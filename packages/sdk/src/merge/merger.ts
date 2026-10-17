@@ -144,29 +144,49 @@ export async function combineEntries(
     [older, olderDb],
     [newer, newerDb],
   ] as const) {
-    // beginUpdate(): remember the state before, to add it to the history if anything changes
+    // beginUpdate(): remember the state before; endUpdate() adds it to the history when anything emitted
+    // a modification in between (Entry::m_modifiedSinceBegin), even if the end state equals the start
     const before = cloneEntry(entry, db, db, false);
+    let modified = false;
     if (entry === older) {
+      // copyDataFrom() emits for attributes, attachments, custom data and auto-type (m_data is assigned silently)
+      modified = emittingDataDiffers(entry, newer);
       // Everything not merged field by field comes from the newer entry
       const history = entry.history;
       const parent = entry.parentGroup;
       copyEntryData(entry, newer, newerDb, db);
       entry.history = history;
       entry.parentGroup = parent;
-      // NOTE: copyDataFrom() in C++ also copies the location-changed time with the rest of the data
     }
     const current = fieldsOf(entry, db);
     for (const key of new Set([...current.keys(), ...merged.keys()])) {
-      if (!sameValue(current.get(key), merged.get(key))) await applyField(entry, db, key, merged.get(key));
+      if (!sameValue(current.get(key), merged.get(key))) {
+        await applyField(entry, db, key, merged.get(key));
+        modified = true;
+      }
     }
     entry.times.lastModTime = when;
-    // endUpdate(): a history item only if the data changed (times alone don't count)
-    if (!entryEquals(before, entry, true, true)) {
+    if (modified) {
       entry.history.push(before);
       truncateHistory(entry, db);
     }
   }
   return conflicts;
+}
+
+/** Whether Entry::copyDataFrom(b) on `a` would emit a modification (attributes, attachments, custom data, auto-type). */
+function emittingDataDiffers(a: KdbxEntry, b: KdbxEntry): boolean {
+  const pick = (e: KdbxEntry) => {
+    const f = fieldsOf(e);
+    const parts: string[] = [];
+    for (const [k, v] of [...f].sort(([x], [y]) => (x < y ? -1 : 1))) {
+      if (!k.startsWith("attribute/") && !k.startsWith("attachment/")) continue;
+      const prot = k.startsWith("attribute/") && e.fields.get(k.slice(10)) instanceof kdbxweb.ProtectedValue;
+      parts.push(`${k}=${v.cmp}${prot ? "/p" : ""}`);
+    }
+    return parts.join("\n") + "|" + customDataJson(e.customData) + "|" + JSON.stringify(e.autoType);
+  };
+  return pick(a) !== pick(b);
 }
 
 // ------------------------------------------------------------------------------------------- Merger
