@@ -4,8 +4,9 @@ FROM oven/bun:1.3.10 AS build
 WORKDIR /src
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages ./packages
-RUN bun install --production --ignore-scripts
-# tsconfig paths resolve @kpnx/sdk to its sources, so no separate SDK build is needed
+RUN bun install --ignore-scripts
+# Bun resolves @kpnx/sdk through the workspace link, i.e. the SDK's dist/
+RUN cd packages/sdk && bunx tsup && cd ../connect && bunx tsup
 RUN bun build --compile --minify --sourcemap packages/connect/src/bin.ts --outfile /out/kpx-connect
 
 FROM gcr.io/distroless/cc-debian12:nonroot
