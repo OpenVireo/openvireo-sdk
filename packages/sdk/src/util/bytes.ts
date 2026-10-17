@@ -101,7 +101,10 @@ export function randomBytes(n: number): Uint8Array {
 
 /** A copy with its own ArrayBuffer of exactly the right length (kdbxweb and WebCrypto want that). */
 export function exactBuffer(b: Uint8Array): ArrayBuffer {
-  return b.slice().buffer as ArrayBuffer;
+  // Not b.slice(): on a Node Buffer that is a view into a shared pool, not a copy
+  const out = new Uint8Array(b.byteLength);
+  out.set(b);
+  return out.buffer;
 }
 
 export function randomUuid(): string {

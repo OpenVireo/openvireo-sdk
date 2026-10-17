@@ -40,13 +40,14 @@ export type CredentialsFactory = () => KdbxCredentials;
 /** Account vault credentials: the 32-byte vault key as a raw key file component, no password. */
 export function vaultCredentials(vaultKey: Uint8Array): CredentialsFactory {
   if (vaultKey.length !== 32) throw new KpxError("no_vault_key", "a vault key is 32 bytes");
-  const key = vaultKey.slice();
-  return () => new kdbxweb.Credentials(null, key.slice());
+  // Copies (new Uint8Array, not .slice(), which is a view on Node Buffers): kdbxweb wipes what it gets
+  const key = new Uint8Array(vaultKey);
+  return () => new kdbxweb.Credentials(null, new Uint8Array(key));
 }
 
 /** Password (and optional key file) credentials, for local and self-hosted databases. */
 export function passwordCredentials(password: string | null, keyFile?: Uint8Array): CredentialsFactory {
-  return () => new kdbxweb.Credentials(password === null ? null : kdbxweb.ProtectedValue.fromString(password), keyFile?.slice());
+  return () => new kdbxweb.Credentials(password === null ? null : kdbxweb.ProtectedValue.fromString(password), keyFile ? new Uint8Array(keyFile) : undefined);
 }
 
 /** The vault KDF (SPEC §7): Argon2id, m = 1 MiB, t = 2, p = 1. */

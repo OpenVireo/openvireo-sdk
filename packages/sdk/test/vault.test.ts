@@ -116,3 +116,20 @@ describe("kpx:// references", () => {
     expect(() => readField(db, parseReference("kpx://x/Nope/password"))).toThrow(/not found/);
   });
 });
+
+describe("Node Buffers", () => {
+  it("opens from a Buffer that is a view into a larger pool", async () => {
+    const pooled = Buffer.concat([Buffer.alloc(100, 1), Buffer.from(fixtureKdbx()), Buffer.alloc(50, 2)]);
+    const view = pooled.subarray(100, pooled.length - 50);
+    const db = await openKdbx(view, vaultCredentials(vaultKey));
+    expect(db.getDefaultGroup().name).toBe("Team Infrastructure");
+  });
+});
+
+describe("key copies", () => {
+  it("never wipes a caller's Buffer key", async () => {
+    const k = Buffer.from(vaultKey);
+    await openKdbx(fixtureKdbx(), vaultCredentials(k));
+    expect(new Uint8Array(k)).toEqual(vaultKey);
+  });
+});
