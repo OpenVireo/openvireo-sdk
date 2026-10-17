@@ -1,0 +1,39 @@
+{
+  "name": "@kpnx/sdk",
+  "version": "0.1.0",
+  "description": "KeePassXC accounts, vault sync and sharing SDK (kpx v1) for browsers, Node and Bun",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./crypto": { "types": "./dist/crypto/index.d.ts", "default": "./dist/crypto/index.js" },
+    "./opaque": { "types": "./dist/opaque/index.d.ts", "default": "./dist/opaque/index.js" },
+    "./auth": { "types": "./dist/auth/index.d.ts", "default": "./dist/auth/index.js" },
+    "./sync": { "types": "./dist/sync/index.d.ts", "default": "./dist/sync/index.js" },
+    "./vault": { "types": "./dist/vault/index.d.ts", "default": "./dist/vault/index.js" },
+    "./merge": { "types": "./dist/merge/index.d.ts", "default": "./dist/merge/index.js" },
+    "./storage/node": { "types": "./dist/auth/storage-node.d.ts", "default": "./dist/auth/storage-node.js" }
+  },
+  "files": ["dist", "vendor", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/ciphers": "2.4.0",
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "hash-wasm": "4.12.0",
+    "kdbxweb": "2.1.1"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.2"
+  }
+}
