@@ -59,15 +59,13 @@ describe("OPAQUE (WASM-only roundtrip with the library's own server functions)",
 
 });
 
-describe("the pinned libopaque build", () => {
-  it("is deterministic (-DNORANDOM): documented contract issue; refuse mode blocks it", async () => {
-    const { opaqueBuildInfo, setOpaqueBuildPolicy } = await import("../src/opaque/index.js");
-    expect((await opaqueBuildInfo()).deterministic).toBe(true);
-    setOpaqueBuildPolicy("refuse");
-    try {
-      await expect(startLogin("pw")).rejects.toMatchObject({ code: "opaque_failed" });
-    } finally {
-      setOpaqueBuildPolicy("allow");
-    }
+describe("the vendored libopaque build", () => {
+  it("is a release build: its login nonce and key share are random", async () => {
+    const { opaqueBuildInfo } = await import("../src/opaque/index.js");
+    expect((await opaqueBuildInfo()).deterministic).toBe(false);
+    const a = await startLogin("pw");
+    const b = await startLogin("pw");
+    // KE1 = blinded element (32) ‖ client nonce (32) ‖ client key share (32)
+    expect(Buffer.from(a.ke1.subarray(32, 96)).equals(Buffer.from(b.ke1.subarray(32, 96)))).toBe(false);
   });
 });
