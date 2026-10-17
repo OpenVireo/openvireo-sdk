@@ -103,17 +103,18 @@ export interface OpaqueBuildInfo {
   /**
    * True when libopaque's own randomness is replaced by the fixed sequence 00 01 02 … (built with
    * -DNORANDOM). The client's login nonce and ephemeral key and the registration envelope nonce are
-   * then constant: unsafe for production. The pinned js/dist build at 6e9ac92 is such a build.
+   * then constant: unsafe for production. Upstream's js/dist build at 6e9ac92 is such a build; the
+   * vendored one is a release rebuild and isn't.
    */
   deterministic: boolean;
 }
 
 let buildInfo: OpaqueBuildInfo | null = null;
 export type OpaqueBuildPolicy = "warn" | "refuse" | "allow";
-let policy: OpaqueBuildPolicy = "warn";
+let policy: OpaqueBuildPolicy = "refuse";
 let warned = false;
 
-/** What to do with a deterministic (-DNORANDOM) build: warn once (default), refuse to run, or allow silently. */
+/** What to do with a deterministic (-DNORANDOM) build: refuse to run (default), warn once, or allow silently. */
 export function setOpaqueBuildPolicy(p: OpaqueBuildPolicy): void {
   policy = p;
 }
@@ -137,7 +138,7 @@ async function checkBuild(): Promise<void> {
   if (policy === "refuse") throw new KpxError("opaque_failed", "the libopaque build uses fixed randomness (-DNORANDOM) and must not be used in production");
   if (!warned) {
     warned = true;
-    globalThis.console?.warn?.("[@kpnx/sdk] WARNING: the vendored libopaque build (6e9ac92 js/dist) uses fixed randomness (-DNORANDOM); OPAQUE logins are not secure with it. See vendor/libopaque/SOURCE.md.");
+    globalThis.console?.warn?.("[@kpnx/sdk] WARNING: the loaded libopaque build uses fixed randomness (-DNORANDOM); OPAQUE logins are not secure with it. See vendor/libopaque/SOURCE.md.");
   }
 }
 

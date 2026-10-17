@@ -101,11 +101,12 @@ server.events({ onEvent: (e) => e.type === "database" && resync(e.id) });
 
 ## OPAQUE build: read before shipping
 
-`vendor/libopaque/libopaque.cjs` is libopaque `js/dist/libopaque.js` at 6e9ac92, as the contract
-requires. That build has **`-DTRACE -DNORANDOM`**: the client's login nonce and ephemeral key and
-the registration envelope nonce are constant. The SDK silences the trace output, works around the
-wrapper's non-ASCII password bug, and warns once (`setOpaqueBuildPolicy("refuse")` blocks it). It
-must be replaced by a release build before production. See `vendor/libopaque/SOURCE.md`.
+`vendor/libopaque/libopaque.cjs` is a release build of libopaque 6e9ac92 (`DEFINES=` empty). Upstream's
+own `js/dist/libopaque.js` at that commit was built with **`-DTRACE -DNORANDOM`** (constant login
+nonces and keys, passwords traced to the console) and must never be used. The SDK refuses to run a
+build with fixed randomness by default (`setOpaqueBuildPolicy("warn" | "allow")` relaxes that for
+tests). It also silences trace output and works around the wrapper's non-ASCII password bug. See
+`vendor/libopaque/SOURCE.md` for how the file was built and its checksum.
 
 Bundlers: the module is plain CommonJS with the WASM inlined. Webpack may need
 `resolve.fallback = { crypto: false }` for its unused Node branch.
