@@ -1,6 +1,7 @@
 /**
  * OPAQUE (SPEC §8) over the vendored libopaque WASM build (commit 6e9ac92, see vendor/libopaque/SOURCE.md).
- * The module (~500 KB with the WASM inlined) is loaded lazily on first use.
+ * The module (~500 KB with the WASM inlined) is loaded lazily on first use, through the package's own
+ * "./vendor/libopaque.cjs" export so the path works from src/, dist/, bundlers and Bun.
  */
 import { KpxError } from "../errors.js";
 import { passwordBytes } from "../crypto/auk.js";
@@ -71,9 +72,22 @@ export function loadOpaque(): Promise<LibOpaque> {
       proc && typeof proc.listeners === "function"
         ? ["uncaughtException", "unhandledRejection"].map((ev) => [ev, proc.listeners(ev).slice()] as const)
         : [];
-    const mod = (await import("../../vendor/libopaque/libopaque.cjs")) as { default?: LibOpaque } & LibOpaque;
-    const lib = (mod.default ?? mod) as LibOpaque;
-    await lib.ready;
+    // The pinned build is compiled with -DTRACE: its C code prints passwords, OPRF values and keys.
+    // Emscripten binds its stdout/stderr to console.log/console.warn when the module loads, so swap
+    // those for no-ops while loading; the module then stays silent and the console is restored.
+    const con = globalThis.console;
+    const saved2 = { log: con.log, warn: con.warn };
+    let lib: LibOpaque;
+    con.log = () => {};
+    con.warn = () => {};
+    try {
+      const mod = (await import("@kpnx/sdk/vendor/libopaque.cjs")) as { default?: LibOpaque } & LibOpaque;
+      lib = (mod.default ?? mod) as LibOpaque;
+      await lib.ready;
+    } finally {
+      con.log = saved2.log;
+      con.warn = saved2.warn;
+    }
     for (const [ev, listeners] of saved) {
       for (const l of listeners) if (!proc!.listeners(ev).includes(l)) proc!.on(ev, l);
     }
@@ -83,6 +97,48 @@ export function loadOpaque(): Promise<LibOpaque> {
     throw new KpxError("opaque_failed", "could not load the OPAQUE module", undefined, { cause: e });
   });
   return loading;
+}
+
+export interface OpaqueBuildInfo {
+  /**
+   * True when libopaque's own randomness is replaced by the fixed sequence 00 01 02 … (built with
+   * -DNORANDOM). The client's login nonce and ephemeral key and the registration envelope nonce are
+   * then constant: unsafe for production. The pinned js/dist build at 6e9ac92 is such a build.
+   */
+  deterministic: boolean;
+}
+
+let buildInfo: OpaqueBuildInfo | null = null;
+export type OpaqueBuildPolicy = "warn" | "refuse" | "allow";
+let policy: OpaqueBuildPolicy = "warn";
+let warned = false;
+
+/** What to do with a deterministic (-DNORANDOM) build: warn once (default), refuse to run, or allow silently. */
+export function setOpaqueBuildPolicy(p: OpaqueBuildPolicy): void {
+  policy = p;
+}
+
+/** Detects a -DNORANDOM build: its credential request carries the nonce 00 01 … 1f. */
+export async function opaqueBuildInfo(): Promise<OpaqueBuildInfo> {
+  if (buildInfo) return buildInfo;
+  const lib = await loadOpaque();
+  const probe = requestWithBytes(lib, lib._opaquejs_CreateCredentialRequest.bind(lib), utf8probe, lib.OPAQUE_USER_SESSION_SECRET_LEN, lib.OPAQUE_USER_SESSION_PUBLIC_LEN);
+  wipe(probe.sec);
+  const nonce = probe.out.subarray(32, 64);
+  buildInfo = { deterministic: nonce.every((b, i) => b === i) };
+  return buildInfo;
+}
+const utf8probe = new Uint8Array([0x70, 0x72, 0x6f, 0x62, 0x65]);
+
+async function checkBuild(): Promise<void> {
+  if (policy === "allow") return;
+  const info = await opaqueBuildInfo();
+  if (!info.deterministic) return;
+  if (policy === "refuse") throw new KpxError("opaque_failed", "the libopaque build uses fixed randomness (-DNORANDOM) and must not be used in production");
+  if (!warned) {
+    warned = true;
+    globalThis.console?.warn?.("[@kpnx/sdk] WARNING: the vendored libopaque build (6e9ac92 js/dist) uses fixed randomness (-DNORANDOM); OPAQUE logins are not secure with it. See vendor/libopaque/SOURCE.md.");
+  }
 }
 
 /** Calls a libopaque request function with the password as real UTF-8 bytes (works around the wrapper bug). */
@@ -135,6 +191,7 @@ export interface RegistrationStart {
 }
 
 export async function startRegistration(password: string): Promise<RegistrationStart> {
+  await checkBuild();
   const lib = await loadOpaque();
   const pw = passwordBytes(password);
   try {
@@ -169,6 +226,7 @@ export interface LoginStart {
 }
 
 export async function startLogin(password: string): Promise<LoginStart> {
+  await checkBuild();
   const lib = await loadOpaque();
   const pw = passwordBytes(password);
   try {
