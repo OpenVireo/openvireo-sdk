@@ -1,0 +1,520 @@
+/**
+ * High-level API for a KeePassXC account (hosted mode): register, log in, unlock/lock, list and open
+ * vaults, share, revoke (with key rotation), and create service accounts.
+ */
+import { KpxError } from "./errors.js";
+import { AuthClient, discover } from "./auth/client.js";
+import { MemoryStorage, NamespacedStorage, type KeyValueStorage } from "./auth/storage.js";
+import { TokenManager, type SignedOutReason } from "./auth/token-manager.js";
+import { type DeviceInfo, type Grant, type KpxConfiguration, type Principal, type Session, type Vault, type VaultRole, isMfaChallenge } from "./auth/types.js";
+import type { HttpOptions } from "./http/request.js";
+import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
+import { sealSaMaster, sealVaultKey, unsealSaMaster, unsealVaultKey } from "./crypto/envelope.js";
+import { type Keyset, fingerprint, generateKeyset, trustedPublicKeys, unwrapKeyset, wipeKeyset, wrapKeyset } from "./crypto/keyset.js";
+import { formatSecretKey, generateSecretKey, parseSecretKey } from "./crypto/secret-key.js";
+import { newSaSecret } from "./crypto/tokens.js";
+import { decryptVaultName, encryptVaultName } from "./crypto/vault-name.js";
+import { b64u, fromB64u, randomBytes, randomUuid, wipe } from "./util/bytes.js";
+import { finishLogin, finishRegistration, opaqueIds, startLogin, startRegistration } from "./opaque/index.js";
+import { SyncClient } from "./sync/client.js";
+import { type EventStream, type SyncEvent, subscribeEvents } from "./sync/events.js";
+import { type SyncResult, type SyncState, deserializeSyncState, serializeSyncState, syncKdbx } from "./sync/engine.js";
+import { type Kdbx, type KeyVersion, createVaultKdbx, rekeyToVaultKey, vaultCredentials } from "./vault/kdbx.js";
+import { parseReference, readField, writeField, type SecretReference } from "./vault/reference.js";
+
+export interface AccountOptions extends HttpOptions {
+  /** the hosted issuer, e.g. https://accounts.keepassxc.org */
+  issuer: string;
+  device: DeviceInfo;
+  /** sessions, trusted-device Secret Keys and sync state (default: memory) */
+  storage?: KeyValueStorage;
+  /** skip discovery (tests) */
+  config?: KpxConfiguration;
+}
+
+export interface VaultInfo {
+  id: string;
+  name: string;
+  role: VaultRole;
+  orgId: string | null;
+  currentKeyVersion: number;
+  pendingKeyVersion: number | null;
+  rotationRequired: boolean;
+}
+
+/** Each listed vault plus the keys this account holds for it (current and pending, newest first). */
+interface VaultEntry {
+  info: VaultInfo;
+  keys: KeyVersion[];
+}
+
+const ROLE_ORDER: Record<VaultRole, number> = { read: 0, write: 1, manage: 2 };
+
+export class Account {
+  readonly auth: AuthClient;
+  readonly sync: SyncClient;
+  readonly tokens: TokenManager;
+  private keyset: Keyset | null = null;
+  private vaults = new Map<string, VaultEntry>();
+  private readonly storage: KeyValueStorage;
+
+  private constructor(
+    readonly config: KpxConfiguration,
+    private readonly opts: AccountOptions,
+  ) {
+    this.storage = opts.storage ?? new MemoryStorage();
+    const base = new AuthClient({ ...opts, api: config.api });
+    this.tokens = new TokenManager({ storage: new NamespacedStorage(this.storage, "kpx:"), refresh: (rt) => base.refresh(rt) });
+    this.auth = base.withTokens(this.tokens);
+    this.sync = new SyncClient({ ...opts, baseUrl: config.sync, token: this.tokens });
+  }
+
+  /** Discovers the server and loads a stored session, if any (signed in but locked). */
+  static async connect(opts: AccountOptions): Promise<Account> {
+    const config = opts.config ?? (await discover(opts.issuer, opts));
+    const acct = new Account(config, opts);
+    await acct.tokens.load();
+    return acct;
+  }
+
+  get signedIn(): boolean {
+    return this.tokens.current !== null;
+  }
+  get unlocked(): boolean {
+    return this.keyset !== null;
+  }
+  get userId(): string | undefined {
+    return this.tokens.current?.userId;
+  }
+  get principal(): Principal {
+    if (!this.tokens.current) throw new KpxError("signed_out", "not signed in");
+    return `user:${this.tokens.current.userId}`;
+  }
+  /** this account's public key fingerprint (to compare out of band) */
+  get fingerprint(): string {
+    return fingerprint(this.requireKeyset());
+  }
+  onSignedOut(listener: (reason: SignedOutReason) => void): () => void {
+    return this.tokens.onSignedOut((r) => {
+      this.lock();
+      listener(r);
+    });
+  }
+
+  private ids(email: string) {
+    return opaqueIds(email, this.config.opaque.ids);
+  }
+  private skKey = (email: string) => `secret_key:${this.ids(email).idU}`;
+  private devKey = (email: string) => `device:${this.ids(email).idU}`;
+
+  /** Creates an account. Returns the Secret Key to show once (Emergency Kit). Signs in and unlocks. */
+  async register(p: { email: string; password: string; kdf?: Parameters<typeof newKdfParams>[0]; trustDevice?: boolean }): Promise<{ secretKey: string; userId: string }> {
+    const sk = generateSecretKey();
+    const kdf = newKdfParams(p.kdf);
+    checkKdfParams(kdf, this.config.kdf_min);
+    const reg = await startRegistration(p.password);
+    const started = await this.auth.registerStart({ email: p.email.trim(), request: b64u(reg.request) });
+    const { record } = await finishRegistration(reg.state, fromB64u(started.response), this.ids(p.email));
+    const auk = await deriveAuk(p.password, kdf, sk, { kdfMin: this.config.kdf_min });
+    const keyset = generateKeyset();
+    try {
+      const session = await this.auth.registerFinish({
+        session_id: started.session_id,
+        record: b64u(record),
+        kdf,
+        keyset: wrapKeyset(auk, keyset),
+        device: this.opts.device,
+      });
+      await this.begin(p.email, session, sk, p.trustDevice ?? true);
+      this.keyset = keyset;
+      return { secretKey: formatSecretKey(sk), userId: session.user.id };
+    } catch (e) {
+      wipeKeyset(keyset);
+      throw e;
+    } finally {
+      wipe(auk, sk);
+    }
+  }
+
+  /**
+   * OPAQUE login (+ TOTP when the account has it), then unlock. The Secret Key is needed the first time
+   * on a device; with `trustDevice` (default) it is kept in storage for next time.
+   */
+  async login(p: { email: string; password: string; secretKey?: string; totp?: string | (() => Promise<string>); trustDevice?: boolean }): Promise<void> {
+    const stored = await this.storage.get(this.skKey(p.email));
+    const skText = p.secretKey ?? stored;
+    if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
+    const sk = parseSecretKey(skText);
+    const deviceId = await this.storage.get(this.devKey(p.email));
+    const ids = this.ids(p.email);
+    const login = await startLogin(p.password);
+    const started = await this.auth.loginStart({ email: p.email.trim(), ke1: b64u(login.ke1) });
+    let authU: Uint8Array;
+    try {
+      ({ authU } = await finishLogin(login.state, fromB64u(started.ke2), ids, this.config.opaque.context));
+    } catch (e) {
+      // Same message as the server's 401 for a wrong password or unknown email
+      throw new KpxError("unauthorized", "wrong email or password", 401, { cause: e });
+    }
+    const device = { ...this.opts.device, ...(deviceId ? { id: deviceId } : {}) };
+    let res = await this.auth.loginFinish({ session_id: started.session_id, auth_u: b64u(authU), device });
+    if (isMfaChallenge(res)) {
+      if (!p.totp) throw new KpxError("mfa_required", "a TOTP code is required");
+      const code = typeof p.totp === "string" ? p.totp : await p.totp();
+      res = await this.auth.loginMfa({ mfa_token: res.mfa_token, totp: code });
+    }
+    try {
+      await this.unlockWith(p.password, res.kdf, res.keyset, sk);
+      await this.begin(p.email, res, sk, p.trustDevice ?? true);
+    } finally {
+      wipe(sk);
+    }
+  }
+
+  private async begin(email: string, s: Session, sk: Uint8Array, trust: boolean) {
+    await this.tokens.start({ issuer: this.config.issuer, userId: s.user.id, email: s.user.email ?? email, deviceId: s.device_id, refreshToken: s.refresh_token }, s.access_token, s.expires_in);
+    await this.storage.set(this.devKey(email), s.device_id);
+    if (trust) await this.storage.set(this.skKey(email), formatSecretKey(sk));
+  }
+
+  private async unlockWith(password: string, kdf: Session["kdf"], wrapped: Session["keyset"], sk: Uint8Array) {
+    checkKdfParams(kdf, this.config.kdf_min);
+    const auk = await deriveAuk(password, kdf, sk, { kdfMin: this.config.kdf_min });
+    try {
+      this.lock();
+      this.keyset = unwrapKeyset(auk, wrapped);
+    } catch (e) {
+      throw (e as KpxError).code === "decryption_failed" ? new KpxError("unauthorized", "wrong password or Secret Key", 401, { cause: e }) : e;
+    } finally {
+      wipe(auk);
+    }
+  }
+
+  /** Unlocks a signed-in (resumed) session with the master password; no OPAQUE round trip needed. */
+  async unlock(password: string, secretKey?: string): Promise<void> {
+    const session = await this.tokens.load();
+    if (!session) throw new KpxError("signed_out", "not signed in");
+    const skText = secretKey ?? (await this.storage.get(this.skKey(session.email)));
+    if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
+    const sk = parseSecretKey(skText);
+    try {
+      const me = await this.auth.me();
+      await this.unlockWith(password, me.kdf, me.keyset, sk);
+    } finally {
+      wipe(sk);
+    }
+  }
+
+  /** Clears private keys and vault keys from memory (best effort). */
+  lock(): void {
+    wipeKeyset(this.keyset);
+    this.keyset = null;
+    for (const v of this.vaults.values()) for (const k of v.keys) wipe(k.key);
+    this.vaults.clear();
+  }
+
+  /** Revokes this device's session on the server and forgets it locally (the trusted Secret Key stays unless `forgetDevice`). */
+  async logout(opts: { forgetDevice?: boolean } = {}): Promise<void> {
+    const email = this.tokens.current?.email;
+    try {
+      await this.auth.logout();
+    } catch {
+      /* best effort */
+    }
+    this.lock();
+    await this.tokens.clear("logout");
+    if (opts.forgetDevice && email) {
+      await this.storage.delete(this.skKey(email));
+      await this.storage.delete(this.devKey(email));
+    }
+  }
+
+  private requireKeyset(): Keyset {
+    if (!this.keyset) throw new KpxError("signed_out", "the account is locked");
+    return this.keyset;
+  }
+
+  // ------------------------------------------------------------------------------------- vaults
+
+  private ingest(v: Vault): VaultEntry {
+    const ks = this.requireKeyset();
+    const keys: KeyVersion[] = [];
+    for (const k of v.keys ?? []) {
+      try {
+        keys.push({ version: k.key_version, key: unsealVaultKey(ks.encSk, v.id, fromB64u(k.sealed_key)) });
+      } catch {
+        /* a key we can't open (sealed to an old keyset): skip, the other version may work */
+      }
+    }
+    keys.sort((a, b) => b.version - a.version);
+    let name = "";
+    for (const k of keys) {
+      try {
+        name = decryptVaultName(k.key, v.id, v.encrypted_name);
+        break;
+      } catch {
+        /* name encrypted under the other key version */
+      }
+    }
+    const entry: VaultEntry = {
+      info: {
+        id: v.id,
+        name,
+        role: v.role,
+        orgId: v.org_id ?? null,
+        currentKeyVersion: v.current_key_version,
+        pendingKeyVersion: v.pending_key_version ?? null,
+        rotationRequired: !!v.rotation_required,
+      },
+      keys,
+    };
+    const old = this.vaults.get(v.id);
+    if (old) for (const k of old.keys) if (!keys.some((n) => n.key === k.key)) wipe(k.key);
+    this.vaults.set(v.id, entry);
+    return entry;
+  }
+
+  /** GET /vaults: every vault this account can open, with names decrypted. */
+  async listVaults(): Promise<VaultInfo[]> {
+    const { vaults } = await this.auth.listVaults();
+    const seen = new Set(vaults.map((v) => v.id));
+    for (const id of [...this.vaults.keys()]) if (!seen.has(id)) this.vaults.delete(id);
+    return vaults.map((v) => this.ingest(v).info);
+  }
+
+  private async entry(vaultId: string): Promise<VaultEntry> {
+    return this.vaults.get(vaultId) ?? this.ingest(await this.auth.getVault(vaultId));
+  }
+
+  /** Opens a vault: downloads and decrypts it (newest key first). */
+  async openVault(vaultId: string): Promise<AccountVault> {
+    const e = await this.entry(vaultId);
+    const v = new AccountVault(this, e.info, () => this.vaults.get(vaultId)?.keys ?? e.keys);
+    await v.sync();
+    return v;
+  }
+
+  /** Public keys of a principal, verified (sig) before anything is sealed to them. */
+  async verifiedPublicKeys(principal: Principal) {
+    return trustedPublicKeys(await this.auth.publicKey(principal));
+  }
+
+  /** Creates a vault (personal, or in an org with `orgId`; owners/admins are sealed in automatically). */
+  async createVault(name: string, opts: { orgId?: string } = {}): Promise<AccountVault> {
+    const ks = this.requireKeyset();
+    const id = randomUuid();
+    const key = randomBytes(32);
+    const grants: Grant[] = [{ principal: this.principal, role: "manage", key_version: 1, sealed_key: b64u(sealVaultKey(ks.encPk, id, key)) }];
+    if (opts.orgId) {
+      const { members } = await this.auth.listMembers(opts.orgId);
+      for (const m of members) {
+        const principal = `user:${m.user_id}`;
+        if (principal === this.principal || (m.role !== "owner" && m.role !== "admin") || m.status !== "confirmed" || !m.public) continue;
+        grants.push({ principal, role: "manage", key_version: 1, sealed_key: b64u(sealVaultKey(trustedPublicKeys(m.public).encPk, id, key)) });
+      }
+    }
+    const created = await this.auth.createVault({ id, org_id: opts.orgId ?? null, encrypted_name: encryptVaultName(key, id, name), grants });
+    const entry = this.ingest({ ...created, keys: created.keys?.length ? created.keys : [{ key_version: 1, sealed_key: grants[0]!.sealed_key }] });
+    // The new vault is only in the next token's vlt claim
+    await this.tokens.refreshNow();
+    const vault = new AccountVault(this, entry.info, () => this.vaults.get(id)?.keys ?? entry.keys);
+    vault.db = createVaultKdbx(name, key);
+    await vault.sync();
+    return vault;
+  }
+
+  /** Grants (or changes) access: seals the current vault key to the grantee after checking their keys. */
+  async share(vaultId: string, who: { email?: string; principal?: Principal }, role: VaultRole): Promise<{ principal: Principal; fingerprint: string }> {
+    const e = await this.entry(vaultId);
+    const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
+    if (!current) throw new KpxError("no_vault_key", "this account doesn't hold the current vault key");
+    const pp = who.principal ? await this.auth.publicKey(who.principal) : await this.auth.lookupUser(who.email ?? "");
+    const pub = trustedPublicKeys(pp);
+    await this.auth.grantAccess(vaultId, [{ principal: pp.principal, role, key_version: current.version, sealed_key: b64u(sealVaultKey(pub.encPk, vaultId, current.key)) }]);
+    return { principal: pp.principal, fingerprint: fingerprint(pub) };
+  }
+
+  /** Removes members and rotates the vault key in one step (SPEC §7). */
+  async revoke(vaultId: string, principals: Principal[]): Promise<SyncResult> {
+    return this.rotate(vaultId, { remove: principals });
+  }
+
+  /**
+   * Rotation (SPEC §7): new key sealed to every remaining member → POST keys (removes `remove` at once)
+   * → download, re-key, conditional PUT (merge/retry on 412) → activate.
+   */
+  async rotate(vaultId: string, opts: { remove?: Principal[] } = {}): Promise<SyncResult> {
+    const e = await this.entry(vaultId);
+    if (ROLE_ORDER[e.info.role] < ROLE_ORDER.manage) throw new KpxError("forbidden", "rotating a vault key needs the manage role", 403);
+    const remove = new Set(opts.remove ?? []);
+    const { access } = await this.auth.listAccess(vaultId);
+    const version = e.info.currentKeyVersion + 1;
+    const key = randomBytes(32);
+    const remaining = new Map<Principal, VaultRole>();
+    for (const a of access) if (!remove.has(a.principal)) remaining.set(a.principal, a.role);
+    remaining.set(this.principal, e.info.role);
+    const grants: Grant[] = [];
+    for (const [principal, role] of remaining) {
+      const pub = principal === this.principal ? this.requireKeyset() : await this.verifiedPublicKeys(principal);
+      grants.push({ principal, role, key_version: version, sealed_key: b64u(sealVaultKey(pub.encPk, vaultId, key)) });
+    }
+    await this.auth.startRotation(vaultId, { key_version: version, grants, remove: [...remove] });
+    e.keys = [{ version, key }, ...e.keys];
+    const vault = new AccountVault(this, e.info, () => e.keys);
+    const result = await vault.sync({ rekeyTo: key });
+    await this.auth.activateKey(vaultId, version);
+    // The name is encrypted under the vault key too
+    await this.auth.renameVault(vaultId, encryptVaultName(key, vaultId, e.info.name));
+    e.info = { ...e.info, currentKeyVersion: version, pendingKeyVersion: null, rotationRequired: false };
+    return result;
+  }
+
+  // --------------------------------------------------------------------------- service accounts
+
+  /**
+   * Creates a service account in an org (owner/admin): generates its keyset and master key in this
+   * client, seals the master key to every owner and admin, grants it the given vaults, and returns the
+   * token to show once.
+   */
+  async createServiceAccount(orgId: string, p: { name: string; vaults?: { id: string; role: VaultRole }[]; expiresAt?: string | null; secretName?: string }) {
+    const saId = randomUuid();
+    const master = randomBytes(32);
+    const saKeys = generateKeyset();
+    try {
+      const { members } = await this.auth.listMembers(orgId);
+      const masterKeys = [];
+      for (const m of members) {
+        if ((m.role !== "owner" && m.role !== "admin") || !m.public) continue;
+        if (m.status !== "confirmed" && `user:${m.user_id}` !== this.principal) continue;
+        const pub = `user:${m.user_id}` === this.principal ? this.requireKeyset() : trustedPublicKeys(m.public);
+        masterKeys.push({ sa_id: saId, principal: `user:${m.user_id}`, sealed_key: b64u(sealSaMaster(pub.encPk, saId, master)) });
+      }
+      if (!masterKeys.some((k) => k.principal === this.principal)) {
+        masterKeys.push({ sa_id: saId, principal: this.principal, sealed_key: b64u(sealSaMaster(this.requireKeyset().encPk, saId, master)) });
+      }
+      const { token, body } = newSaSecret({ url: this.config.issuer, saId, master, secretId: randomUuid(), name: p.secretName, expiresAt: p.expiresAt });
+      const sa = await this.auth.createServiceAccount(orgId, { id: saId, name: p.name, expires_at: p.expiresAt ?? null, keyset: wrapKeyset(master, saKeys), master_keys: masterKeys, secret: body });
+      for (const g of p.vaults ?? []) {
+        const e = await this.entry(g.id);
+        const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
+        if (!current) throw new KpxError("no_vault_key", `no current key for vault ${g.id}`);
+        await this.auth.grantAccess(g.id, [{ principal: `sa:${saId}`, role: g.role, key_version: current.version, sealed_key: b64u(sealVaultKey(saKeys.encPk, g.id, current.key)) }]);
+      }
+      return { serviceAccount: sa, token };
+    } finally {
+      wipe(master);
+      wipeKeyset(saKeys);
+    }
+  }
+
+  /** Issues another secret for an SA (owner/admin): unseals the master key and builds a token to show once. */
+  async issueServiceAccountSecret(saId: string, p: { name?: string; expiresAt?: string | null } = {}) {
+    const sa = await this.auth.getServiceAccount(saId);
+    if (!sa.master_key) throw new KpxError("forbidden", "only org owners and admins hold the SA master key", 403);
+    const master = unsealSaMaster(this.requireKeyset().encSk, saId, fromB64u(sa.master_key));
+    try {
+      const { token, body } = newSaSecret({ url: this.config.issuer, saId, master, secretId: randomUuid(), name: p.name, expiresAt: p.expiresAt });
+      await this.auth.issueSaSecret(saId, body);
+      return { token, prefix: body.prefix, id: body.id };
+    } finally {
+      wipe(master);
+    }
+  }
+
+  // ------------------------------------------------------------------------------------- events
+
+  /**
+   * Live updates: `vault` events are passed on; on `access` events the JWT is refreshed (new vlt
+   * claims), the vault list reloaded and the stream reconnected (SPEC §11).
+   */
+  subscribe(handlers: { onVaultChanged?: (e: Extract<SyncEvent, { type: "vault" }>) => void; onVaultsChanged?: (vaults: VaultInfo[]) => void; onError?: (e: unknown) => void } = {}): EventStream {
+    const stream: EventStream = subscribeEvents(this.sync, {
+      onEvent: (ev) => {
+        if (ev.type === "vault") handlers.onVaultChanged?.(ev);
+        else if (ev.type === "access") {
+          void (async () => {
+            try {
+              await this.tokens.refreshNow();
+              const vaults = await this.listVaults();
+              handlers.onVaultsChanged?.(vaults);
+              stream.reconnect();
+            } catch (e) {
+              handlers.onError?.(e);
+            }
+          })();
+        }
+      },
+      onStatus: (s, d) => d?.error && handlers.onError?.(d.error),
+    });
+    return stream;
+  }
+
+  /** @internal storage for vault sync state */
+  async loadState(vaultId: string): Promise<SyncState | null> {
+    const raw = await this.storage.get(`sync:${vaultId}`);
+    return raw ? deserializeSyncState(raw) : null;
+  }
+  /** @internal */
+  async saveState(vaultId: string, state: SyncState): Promise<void> {
+    await this.storage.set(`sync:${vaultId}`, serializeSyncState(state));
+  }
+}
+
+/** An opened account vault: a kdbxweb database kept in sync with `vaults/<id>`. */
+export class AccountVault {
+  db: Kdbx | null = null;
+  private state: SyncState | null | undefined = undefined;
+
+  constructor(
+    private readonly account: Account,
+    public info: VaultInfo,
+    private readonly keys: () => KeyVersion[],
+  ) {}
+
+  get id(): string {
+    return this.info.id;
+  }
+  get name(): string {
+    return this.info.name;
+  }
+
+  /** Downloads, merges local edits and uploads them (conditional PUT, merge and retry on 412). */
+  async sync(opts: { rekeyTo?: Uint8Array } = {}): Promise<SyncResult> {
+    if (this.state === undefined) this.state = await this.account.loadState(this.id);
+    const keys = [...this.keys()].sort((a, b) => b.version - a.version);
+    const credentials = keys.map((k) => vaultCredentials(k.key));
+    const blob = this.account.sync.vault(this.id);
+    let db = this.db;
+    if (!db) {
+      // Nothing local yet: the server copy becomes the working copy
+      const got = await blob.get();
+      if (got.status !== 200) throw new KpxError("not_found", `vault ${this.id} has no data on the sync server`, 404);
+      const { openWithKeyVersions } = await import("./vault/kdbx.js");
+      db = (await openWithKeyVersions(got.data, keys)).db;
+      this.db = db;
+    }
+    const result = await syncKdbx({
+      blob,
+      db,
+      credentials,
+      state: this.state,
+      beforeUpload: opts.rekeyTo ? (d) => rekeyToVaultKey(d, opts.rekeyTo!) : undefined,
+    });
+    this.db = result.db;
+    this.state = result.state;
+    await this.account.saveState(this.id, result.state);
+    return result;
+  }
+
+  read(ref: string | Pick<SecretReference, "groupPath" | "entry" | "field">): string {
+    if (!this.db) throw new KpxError("kdbx_error", "vault not opened");
+    return readField(this.db, typeof ref === "string" ? parseReference(ref) : ref);
+  }
+
+  /** Sets a field and syncs it up. */
+  async write(ref: string | Pick<SecretReference, "groupPath" | "entry" | "field">, value: string, opts: { create?: boolean } = {}): Promise<SyncResult> {
+    if (!this.db) throw new KpxError("kdbx_error", "vault not opened");
+    writeField(this.db, typeof ref === "string" ? parseReference(ref) : ref, value, opts);
+    return this.sync();
+  }
+}
