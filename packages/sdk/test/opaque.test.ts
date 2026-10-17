@@ -58,3 +58,16 @@ describe("OPAQUE (WASM-only roundtrip with the library's own server functions)",
   });
 
 });
+
+describe("the pinned libopaque build", () => {
+  it("is deterministic (-DNORANDOM): documented contract issue; refuse mode blocks it", async () => {
+    const { opaqueBuildInfo, setOpaqueBuildPolicy } = await import("../src/opaque/index.js");
+    expect((await opaqueBuildInfo()).deterministic).toBe(true);
+    setOpaqueBuildPolicy("refuse");
+    try {
+      await expect(startLogin("pw")).rejects.toMatchObject({ code: "opaque_failed" });
+    } finally {
+      setOpaqueBuildPolicy("allow");
+    }
+  });
+});

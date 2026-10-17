@@ -23,3 +23,11 @@ Known quirks, handled in `src/opaque/index.ts`:
    the real UTF-8 bytes instead.
 2. In Node the module calls `process.removeAllListeners("uncaughtException")` and
    `("unhandledRejection")` when it loads. The SDK restores the host's listeners afterwards.
+3. **Not production-safe.** `js/Makefile` at this commit sets `DEFINES=-DTRACE -DNORANDOM`, so this
+   file is a debug build: libopaque's `randombytes`/`scalar_random` return 00 01 02 … (the client's
+   login nonce and ephemeral key, the registration envelope nonce and the WASM server's per-user key
+   are constant), and every operation traces passwords, OPRF values and keys to stdout/stderr. The
+   SDK silences the trace output while loading the module, detects the fixed randomness
+   (`opaqueBuildInfo()`), and warns once by default (`setOpaqueBuildPolicy("refuse")` to block it).
+   A production build must be rebuilt from the same commit with `DEFINES=` empty (Emscripten), and
+   the contract should pin that artifact instead.

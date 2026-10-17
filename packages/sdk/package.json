@@ -11,16 +11,45 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./crypto": { "types": "./dist/crypto/index.d.ts", "default": "./dist/crypto/index.js" },
-    "./opaque": { "types": "./dist/opaque/index.d.ts", "default": "./dist/opaque/index.js" },
-    "./auth": { "types": "./dist/auth/index.d.ts", "default": "./dist/auth/index.js" },
-    "./sync": { "types": "./dist/sync/index.d.ts", "default": "./dist/sync/index.js" },
-    "./vault": { "types": "./dist/vault/index.d.ts", "default": "./dist/vault/index.js" },
-    "./merge": { "types": "./dist/merge/index.d.ts", "default": "./dist/merge/index.js" },
-    "./storage/node": { "types": "./dist/auth/storage-node.d.ts", "default": "./dist/auth/storage-node.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./crypto": {
+      "types": "./dist/crypto/index.d.ts",
+      "default": "./dist/crypto/index.js"
+    },
+    "./opaque": {
+      "types": "./dist/opaque/index.d.ts",
+      "default": "./dist/opaque/index.js"
+    },
+    "./auth": {
+      "types": "./dist/auth/index.d.ts",
+      "default": "./dist/auth/index.js"
+    },
+    "./sync": {
+      "types": "./dist/sync/index.d.ts",
+      "default": "./dist/sync/index.js"
+    },
+    "./vault": {
+      "types": "./dist/vault/index.d.ts",
+      "default": "./dist/vault/index.js"
+    },
+    "./merge": {
+      "types": "./dist/merge/index.d.ts",
+      "default": "./dist/merge/index.js"
+    },
+    "./storage/node": {
+      "types": "./dist/auth/storage-node.d.ts",
+      "default": "./dist/auth/storage-node.js"
+    },
+    "./vendor/libopaque.cjs": "./vendor/libopaque/libopaque.cjs"
   },
-  "files": ["dist", "vendor", "README.md"],
+  "files": [
+    "dist",
+    "vendor",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
