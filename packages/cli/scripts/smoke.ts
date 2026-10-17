@@ -73,6 +73,23 @@ try {
   check("rotate with a write grant", r.code === 0 && rotated.length === 32, r);
   r = await run(["read", "kpx://Team%20Infra/GitHub/password"], reader);
   check("rotated value is on the server", r.out === rotated + "\n", r);
+  // kpx connect from the same binary
+  const connect = spawn(bin, ["connect"], { env: { PATH: process.env.PATH ?? "", ...reader, KPX_CONNECT_TOKEN: "kpx_ct_smoke", KPX_CONNECT_PORT: "0" } });
+  const url = await new Promise<string>((resolve, reject) => {
+    let err = "";
+    connect.stderr.on("data", (c) => {
+      err += c;
+      const m = /listening on (http:\/\/\S+)/.exec(err);
+      if (m) resolve(m[1]!);
+    });
+    connect.on("close", () => reject(new Error(err)));
+  });
+  const res = await fetch(`${url}/v1/vaults/Team%20Infra/items/Deploy/Database?field=username`, { headers: { Authorization: "Bearer kpx_ct_smoke" } });
+  const body = await res.json();
+  check("kpx connect serves an item field", res.status === 200 && body.value === "app", body);
+  const denied = await fetch(`${url}/v1/vaults`, { headers: { Authorization: "Bearer wrong" } });
+  check("kpx connect rejects unknown tokens", denied.status === 401, denied.status);
+  connect.kill("SIGTERM");
   r = await run(["login", "--email", "alice@example.com", "--secret-key", w.secretKey], { KPX_ISSUER: base, KPX_PASSWORD: w.password });
   check("human login (OPAQUE in the binary)", r.code === 0 && r.err.startsWith("Signed in"), r);
   r = await run(["read", "kpx://Private/Bank/password"], { KPX_PASSWORD: w.password });

@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "build:binary": "bun build --compile --minify --sourcemap src/bin.ts --outfile dist/kpx",
+    "build:binary": "npm run build --prefix ../.. -w @kpnx/sdk -w @kpnx/connect && bun build --compile --minify --sourcemap src/bin.ts --outfile dist/kpx",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "smoke": "bun scripts/smoke.ts"

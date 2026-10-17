@@ -79,7 +79,7 @@ environment for non-interactive use; prefer a service account for automation.
 ## Single binary
 
 ```sh
-npm run build:binary -w @kpnx/cli     # bun build --compile --minify --sourcemap src/bin.ts --outfile dist/kpx
+npm run build:binary -w @kpnx/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/kpx
 ./packages/cli/dist/kpx version        # kpx 0.1.0
 npm run smoke -w @kpnx/cli            # runs dist/kpx against the in-memory servers over HTTP
 # cross-compile: add --target=bun-linux-x64 | bun-linux-arm64 | bun-darwin-arm64 | bun-windows-x64
