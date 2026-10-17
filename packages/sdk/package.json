@@ -53,7 +53,8 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs && bun scripts/smoke.mjs"
   },
   "dependencies": {
     "@noble/ciphers": "2.4.0",
