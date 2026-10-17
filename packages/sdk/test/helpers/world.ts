@@ -58,14 +58,18 @@ export async function makeWorld(): Promise<World> {
   return { auth, sync, fetch, alice, password, secretKey, vaultId: vault.id, otherVaultId: other.id, readToken: read.token, writeToken: write.token };
 }
 
-/** Simulates another client editing the vault right after the next GET (forces a 412 on the PUT). */
-export async function editBetweenGetAndPut(w: World, title: string, fields: Record<string, string>) {
+/**
+ * Simulates another client editing the vault right after a GET (forces a 412 on the PUT that follows).
+ * `skipGets`: GETs of the vault to let through first (a client that downloads, then syncs).
+ */
+export async function editBetweenGetAndPut(w: World, title: string, fields: Record<string, string>, opts: { skipGets?: number } = {}) {
   const { openWithKeyVersions, saveKdbx, kdbxweb } = await import("../../src/vault/kdbx.js");
   const { fieldText } = await import("../../src/vault/entries.js");
   const vault = await w.alice.openVault(w.vaultId);
   let done = false;
+  let skip = opts.skipGets ?? 0;
   w.sync.afterGet = async (key) => {
-    if (done || key !== `vaults/${w.vaultId}`) return;
+    if (done || key !== `vaults/${w.vaultId}` || skip-- > 0) return;
     done = true;
     const cur = w.sync.blobs.get(key)!.at(-1)!.data;
     const keys = [{ version: vault.info.currentKeyVersion, key: (vault as any).keys()[0].key }];
