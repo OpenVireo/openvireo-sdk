@@ -5,7 +5,7 @@
 `DEFINES=` empty in `emscripten/emsdk:1.40.1`. It was renamed to `.cjs` only so that Node treats it
 as CommonJS inside this ESM package.
 
-- SHA-256: `a96a09af1e96fb3ddb8e59344510bde093313fa6f004a9d8587b0cd30f99071e`
+- SHA-256: `5135049e647894325acc6ec2d832853afe6591ad770bd2d02029a400d0a98495`
 - Build: `docs/plans/accounts/opaque-spike/build-libopaque-wasm.sh` in the keepassxc repo (git + Docker).
   It also checks that every login request carries a fresh nonce.
 - License: GPL-3.0 (`LICENSE`, copied from `js/LICENSE` of the same commit). The libopaque C core is
