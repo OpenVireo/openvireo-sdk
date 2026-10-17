@@ -4,7 +4,7 @@
  */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { kdbxweb, type Kdbx } from "../vault/kdbx.js";
-import { toHex } from "../util/bytes.js";
+import { exactBuffer, toHex } from "../util/bytes.js";
 
 type KdbxEntry = kdbxweb.KdbxEntry;
 
@@ -108,7 +108,7 @@ export async function applyField(entry: KdbxEntry, db: Kdbx, field: string, valu
       entry.binaries.delete(key);
       return;
     }
-    const bin = value.protectedBinary ? kdbxweb.ProtectedValue.fromBinary(value.data.slice().buffer as ArrayBuffer) : (value.data.slice().buffer as ArrayBuffer);
+    const bin = value.protectedBinary ? kdbxweb.ProtectedValue.fromBinary(exactBuffer(value.data)) : exactBuffer(value.data);
     entry.binaries.set(key, await db.createBinary(bin));
   } else if (field === "tags") {
     entry.tags = value?.kind === "tags" ? [...value.tags] : [];
