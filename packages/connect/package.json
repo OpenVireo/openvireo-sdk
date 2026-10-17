@@ -1,0 +1,34 @@
+{
+  "name": "@kpnx/connect",
+  "version": "0.1.0",
+  "description": "kpx connect: a self-hosted REST server that holds one KeePassXC service account token",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "kpx-connect": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "deploy",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kpnx/sdk": "0.1.0"
+  }
+}
