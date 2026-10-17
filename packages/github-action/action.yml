@@ -1,0 +1,25 @@
+name: KeePassXC load secrets
+description: Load secrets from KeePassXC vaults (kpx service account) into the environment, masked in the logs
+author: KeePassXC
+branding:
+  icon: lock
+  color: green
+inputs:
+  service-account-token:
+    description: The kpx_sa_… service account token. Defaults to the KPX_SERVICE_ACCOUNT_TOKEN environment variable.
+    required: false
+  secrets:
+    description: |
+      Extra secrets to load, one NAME=kpx://… per line (in addition to environment variables of this
+      step whose values are kpx:// references).
+    required: false
+  export-env:
+    description: Export the values as environment variables for the following steps ("true"), or only set them as outputs of this step ("false").
+    required: false
+    default: "true"
+outputs:
+  loaded:
+    description: Comma-separated names of the variables that were loaded. Every loaded NAME is also an output (when export-env is false).
+runs:
+  using: node24
+  main: dist/index.mjs
