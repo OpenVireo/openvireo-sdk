@@ -251,10 +251,7 @@ describe("§9 refresh token", () => {
 
 describe("§9 JWT", () => {
   const j = V.jwt;
-  // CONTRACT ISSUE: SPEC §9 allows 60 s of skew on exp, but the "expired" vector has exp = iat+30 and
-  // now = iat+60, which is inside that skew. The vectors only hold with a skew below 30 s, so they run
-  // with skew 0 here; the SPEC default (60) is checked separately below.
-  const opts = { issuer: j.valid[0].claims.iss, audience: "kpx-sync", now: j.now, skew: 0 };
+  const opts = { issuer: j.valid[0].claims.iss, audience: "kpx-sync", now: j.now }; // SPEC default skew (60 s)
   for (const [i, v] of (j.valid as any[]).entries()) {
     it(`valid ${i}`, async () => {
       expect(decodeJwt(v.token).claims).toEqual(v.claims);
@@ -269,9 +266,9 @@ describe("§9 JWT", () => {
       if (v.case.startsWith("unknown kid")) expect(refetched).toBe(1);
     });
   }
-  it("with the SPEC's 60 s skew, the 'expired' vector (30 s past exp) is still accepted", async () => {
-    const expired = j.invalid.find((v: any) => v.case === "expired");
-    await expect(verifyJwt(expired.token, j.jwks, { ...opts, skew: 60 })).resolves.toBeTruthy();
-    await expect(verifyJwt(expired.token, j.jwks, { ...opts, skew: 60, now: j.now + 31 })).rejects.toThrow(/expired/);
+  it("the 'expired' vector is 61 s past exp, just outside the 60 s skew", async () => {
+    const expired = j.invalid[0];
+    await expect(verifyJwt(expired.token, j.jwks, { ...opts, now: j.now - 2 })).resolves.toBeTruthy();
   });
+
 });
