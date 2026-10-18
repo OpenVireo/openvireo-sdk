@@ -156,7 +156,9 @@ export class EventStream {
         const token = await this.client.token(this.forceRefresh);
         this.forceRefresh = false;
         const res = await send(this.client.opts, this.client.url("events"), {
-          headers: { Accept: "text/event-stream", "Cache-Control": "no-cache" },
+          // Only CORS-allowed headers (sync-openapi.yaml); no-store stands in for Cache-Control
+          headers: { Accept: "text/event-stream" },
+          cache: "no-store",
           token,
           signal: abort.signal,
         });
