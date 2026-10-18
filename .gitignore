@@ -3,3 +3,6 @@ dist/
 coverage/
 *.tsbuildinfo
 .DS_Store
+
+# The GitHub Action runs its committed bundle
+!packages/github-action/dist/

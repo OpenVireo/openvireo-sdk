@@ -1,0 +1,36 @@
+{
+  "name": "@kpnx/cli",
+  "version": "0.1.0",
+  "description": "kpx: read, inject and rotate KeePassXC vault secrets with a service account or a user login",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "kpx": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:binary": "npm run build --prefix ../.. -w @kpnx/sdk -w @kpnx/connect && bun build --compile --minify --sourcemap src/bin.ts --outfile dist/kpx",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "smoke": "bun scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@kpnx/connect": "0.1.0",
+    "@kpnx/sdk": "0.1.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}
