@@ -44,6 +44,10 @@
       "types": "./dist/merge/index.d.ts",
       "default": "./dist/merge/index.js"
     },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
     "./storage/node": {
       "types": "./dist/auth/storage-node.d.ts",
       "default": "./dist/auth/storage-node.js"
