@@ -249,6 +249,10 @@ export class AuthClient {
   issueSaSecret(sa: string, body: NewSaSecret) {
     return this.authed<unknown>("POST", `service-accounts/${seg(sa)}/secrets`, body);
   }
+  /** Changes when a secret expires (null: never); the token stays the same (SPEC §9). */
+  updateSaSecret(sa: string, id: string, body: { expires_at: string | null }) {
+    return this.authed<SaSecretInfo>("PATCH", `service-accounts/${seg(sa)}/secrets/${seg(id)}`, body);
+  }
   revokeSaSecret(sa: string, id: string) {
     return this.authed<void>("DELETE", `service-accounts/${seg(sa)}/secrets/${seg(id)}`);
   }

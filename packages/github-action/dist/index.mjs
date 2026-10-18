@@ -19178,6 +19178,10 @@ var AuthClient = class _AuthClient {
   issueSaSecret(sa, body) {
     return this.authed("POST", `service-accounts/${seg(sa)}/secrets`, body);
   }
+  /** Changes when a secret expires (null: never); the token stays the same (SPEC §9). */
+  updateSaSecret(sa, id, body) {
+    return this.authed("PATCH", `service-accounts/${seg(sa)}/secrets/${seg(id)}`, body);
+  }
   revokeSaSecret(sa, id) {
     return this.authed("DELETE", `service-accounts/${seg(sa)}/secrets/${seg(id)}`);
   }
