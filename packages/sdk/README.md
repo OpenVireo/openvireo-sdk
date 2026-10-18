@@ -15,6 +15,7 @@ keysets and sealed keys.
 | `@kpnx/sdk/sync` | `SyncClient` (vault + legacy routes), `syncKdbx` merge/retry loop, SSE `subscribeEvents` |
 | `@kpnx/sdk/vault` | kdbxweb open/save, vault-key credentials, rotation helpers, entry helpers, `kpx://` references |
 | `@kpnx/sdk/merge` | port of KeePassXC's three-way merge (`SyncEngine::mergeDatabases` + `Merger`) |
+| `@kpnx/sdk/testing` | in-memory auth and sync servers (`FakeAuthServer`, `FakeSyncServer`) for app tests; not for production |
 
 ## Hosted account
 
@@ -50,8 +51,31 @@ const live = account.subscribe({
   onVaultsChanged: (list) => render(list),      // access changed: JWT refreshed, list reloaded, stream reconnected
 });
 
+// "Move to account": a re-keyed copy of an open local or self-hosted database becomes a new vault
+// (uploaded with If-None-Match: *); the original is not changed. A VaultUploadError carries the
+// created vault when only the upload failed (vault.sync() retries it).
+const moved = await account.importVault(localDb, { name: "Home", orgId });
+
 account.lock();     // wipes keys from memory
-await account.logout();
+await account.logout(); // also drops the offline cache
+```
+
+### Offline
+
+With `offline: true`, `connect`, `unlock`, `listVaults` and `openVault` fall back to what this device
+kept when a server can't be reached (`isUnreachable(e)`: no network, or 502/503/504), and
+`account.offline` / `vault.offline` turn true. The cache lives in `storage` and holds only what the
+servers store too: the discovery document, the wrapped keyset and KDF params, GET /vaults as returned
+(encrypted names, sealed keys), the sync state (its base copy is the server's encrypted .kdbx), and
+local edits not yet uploaded as a .kdbx encrypted with the vault key (`sync:<vault id>:pending`).
+Unlocking offline still needs the master password and the Secret Key (kept on trusted devices).
+
+```ts
+const account = await Account.connect({ issuer, device, storage: browserStorage(), offline: true });
+await account.unlock(password);              // works offline from the cached wrapped keyset
+const vault = await account.openVault(id);   // offline: the local copy; `not_available_offline` if never synced here
+await vault.sync().catch(() => {});          // offline: the edit is kept (pending) and merges in later
+const { vaults, dropped } = await account.reconnect(); // back online; revoked vaults are forgotten
 ```
 
 ## Service accounts (CLI, connect, GitHub Action)
