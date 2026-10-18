@@ -38,107 +38,6 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
-// ../sdk/src/errors.ts
-var KpxError;
-var init_errors = __esm({
-  "../sdk/src/errors.ts"() {
-    "use strict";
-    KpxError = class extends Error {
-      constructor(code, message, status, options) {
-        super(message, options);
-        this.code = code;
-        this.status = status;
-      }
-      name = "KpxError";
-    };
-  }
-});
-
-// ../sdk/src/util/bytes.ts
-function concat(...parts) {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let i = 0;
-  for (const p of parts) {
-    out.set(p, i);
-    i += p.length;
-  }
-  return out;
-}
-function toHex(b) {
-  let s = "";
-  for (const x of b) s += x.toString(16).padStart(2, "0");
-  return s;
-}
-function b64u(b) {
-  let s = "";
-  let i = 0;
-  for (; i + 2 < b.length; i += 3) {
-    const n = b[i] << 16 | b[i + 1] << 8 | b[i + 2];
-    s += B64U[n >> 18 & 63] + B64U[n >> 12 & 63] + B64U[n >> 6 & 63] + B64U[n & 63];
-  }
-  const rest = b.length - i;
-  if (rest === 1) {
-    const n = b[i] << 16;
-    s += B64U[n >> 18 & 63] + B64U[n >> 12 & 63];
-  } else if (rest === 2) {
-    const n = b[i] << 16 | b[i + 1] << 8;
-    s += B64U[n >> 18 & 63] + B64U[n >> 12 & 63] + B64U[n >> 6 & 63];
-  }
-  return s;
-}
-function fromB64u(s) {
-  const clean3 = s.replace(/=+$/, "");
-  if (clean3.length % 4 === 1) throw new TypeError("invalid base64url length");
-  const out = new Uint8Array(Math.floor(clean3.length * 3 / 4));
-  let bits = 0;
-  let acc = 0;
-  let o = 0;
-  for (let i = 0; i < clean3.length; i++) {
-    const c = clean3.charCodeAt(i);
-    const v = c < 128 ? B64U_LOOKUP[c] : -1;
-    if (v < 0) throw new TypeError("invalid base64url character");
-    acc = acc << 6 | v;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out[o++] = acc >> bits & 255;
-    }
-  }
-  return out;
-}
-function ctEqual(a, b) {
-  if (a.length !== b.length) return false;
-  let d = 0;
-  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
-  return d === 0;
-}
-function wipe(...bufs) {
-  for (const b of bufs) b?.fill(0);
-}
-function exactBuffer(b) {
-  const out = new Uint8Array(b.byteLength);
-  out.set(b);
-  return out.buffer;
-}
-var encoder, decoder, utf8, fromUtf8, B64U, B64U_LOOKUP;
-var init_bytes = __esm({
-  "../sdk/src/util/bytes.ts"() {
-    "use strict";
-    encoder = new TextEncoder();
-    decoder = new TextDecoder("utf-8", { fatal: true });
-    utf8 = (s) => encoder.encode(s);
-    fromUtf8 = (b) => decoder.decode(b);
-    B64U = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    B64U_LOOKUP = (() => {
-      const t = new Int16Array(128).fill(-1);
-      for (let i = 0; i < 64; i++) t[B64U.charCodeAt(i)] = i;
-      t["+".charCodeAt(0)] = 62;
-      t["/".charCodeAt(0)] = 63;
-      return t;
-    })();
-  }
-});
-
 // ../../node_modules/hash-wasm/dist/index.esm.js
 var index_esm_exports = {};
 __export(index_esm_exports, {
@@ -2475,31 +2374,6 @@ var init_index_esm = __esm({
     };
     mutex = new Mutex();
     wasmCache = null;
-  }
-});
-
-// ../sdk/src/crypto/argon2.ts
-function argon2(params) {
-  return impl(params);
-}
-var hashWasmArgon2, impl;
-var init_argon2 = __esm({
-  "../sdk/src/crypto/argon2.ts"() {
-    "use strict";
-    hashWasmArgon2 = async ({ type, password, salt, m, t, p, dkLen }) => {
-      const hw = await Promise.resolve().then(() => (init_index_esm(), index_esm_exports));
-      const fn = type === "argon2id" ? hw.argon2id : type === "argon2d" ? hw.argon2d : hw.argon2i;
-      return fn({
-        password,
-        salt,
-        iterations: t,
-        parallelism: p,
-        memorySize: m,
-        hashLength: dkLen,
-        outputType: "binary"
-      });
-    };
-    impl = hashWasmArgon2;
   }
 });
 
@@ -16171,88 +16045,113 @@ var require_kdbxweb = __commonJS({
   }
 });
 
-// ../sdk/src/vault/kdbx.ts
-function initKdbx() {
-  if (installed) return;
-  installed = true;
-  kdbxweb.CryptoEngine.setArgon2Impl(async (password, salt, memory, iterations, length, parallelism, type) => {
-    const t = type === kdbxweb.CryptoEngine.Argon2TypeArgon2id ? "argon2id" : type === kdbxweb.CryptoEngine.Argon2TypeArgon2d ? "argon2d" : "argon2i";
-    const out = await argon2({
-      type: t,
-      password: new Uint8Array(password),
-      salt: new Uint8Array(salt),
-      m: memory,
-      t: iterations,
-      p: parallelism,
-      dkLen: length
-    });
-    return exactBuffer(out);
-  });
-}
-function vaultCredentials(vaultKey) {
-  if (vaultKey.length !== 32) throw new KpxError("no_vault_key", "a vault key is 32 bytes");
-  const key = new Uint8Array(vaultKey);
-  return () => new kdbxweb.Credentials(null, new Uint8Array(key));
-}
-function mapError(e) {
-  const code = e?.code;
-  if (code === kdbxweb.Consts.ErrorCodes.InvalidKey) {
-    throw new KpxError("vault_key_mismatch", "wrong key for this database", void 0, { cause: e });
+// ../sdk/src/errors.ts
+var KpxError = class extends Error {
+  constructor(code, message, status, options) {
+    super(message, options);
+    this.code = code;
+    this.status = status;
   }
-  throw new KpxError("kdbx_error", `could not read the database: ${e?.message ?? e}`, void 0, { cause: e });
-}
-async function openKdbx(data2, credentials) {
-  initKdbx();
-  const creds = typeof credentials === "function" ? credentials() : credentials;
-  try {
-    return await kdbxweb.Kdbx.load(toArrayBuffer(data2), creds);
-  } catch (e) {
-    mapError(e);
+  name = "KpxError";
+};
+
+// ../sdk/src/util/bytes.ts
+var encoder = new TextEncoder();
+var decoder = new TextDecoder("utf-8", { fatal: true });
+var utf8 = (s) => encoder.encode(s);
+var fromUtf8 = (b) => decoder.decode(b);
+function concat(...parts) {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let i = 0;
+  for (const p of parts) {
+    out.set(p, i);
+    i += p.length;
   }
+  return out;
 }
-async function saveKdbx(db) {
-  initKdbx();
-  return new Uint8Array(await db.save());
+function toHex(b) {
+  let s = "";
+  for (const x of b) s += x.toString(16).padStart(2, "0");
+  return s;
 }
-async function openWithKeyVersions(data2, keys) {
-  if (keys.length === 0) throw new KpxError("no_vault_key", "no vault key available");
-  const sorted = [...keys].sort((a, b) => b.version - a.version);
-  let last;
-  for (const k of sorted) {
-    try {
-      return { db: await openKdbx(data2, vaultCredentials(k.key)), keyVersion: k.version };
-    } catch (e) {
-      if (e.code !== "vault_key_mismatch") throw e;
-      last = e;
+var B64U = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+var B64U_LOOKUP = (() => {
+  const t = new Int16Array(128).fill(-1);
+  for (let i = 0; i < 64; i++) t[B64U.charCodeAt(i)] = i;
+  t["+".charCodeAt(0)] = 62;
+  t["/".charCodeAt(0)] = 63;
+  return t;
+})();
+function b64u(b) {
+  let s = "";
+  let i = 0;
+  for (; i + 2 < b.length; i += 3) {
+    const n = b[i] << 16 | b[i + 1] << 8 | b[i + 2];
+    s += B64U[n >> 18 & 63] + B64U[n >> 12 & 63] + B64U[n >> 6 & 63] + B64U[n & 63];
+  }
+  const rest = b.length - i;
+  if (rest === 1) {
+    const n = b[i] << 16;
+    s += B64U[n >> 18 & 63] + B64U[n >> 12 & 63];
+  } else if (rest === 2) {
+    const n = b[i] << 16 | b[i + 1] << 8;
+    s += B64U[n >> 18 & 63] + B64U[n >> 12 & 63] + B64U[n >> 6 & 63];
+  }
+  return s;
+}
+function fromB64u(s) {
+  const clean3 = s.replace(/=+$/, "");
+  if (clean3.length % 4 === 1) throw new TypeError("invalid base64url length");
+  const out = new Uint8Array(Math.floor(clean3.length * 3 / 4));
+  let bits = 0;
+  let acc = 0;
+  let o = 0;
+  for (let i = 0; i < clean3.length; i++) {
+    const c = clean3.charCodeAt(i);
+    const v = c < 128 ? B64U_LOOKUP[c] : -1;
+    if (v < 0) throw new TypeError("invalid base64url character");
+    acc = acc << 6 | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[o++] = acc >> bits & 255;
     }
   }
-  throw last;
+  return out;
 }
-function syncGeneration(db) {
-  const v = db.meta.customData.get(SYNC_GENERATION_KEY)?.value;
-  const n = v ? Number.parseInt(v, 10) : 0;
-  return Number.isFinite(n) ? n : 0;
+function ctEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
 }
-function setSyncGeneration(db, generation) {
-  db.meta.customData.set(SYNC_GENERATION_KEY, { value: String(generation) });
+function wipe(...bufs) {
+  for (const b of bufs) b?.fill(0);
 }
-var kdbxweb, installed, VAULT_KDF, toArrayBuffer, SYNC_GENERATION_KEY;
-var init_kdbx = __esm({
-  "../sdk/src/vault/kdbx.ts"() {
-    "use strict";
-    kdbxweb = __toESM(require_kdbxweb(), 1);
-    init_errors();
-    init_argon2();
-    init_bytes();
-    installed = false;
-    VAULT_KDF = { m: 1024 * 1024, t: 2, p: 1 };
-    toArrayBuffer = (data2) => data2 instanceof ArrayBuffer ? data2.slice(0) : exactBuffer(data2);
-    SYNC_GENERATION_KEY = "KPXC_SYNC_GENERATION";
-  }
-});
+function exactBuffer(b) {
+  const out = new Uint8Array(b.byteLength);
+  out.set(b);
+  return out.buffer;
+}
 
-// ../sdk/src/index.ts
-init_errors();
+// ../sdk/src/crypto/argon2.ts
+var hashWasmArgon2 = async ({ type, password, salt, m, t, p, dkLen }) => {
+  const hw = await Promise.resolve().then(() => (init_index_esm(), index_esm_exports));
+  const fn = type === "argon2id" ? hw.argon2id : type === "argon2d" ? hw.argon2d : hw.argon2i;
+  return fn({
+    password,
+    salt,
+    iterations: t,
+    parallelism: p,
+    memorySize: m,
+    hashLength: dkLen,
+    outputType: "binary"
+  });
+};
+var impl = hashWasmArgon2;
+function argon2(params) {
+  return impl(params);
+}
 
 // ../../node_modules/@noble/curves/ed25519.js
 init_sha2();
@@ -18765,7 +18664,6 @@ var hkdf = (hash2, ikm, salt, info2, length) => {
 
 // ../sdk/src/crypto/primitives.ts
 init_sha2();
-init_bytes();
 var hkdf2 = (ikm, salt, info2, length = 32) => hkdf(sha2562, ikm, salt, utf8(info2), length);
 var aeadDecrypt = (key, nonce, ciphertext, aad) => xchacha20poly1305(key, nonce, utf8(aad)).decrypt(ciphertext);
 var x25519PublicKey = (sk) => x25519.getPublicKey(sk);
@@ -18782,8 +18680,6 @@ var ed25519Verify = (sig, message, pk) => {
 var NONCE_BYTES = 24;
 
 // ../sdk/src/crypto/envelope.ts
-init_errors();
-init_bytes();
 var VERSION = 1;
 function decrypt(key, nonce, ct, aad) {
   try {
@@ -18842,8 +18738,6 @@ var AAD = {
 var unsealVaultKey = (encSk, vaultId, sealed) => unseal(encSk, sealed, AAD.vaultKey(vaultId));
 
 // ../sdk/src/crypto/keyset.ts
-init_errors();
-init_bytes();
 var pubkeysMessage = (encPk, signPk) => concat(utf8("kpx-pubkeys-v1"), encPk, signPk);
 function keysetFromSecrets(encSk, signSeed) {
   const encPk = x25519PublicKey(encSk);
@@ -18879,7 +18773,6 @@ function wipeKeyset(ks) {
 }
 
 // ../sdk/src/crypto/vault-name.ts
-init_bytes();
 var vaultNameKey = (vaultKey) => hkdf2(vaultKey, new Uint8Array(0), "kpx-vault-name-v1", 32);
 function decryptVaultName(vaultKey, vaultId, encryptedName) {
   const k = vaultNameKey(vaultKey);
@@ -18891,8 +18784,6 @@ function decryptVaultName(vaultKey, vaultId, encryptedName) {
 }
 
 // ../sdk/src/crypto/tokens.ts
-init_errors();
-init_bytes();
 var SA_TOKEN_PREFIX = "kpx_sa_";
 function parseSaToken(token) {
   const t = token.trim();
@@ -18914,11 +18805,7 @@ function parseSaToken(token) {
 }
 var unwrapSaMaster = (kek, saId, wrapped) => unwrap(kek, fromB64u(wrapped), AAD.saMaster(saId));
 
-// ../sdk/src/auth/client.ts
-init_errors();
-
 // ../sdk/src/http/request.ts
-init_errors();
 var HttpError = class extends KpxError {
   constructor(code, message, status, body, retryAfter) {
     super(code, message, status);
@@ -19192,7 +19079,6 @@ var AuthClient = class _AuthClient {
 };
 
 // ../sdk/src/sync/client.ts
-init_errors();
 var version = (res) => {
   const rev = Number(res.headers.get("X-Database-Revision"));
   return { etag: res.headers.get("ETag") ?? "", revision: Number.isFinite(rev) ? rev : -1, lastModified: res.headers.get("Last-Modified") ?? void 0 };
@@ -19328,14 +19214,79 @@ var SyncClient = class _SyncClient {
   }
 };
 
-// ../sdk/src/sync/engine.ts
-init_errors();
-init_kdbx();
+// ../sdk/src/vault/kdbx.ts
+var kdbxweb = __toESM(require_kdbxweb(), 1);
+var installed = false;
+function initKdbx() {
+  if (installed) return;
+  installed = true;
+  kdbxweb.CryptoEngine.setArgon2Impl(async (password, salt, memory, iterations, length, parallelism, type) => {
+    const t = type === kdbxweb.CryptoEngine.Argon2TypeArgon2id ? "argon2id" : type === kdbxweb.CryptoEngine.Argon2TypeArgon2d ? "argon2d" : "argon2i";
+    const out = await argon2({
+      type: t,
+      password: new Uint8Array(password),
+      salt: new Uint8Array(salt),
+      m: memory,
+      t: iterations,
+      p: parallelism,
+      dkLen: length
+    });
+    return exactBuffer(out);
+  });
+}
+function vaultCredentials(vaultKey) {
+  if (vaultKey.length !== 32) throw new KpxError("no_vault_key", "a vault key is 32 bytes");
+  const key = new Uint8Array(vaultKey);
+  return () => new kdbxweb.Credentials(null, new Uint8Array(key));
+}
+var VAULT_KDF = { m: 1024 * 1024, t: 2, p: 1 };
+var toArrayBuffer = (data2) => data2 instanceof ArrayBuffer ? data2.slice(0) : exactBuffer(data2);
+function mapError(e) {
+  const code = e?.code;
+  if (code === kdbxweb.Consts.ErrorCodes.InvalidKey) {
+    throw new KpxError("vault_key_mismatch", "wrong key for this database", void 0, { cause: e });
+  }
+  throw new KpxError("kdbx_error", `could not read the database: ${e?.message ?? e}`, void 0, { cause: e });
+}
+async function openKdbx(data2, credentials) {
+  initKdbx();
+  const creds = typeof credentials === "function" ? credentials() : credentials;
+  try {
+    return await kdbxweb.Kdbx.load(toArrayBuffer(data2), creds);
+  } catch (e) {
+    mapError(e);
+  }
+}
+async function saveKdbx(db) {
+  initKdbx();
+  return new Uint8Array(await db.save());
+}
+async function openWithKeyVersions(data2, keys) {
+  if (keys.length === 0) throw new KpxError("no_vault_key", "no vault key available");
+  const sorted = [...keys].sort((a, b) => b.version - a.version);
+  let last;
+  for (const k of sorted) {
+    try {
+      return { db: await openKdbx(data2, vaultCredentials(k.key)), keyVersion: k.version };
+    } catch (e) {
+      if (e.code !== "vault_key_mismatch") throw e;
+      last = e;
+    }
+  }
+  throw last;
+}
+var SYNC_GENERATION_KEY = "KPXC_SYNC_GENERATION";
+function syncGeneration(db) {
+  const v = db.meta.customData.get(SYNC_GENERATION_KEY)?.value;
+  const n = v ? Number.parseInt(v, 10) : 0;
+  return Number.isFinite(n) ? n : 0;
+}
+function setSyncGeneration(db, generation) {
+  db.meta.customData.set(SYNC_GENERATION_KEY, { value: String(generation) });
+}
 
 // ../sdk/src/merge/fields.ts
 init_sha2();
-init_kdbx();
-init_bytes();
 var DEFAULT_ATTRIBUTES = ["Title", "UserName", "Password", "URL", "Notes"];
 var isDefaultAttribute = (k) => DEFAULT_ATTRIBUTES.includes(k);
 var seconds = (d) => d ? Math.floor(d.getTime() / 1e3) : 0;
@@ -19463,7 +19414,6 @@ function conflictingFields(local, remote, base) {
 }
 
 // ../sdk/src/merge/merger.ts
-init_kdbx();
 var title = (e) => {
   const t = e.fields.get("Title");
   return t instanceof kdbxweb.ProtectedValue ? t.getText() : t ?? "";
@@ -20043,7 +19993,6 @@ async function syncKdbx(opts) {
 }
 
 // ../sdk/src/vault/entries.ts
-init_kdbx();
 function getUuidString(uuid) {
   if (!uuid) return Math.random().toString(36).substring(2, 11);
   if (typeof uuid === "string") return uuid;
@@ -20061,8 +20010,6 @@ function fieldText(val) {
 }
 
 // ../sdk/src/vault/reference.ts
-init_errors();
-init_kdbx();
 var SCHEME = "kpx://";
 function parseReference(ref) {
   if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a kpx:// reference: ${ref}`);
@@ -20143,9 +20090,6 @@ function writeField(db, ref, value, opts = {}) {
 }
 
 // ../sdk/src/service-account.ts
-init_errors();
-init_bytes();
-init_kdbx();
 var ServiceAccount = class _ServiceAccount {
   constructor(saId, config, secret, keyset, access, http) {
     this.saId = saId;
