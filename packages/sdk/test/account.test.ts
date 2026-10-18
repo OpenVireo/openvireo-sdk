@@ -121,6 +121,58 @@ describe("Account.login with TOTP", () => {
   });
 });
 
+describe("Org members", () => {
+  it("confirm with chosen vaults → promote to admin → remove and rotate", async () => {
+    const { auth, fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    const org = await alice.auth.createOrg("Acme");
+    const infra = await alice.createVault("Infra", { orgId: org.id });
+    addEntry(infra.db!, "GitHub", { Password: "s3cret" }, 1000);
+    await infra.sync();
+    const payroll = await alice.createVault("Payroll", { orgId: org.id });
+    const { serviceAccount } = await alice.createServiceAccount(org.id, { name: "ci" });
+
+    const bob = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
+    auth.addMember(org.id, "bob@example.com");
+    const pending = (await alice.auth.listMembers(org.id)).members.find((m) => m.email === "bob@example.com")!;
+    expect(pending.status).toBe("accepted");
+
+    // a member gets only the vaults picked for them, and no SA master keys
+    const confirmed = await alice.confirmMember(org.id, pending, [{ id: infra.id, role: "read" }]);
+    expect(confirmed.status).toBe("confirmed");
+    expect((await bob.listVaults()).map((v) => [v.name, v.role])).toEqual([["Infra", "read"]]);
+    expect((await bob.openVault(infra.id)).read("kpx://Infra/GitHub/password")).toBe("s3cret");
+    await expect(bob.issueServiceAccountSecret(serviceAccount.id)).rejects.toMatchObject({ code: "forbidden" });
+
+    // promotion: manage on every org vault, and the SA master key
+    await alice.setMemberRole(org.id, confirmed, "admin");
+    expect((await bob.listVaults()).map((v) => [v.name, v.role]).sort()).toEqual([["Infra", "manage"], ["Payroll", "manage"]]);
+    expect((await bob.issueServiceAccountSecret(serviceAccount.id)).token).toMatch(/^kpx_sa_/);
+
+    // removal: access goes at once, and both vault keys rotate
+    const { rotated, failed } = await alice.removeMember(org.id, confirmed.user_id);
+    expect([rotated.sort(), failed]).toEqual([[infra.id, payroll.id].sort(), []]);
+    expect(await bob.listVaults()).toEqual([]);
+    expect(auth.vaults.get(infra.id)!.current).toBe(2);
+  });
+
+  it("refuses a vault from another org or a member without keys", async () => {
+    const { auth, fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    const org = await alice.auth.createOrg("Acme");
+    const personal = await alice.createVault("Personal");
+    const bob = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
+    auth.addMember(org.id, "bob@example.com");
+    const m = (await alice.auth.listMembers(org.id)).members.find((x) => x.email === "bob@example.com")!;
+    await expect(alice.confirmMember(org.id, m, [{ id: personal.id, role: "read" }])).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(alice.confirmMember(org.id, { ...m, public: undefined })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+});
+
 describe("SelfHostedSync", () => {
   it("pairs with a code and syncs a password database through databases/<id>", async () => {
     const { sync } = servers();
