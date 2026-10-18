@@ -66,6 +66,8 @@ export interface RequestOptions {
   body?: Uint8Array;
   token?: string | null;
   signal?: AbortSignal;
+  /** fetch cache mode; a header like Cache-Control would need a CORS preflight the sync server refuses */
+  cache?: RequestCache;
 }
 
 export async function send(http: HttpOptions, url: string, opts: RequestOptions = {}): Promise<Response> {
@@ -84,7 +86,7 @@ export async function send(http: HttpOptions, url: string, opts: RequestOptions 
   let res: Response;
   try {
     // Never follow redirects: they could forward the bearer token to another host
-    res = await f(url, { method: opts.method ?? "GET", headers, body, signal: opts.signal, redirect: "manual" });
+    res = await f(url, { method: opts.method ?? "GET", headers, body, signal: opts.signal, redirect: "manual", ...(opts.cache ? { cache: opts.cache } : {}) });
   } catch (e) {
     if ((e as { name?: string })?.name === "AbortError") throw new KpxError("aborted", "request aborted", undefined, { cause: e });
     throw new KpxError("network_error", `could not reach ${new URL(url).host}: ${String((e as Error)?.message ?? e)}`, 0, { cause: e });

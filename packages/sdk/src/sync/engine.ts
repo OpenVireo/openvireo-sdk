@@ -5,7 +5,7 @@
  */
 import { KpxError } from "../errors.js";
 import { b64u, fromB64u } from "../util/bytes.js";
-import { type CredentialsFactory, type Kdbx, openKdbx, saveKdbx, syncGeneration } from "../vault/kdbx.js";
+import { type CredentialsFactory, type Kdbx, openKdbx, saveKdbx, setSyncGeneration, syncGeneration } from "../vault/kdbx.js";
 import {
   type MergeChange,
   type MergeOptions,
@@ -183,7 +183,13 @@ export async function syncKdbx(opts: SyncOptions): Promise<SyncResult> {
     changes = merged.changes;
 
     if (!merged.remoteChanged && !opts.beforeUpload) {
-      // The merge didn't change the server copy: nothing to upload
+      // The merge didn't change the server copy: nothing to upload. The merge bumped the generation
+      // for an upload that won't happen, so both copies keep the server's; otherwise the next sync
+      // would take the server for a rollback.
+      if (merged.changes.length) {
+        setSyncGeneration(local, remoteGeneration);
+        setSyncGeneration(remote, remoteGeneration);
+      }
       return finish(opts.localChanged === false && !merged.localChanged ? "unchanged" : "pulled", remote, got.etag, got.revision, got.data, index, attempt, remoteGeneration);
     }
 
