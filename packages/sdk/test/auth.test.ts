@@ -98,6 +98,7 @@ describe("AuthClient routes (openapi.yaml)", () => {
     ["deleteServiceAccount", (c) => c.deleteServiceAccount(SA), "DELETE", `/service-accounts/${SA}`, undefined, true],
     ["listSaSecrets", (c) => c.listSaSecrets(SA), "GET", `/service-accounts/${SA}/secrets`, undefined, true],
     ["issueSaSecret", (c) => c.issueSaSecret(SA, secret), "POST", `/service-accounts/${SA}/secrets`, secret, true],
+    ["updateSaSecret", (c) => c.updateSaSecret(SA, "s1", { expires_at: null }), "PATCH", `/service-accounts/${SA}/secrets/s1`, { expires_at: null }, true],
     ["revokeSaSecret", (c) => c.revokeSaSecret(SA, "s1"), "DELETE", `/service-accounts/${SA}/secrets/s1`, undefined, true],
     ["audit", (c) => c.audit(O, { before: "c1", limit: 20 }), "GET", `/orgs/${O}/audit?before=c1&limit=20`, undefined, true],
   ];
@@ -120,7 +121,7 @@ describe("AuthClient routes (openapi.yaml)", () => {
     });
   }
   it(`covers all ${cases.length} routes of openapi.yaml`, () => {
-    expect(new Set(cases.map((c) => `${c[2]} ${c[3].split("?")[0]}`)).size).toBe(48);
+    expect(new Set(cases.map((c) => `${c[2]} ${c[3].split("?")[0]}`)).size).toBe(49);
   });
 });
 
