@@ -135,6 +135,15 @@ export class AuthClient {
   passwordFinish(body: { session_id: string; record: string; kdf: KdfParams; keyset: WrappedKeysetJson }) {
     return this.authed<void>("POST", "me/password/finish", body);
   }
+  emailRequest(email: string) {
+    return this.authed<{ expires_in: number }>("POST", "me/email", { email });
+  }
+  emailStart(body: { email: string; code: string; request: string }) {
+    return this.authed<{ session_id: string; response: string }>("POST", "me/email/start", body);
+  }
+  emailFinish(body: { session_id: string; record: string }) {
+    return this.authed<void>("POST", "me/email/finish", body);
+  }
   /** A one-time code that signs the browser in to the auth website (SPEC.md §16) */
   createWebSession() {
     return this.authed<{ code: string; expires_in: number }>("POST", "me/web-session");

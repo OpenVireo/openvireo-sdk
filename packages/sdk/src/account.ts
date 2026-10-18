@@ -306,6 +306,7 @@ export class Account {
       try {
         const me = await this.auth.me();
         profile = { kdf: me.kdf, keyset: me.keyset };
+        await this.followEmail(me.email);
       } catch (e) {
         const cached = isUnreachable(e) ? await this.cachedProfile(session.userId) : null;
         if (!cached) throw e;
@@ -326,24 +327,11 @@ export class Account {
    * working. The Secret Key stays the same. The server signs out the other devices.
    */
   async changePassword(p: { current: string; next: string; kdf?: Parameters<typeof newKdfParams>[0] }): Promise<void> {
-    const session = await this.tokens.load();
-    if (!session) throw new KpxError("signed_out", "not signed in");
-    const skText = await this.storage.get(this.skKey(session.email));
-    if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
-    const sk = parseSecretKey(skText);
+    const { session, sk } = await this.storedSecretKey();
     let keyset: Keyset | null = null;
     let auk: Uint8Array | null = null;
     try {
-      const me = await this.auth.me();
-      checkKdfParams(me.kdf, this.config.kdf_min);
-      const oldAuk = await deriveAuk(p.current, me.kdf, sk, { kdfMin: this.config.kdf_min });
-      try {
-        keyset = unwrapKeyset(oldAuk, me.keyset);
-      } catch (e) {
-        throw (e as KpxError).code === "decryption_failed" ? new KpxError("unauthorized", "the current password is wrong", 401, { cause: e }) : e;
-      } finally {
-        wipe(oldAuk);
-      }
+      keyset = await this.checkPassword(p.current, sk);
       const kdf = newKdfParams(p.kdf);
       checkKdfParams(kdf, this.config.kdf_min);
       auk = await deriveAuk(p.next, kdf, sk, { kdfMin: this.config.kdf_min });
@@ -360,6 +348,75 @@ export class Account {
       if (auk) wipe(auk);
       wipe(sk);
     }
+  }
+
+  /** Unwraps the keyset from /me with this password, which proves it is the master password. */
+  private async checkPassword(password: string, sk: Uint8Array): Promise<Keyset> {
+    const me = await this.auth.me();
+    checkKdfParams(me.kdf, this.config.kdf_min);
+    const auk = await deriveAuk(password, me.kdf, sk, { kdfMin: this.config.kdf_min });
+    try {
+      return unwrapKeyset(auk, me.keyset);
+    } catch (e) {
+      throw (e as KpxError).code === "decryption_failed" ? new KpxError("unauthorized", "the master password is wrong", 401, { cause: e }) : e;
+    } finally {
+      wipe(auk);
+    }
+  }
+
+  private async storedSecretKey(): Promise<{ session: NonNullable<TokenManager["current"]>; sk: Uint8Array }> {
+    const session = await this.tokens.load();
+    if (!session) throw new KpxError("signed_out", "not signed in");
+    const skText = await this.storage.get(this.skKey(session.email));
+    if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
+    return { session, sk: parseSecretKey(skText) };
+  }
+
+  /** Email change, step 1 (SPEC.md §16): the server mails an 8-digit code to the new address. */
+  async requestEmailChange(email: string): Promise<void> {
+    // /me/email needs an access token issued in the last 5 minutes
+    await this.tokens.getAccessToken({ force: true });
+    await this.auth.emailRequest(email.trim());
+  }
+
+  /**
+   * Email change, step 2: with the mailed code and the master password, registers OPAQUE again under
+   * the new email. The password is checked first by unwrapping the keyset, so a typo can't become the
+   * new login. Keys, Secret Key and vaults stay as they are.
+   */
+  async changeEmail(p: { email: string; code: string; password: string }): Promise<void> {
+    const { sk } = await this.storedSecretKey();
+    const email = p.email.trim();
+    try {
+      wipeKeyset(await this.checkPassword(p.password, sk));
+      await this.tokens.getAccessToken({ force: true });
+      const reg = await startRegistration(p.password);
+      const started = await this.auth.emailStart({ email, code: p.code.trim(), request: b64u(reg.request) });
+      const { record } = await finishRegistration(reg.state, fromB64u(started.response), this.ids(email));
+      await this.auth.emailFinish({ session_id: started.session_id, record: b64u(record) });
+      await this.followEmail(email);
+    } finally {
+      wipe(sk);
+    }
+  }
+
+  /**
+   * Moves what this device keeps under the email (Secret Key, device id, session) to the account's
+   * current email, after it changed here or on another device (SPEC.md §16).
+   */
+  private async followEmail(email: string): Promise<void> {
+    const session = await this.tokens.load();
+    if (!session || !email) return;
+    const [from, to] = [this.ids(session.email).idU, this.ids(email).idU];
+    if (from === to) return;
+    for (const key of [this.skKey, this.devKey]) {
+      const value = await this.storage.get(key(session.email));
+      if (value !== null && value !== undefined) {
+        await this.storage.set(key(email), value);
+        await this.storage.delete(key(session.email));
+      }
+    }
+    await this.tokens.update({ email });
   }
 
   /** The Secret Key kept on this device, to download the Emergency Kit again. Needs the account unlocked. */
@@ -390,6 +447,7 @@ export class Account {
     const session = await this.tokens.load();
     if (!session) throw new KpxError("signed_out", "not signed in");
     const me = await this.auth.me();
+    await this.followEmail(me.email);
     await this.cacheProfile(session.userId, { kdf: me.kdf, keyset: me.keyset });
     return this.loadVaultList();
   }
