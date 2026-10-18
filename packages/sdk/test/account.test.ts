@@ -121,6 +121,53 @@ describe("Account.login with TOTP", () => {
   });
 });
 
+describe("Account settings (SPEC.md §16)", () => {
+  it("changes the password: same keys and Secret Key, vaults still open, the old password stops working", async () => {
+    const { auth, fetch } = servers();
+    const storage = new MemoryStorage();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, storage, device: { name: "web", platform: "web" } });
+    const { secretKey } = await alice.register({ email: "alice@example.com", password: "old pw", kdf });
+    const vault = await alice.createVault("Personal");
+    await vault.sync();
+    const fp = alice.fingerprint;
+
+    await expect(alice.changePassword({ current: "nope", next: "new pw", kdf })).rejects.toMatchObject({ code: "unauthorized" });
+    await alice.changePassword({ current: "old pw", next: "new pw", kdf });
+    expect(JSON.stringify(auth.calls.map((c) => c.json))).not.toContain("new pw");
+    expect(await alice.secretKey()).toBe(secretKey);
+
+    const device = await Account.connect({ issuer: ISSUER, fetch, device: { name: "cli", platform: "cli" } });
+    await expect(device.login({ email: "alice@example.com", password: "old pw", secretKey })).rejects.toMatchObject({ code: "unauthorized" });
+    await device.login({ email: "alice@example.com", password: "new pw", secretKey });
+    expect(device.fingerprint).toBe(fp);
+    expect((await device.openVault(vault.id)).id).toBe(vault.id);
+
+    const resumed = await Account.connect({ issuer: ISSUER, fetch, storage, device: { name: "web", platform: "web" } });
+    await resumed.unlock("new pw");
+    expect(resumed.email).toBe("alice@example.com");
+  });
+
+  it("makes a one-time link to the auth website", async () => {
+    const { fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await alice.register({ email: "alice@example.com", password: "pw", kdf });
+
+    const url = new URL(await alice.webSessionUrl("/billing/pricing"));
+    expect(url.origin + url.pathname).toBe(ISSUER + "/session/claim");
+    expect(url.searchParams.get("code")).toMatch(/^kpx_ws_/);
+    expect(url.searchParams.get("next")).toBe("/billing/pricing");
+  });
+
+  it("only gives the Secret Key while unlocked", async () => {
+    const { fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    const { secretKey } = await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    expect(await alice.secretKey()).toBe(secretKey);
+    alice.lock();
+    await expect(alice.secretKey()).rejects.toThrow();
+  });
+});
+
 describe("AccountVault.sync with no local edits", () => {
   it("checks with a HEAD and skips the download when the ETag still matches", async () => {
     const { sync, fetch } = servers();

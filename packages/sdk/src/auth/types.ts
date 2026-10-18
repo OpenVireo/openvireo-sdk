@@ -18,6 +18,8 @@ export interface KpxConfiguration {
   jwks_uri: string;
   opaque: { lib: string; version: string; context: string; ids: string };
   kdf_min?: { m: number; t: number };
+  /** The web app: account settings and the auth website's sign-in (SPEC.md §16) */
+  web?: string;
 }
 
 export interface DeviceInfo {

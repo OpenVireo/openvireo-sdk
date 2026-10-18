@@ -158,6 +158,9 @@ export class Account {
   get userId(): string | undefined {
     return this.tokens.current?.userId;
   }
+  get email(): string | undefined {
+    return this.tokens.current?.email;
+  }
   get principal(): Principal {
     if (!this.tokens.current) throw new KpxError("signed_out", "not signed in");
     return `user:${this.tokens.current.userId}`;
@@ -315,6 +318,67 @@ export class Account {
     } finally {
       wipe(sk);
     }
+  }
+
+  /**
+   * Changes the master password (SPEC.md §16). The current one is checked by unwrapping the keyset; then
+   * OPAQUE is registered again and the same keyset is wrapped with the new AUK, so sealed vault keys keep
+   * working. The Secret Key stays the same. The server signs out the other devices.
+   */
+  async changePassword(p: { current: string; next: string; kdf?: Parameters<typeof newKdfParams>[0] }): Promise<void> {
+    const session = await this.tokens.load();
+    if (!session) throw new KpxError("signed_out", "not signed in");
+    const skText = await this.storage.get(this.skKey(session.email));
+    if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
+    const sk = parseSecretKey(skText);
+    let keyset: Keyset | null = null;
+    let auk: Uint8Array | null = null;
+    try {
+      const me = await this.auth.me();
+      checkKdfParams(me.kdf, this.config.kdf_min);
+      const oldAuk = await deriveAuk(p.current, me.kdf, sk, { kdfMin: this.config.kdf_min });
+      try {
+        keyset = unwrapKeyset(oldAuk, me.keyset);
+      } catch (e) {
+        throw (e as KpxError).code === "decryption_failed" ? new KpxError("unauthorized", "the current password is wrong", 401, { cause: e }) : e;
+      } finally {
+        wipe(oldAuk);
+      }
+      const kdf = newKdfParams(p.kdf);
+      checkKdfParams(kdf, this.config.kdf_min);
+      auk = await deriveAuk(p.next, kdf, sk, { kdfMin: this.config.kdf_min });
+      const wrapped = wrapKeyset(auk, keyset);
+      // password/start needs an access token issued in the last 5 minutes
+      await this.tokens.getAccessToken({ force: true });
+      const reg = await startRegistration(p.next);
+      const started = await this.auth.passwordStart({ request: b64u(reg.request) });
+      const { record } = await finishRegistration(reg.state, fromB64u(started.response), this.ids(session.email));
+      await this.auth.passwordFinish({ session_id: started.session_id, record: b64u(record), kdf, keyset: wrapped });
+      await this.cacheProfile(session.userId, { kdf, keyset: wrapped });
+    } finally {
+      if (keyset) wipeKeyset(keyset);
+      if (auk) wipe(auk);
+      wipe(sk);
+    }
+  }
+
+  /** The Secret Key kept on this device, to download the Emergency Kit again. Needs the account unlocked. */
+  async secretKey(): Promise<string | null> {
+    this.requireKeyset();
+    const session = await this.tokens.load();
+    return session ? this.storage.get(this.skKey(session.email)) : null;
+  }
+
+  /**
+   * A one-time link (valid 60 seconds) that signs the browser in to the auth website and opens `next`,
+   * a path there such as `/settings` (SPEC.md §16).
+   */
+  async webSessionUrl(next?: string): Promise<string> {
+    const { code } = await this.auth.createWebSession();
+    const url = new URL("session/claim", this.config.issuer.replace(/\/?$/, "/"));
+    url.searchParams.set("code", code);
+    if (next) url.searchParams.set("next", next);
+    return url.toString();
   }
 
   /**
