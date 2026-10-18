@@ -121,6 +121,38 @@ describe("Account.login with TOTP", () => {
   });
 });
 
+describe("AccountVault.sync with no local edits", () => {
+  it("checks with a HEAD and skips the download when the ETag still matches", async () => {
+    const { sync, fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    const { secretKey } = await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    const vault = await alice.createVault("Infra");
+    expect(vault.etag).toMatch(/.+/);
+    const before = sync.calls.length;
+    const result = await vault.sync({ localChanged: false });
+    expect(result.outcome).toBe("unchanged");
+    expect(sync.calls.slice(before).map((c) => c.method)).toEqual(["HEAD"]);
+
+    // another device changed it: the HEAD misses, so it downloads
+    const other = await Account.connect({ issuer: ISSUER, fetch, device: { name: "cli", platform: "cli" } });
+    await other.login({ email: "alice@example.com", password: "pw", secretKey });
+    const theirs = await other.openVault(vault.id);
+    addEntry(theirs.db!, "New", { Password: "x" }, 2000);
+    await theirs.sync();
+    const mark = sync.calls.length;
+    await vault.sync({ localChanged: false });
+    expect(sync.calls.slice(mark).map((c) => c.method)).toContain("GET");
+    // a pull doesn't upload (no spurious Recycle Bin time change), and the next full sync doesn't take
+    // the server for a rollback (the merge's generation bump never reached it)
+    expect(sync.calls.slice(mark).map((c) => c.method)).not.toContain("PUT");
+    expect(vault.etag).toBe(theirs.etag);
+    const mark2 = sync.calls.length;
+    expect((await vault.sync()).outcome).toBe("pulled");
+    expect((await theirs.sync()).outcome).toBe("pulled");
+    expect(sync.calls.slice(mark2).map((c) => c.method)).not.toContain("PUT");
+  });
+});
+
 describe("Org members", () => {
   it("confirm with chosen vaults → promote to admin → remove and rotate", async () => {
     const { auth, fetch } = servers();

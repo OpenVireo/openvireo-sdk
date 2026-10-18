@@ -579,8 +579,16 @@ export class AccountVault {
     return this.info.name;
   }
 
-  /** Downloads, merges local edits and uploads them (conditional PUT, merge and retry on 412). */
-  async sync(opts: { rekeyTo?: Uint8Array } = {}): Promise<SyncResult> {
+  /** The server ETag at the last sync (compare with a `vault` event's etag), or undefined before one. */
+  get etag(): string | undefined {
+    return this.state?.etag;
+  }
+
+  /**
+   * Downloads, merges local edits and uploads them (conditional PUT, merge and retry on 412). With
+   * `localChanged: false` it first asks the server with a HEAD and stops there when nothing changed.
+   */
+  async sync(opts: { rekeyTo?: Uint8Array; localChanged?: boolean } = {}): Promise<SyncResult> {
     if (this.state === undefined) this.state = await this.account.loadState(this.id);
     const keys = [...this.keys()].sort((a, b) => b.version - a.version);
     const credentials = keys.map((k) => vaultCredentials(k.key));
@@ -599,6 +607,7 @@ export class AccountVault {
       db,
       credentials,
       state: this.state,
+      localChanged: opts.localChanged,
       beforeUpload: opts.rekeyTo ? (d) => rekeyToVaultKey(d, opts.rekeyTo!) : undefined,
     });
     this.db = result.db;
