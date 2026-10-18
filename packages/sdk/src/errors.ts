@@ -19,6 +19,7 @@ export type KpxErrorCode =
   | "rate_limited"
   | "mfa_required"
   | "invalid_mfa"
+  | "mfa_expired"
   | "session_expired"
   | "token_reused"
   | "precondition_failed"

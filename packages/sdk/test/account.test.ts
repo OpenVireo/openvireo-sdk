@@ -116,7 +116,7 @@ describe("Account.login with TOTP", () => {
   it("ends the login once the server drops the token after the 5th wrong code", async () => {
     const { device, secretKey } = await aliceWithTotp();
     let asked = 0;
-    await expect(device.login({ ...login, secretKey, totp: async () => (++asked, "000000") })).rejects.toMatchObject({ code: "unauthorized" });
+    await expect(device.login({ ...login, secretKey, totp: async () => (++asked, "000000") })).rejects.toMatchObject({ code: "mfa_expired", status: 401 });
     expect(asked).toBe(6);
   });
 });

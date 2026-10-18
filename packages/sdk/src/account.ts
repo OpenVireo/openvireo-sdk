@@ -166,16 +166,23 @@ export class Account {
     if (isMfaChallenge(res)) {
       if (!p.totp) throw new KpxError("mfa_required", "a TOTP code is required");
       const mfaToken = res.mfa_token;
-      // SPEC.md §8: a wrong code (invalid_mfa) keeps the token, so a prompt is asked again; any other
-      // error (the 5th wrong code drops the token) ends the login
+      // SPEC.md §8: a wrong code (invalid_mfa) keeps the token, so a prompt is asked again; once the
+      // token is gone (the 5th wrong code, or it expired) the login fails with mfa_expired
       for (let attempt = 1, error: KpxError | undefined; ; attempt++) {
         const code = typeof p.totp === "string" ? p.totp : await p.totp({ attempt, error });
         try {
           res = await this.auth.loginMfa({ mfa_token: mfaToken, totp: code });
           break;
         } catch (e) {
-          if (typeof p.totp === "string" || !(e instanceof KpxError) || e.code !== "invalid_mfa") throw e;
-          error = e;
+          if (e instanceof KpxError && e.code === "invalid_mfa" && typeof p.totp !== "string") {
+            error = e;
+            continue;
+          }
+          // The server dropped the MFA token (5th wrong code, or it expired): sign-in starts over
+          if (e instanceof KpxError && e.code !== "invalid_mfa" && (e.status === 401 || e.status === 410)) {
+            throw new KpxError("mfa_expired", "the sign-in expired or the code was wrong too often; sign in again", e.status, { cause: e });
+          }
+          throw e;
         }
       }
     }
