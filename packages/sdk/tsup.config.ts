@@ -10,6 +10,7 @@ export default defineConfig({
     "sync/index": "src/sync/index.ts",
     "vault/index": "src/vault/index.ts",
     "merge/index": "src/merge/index.ts",
+    "testing/index": "src/testing/index.ts",
   },
   format: ["esm"],
   target: "es2022",
