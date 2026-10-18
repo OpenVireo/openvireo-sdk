@@ -113,6 +113,11 @@ export interface Grant {
   sealed_key: string;
 }
 
+/** A Grant that names its vault, for routes that grant several vaults at once (member confirmation) */
+export interface VaultGrant extends Grant {
+  vault_id: string;
+}
+
 export interface SaMasterGrant {
   sa_id: string;
   principal: Principal;

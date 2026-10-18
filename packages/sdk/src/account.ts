@@ -6,7 +6,7 @@ import { KpxError } from "./errors.js";
 import { AuthClient, discover } from "./auth/client.js";
 import { MemoryStorage, NamespacedStorage, type KeyValueStorage } from "./auth/storage.js";
 import { TokenManager, type SignedOutReason } from "./auth/token-manager.js";
-import { type DeviceInfo, type Grant, type KpxConfiguration, type Principal, type Session, type Vault, type VaultRole, isMfaChallenge } from "./auth/types.js";
+import { type DeviceInfo, type Grant, type KpxConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type Vault, type VaultGrant, type VaultRole, isMfaChallenge } from "./auth/types.js";
 import type { HttpOptions } from "./http/request.js";
 import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
 import { sealSaMaster, sealVaultKey, unsealSaMaster, unsealVaultKey } from "./crypto/envelope.js";
@@ -21,6 +21,8 @@ import { type EventStream, type SyncEvent, subscribeEvents } from "./sync/events
 import { type SyncResult, type SyncState, deserializeSyncState, serializeSyncState, syncKdbx } from "./sync/engine.js";
 import { type Kdbx, type KeyVersion, createVaultKdbx, rekeyToVaultKey, vaultCredentials } from "./vault/kdbx.js";
 import { parseReference, readField, writeField, type SecretReference } from "./vault/reference.js";
+
+const isManager = (role: OrgRole) => role === "owner" || role === "admin";
 
 /** Asks for a TOTP code; asked again with the previous `invalid_mfa` error after a wrong code. */
 export type TotpPrompt = (ctx: { attempt: number; error?: KpxError }) => Promise<string>;
@@ -433,6 +435,91 @@ export class Account {
     } finally {
       wipe(master);
     }
+  }
+
+  // --------------------------------------------------------------------------------------- orgs
+
+  /**
+   * Confirms an accepted member (owner/admin) after checking their key signature. Owners and admins
+   * get every org vault this account manages, with manage, and the org's SA master keys; a member
+   * gets the vaults in `vaults` only.
+   */
+  async confirmMember(orgId: string, member: Member, vaults: { id: string; role: VaultRole }[] = []): Promise<Member> {
+    if (!member.public) throw new KpxError("invalid_request", "this member has no public keys yet", 400);
+    const pub = trustedPublicKeys(member.public);
+    const principal: Principal = `user:${member.user_id}`;
+    const manager = isManager(member.role);
+    const chosen = manager ? (await this.managedOrgVaults(orgId)).map((v) => ({ id: v.id, role: "manage" as VaultRole })) : vaults;
+    const grants: VaultGrant[] = [];
+    for (const g of chosen) {
+      const e = await this.entry(g.id);
+      if (e.info.orgId !== orgId) throw new KpxError("invalid_request", `vault ${g.id} is not a vault of this org`, 400);
+      const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
+      if (!current) throw new KpxError("no_vault_key", `no current key for vault ${g.id}`);
+      grants.push({ vault_id: g.id, principal, role: g.role, key_version: current.version, sealed_key: b64u(sealVaultKey(pub.encPk, g.id, current.key)) });
+    }
+    return this.auth.confirmMember(orgId, member.user_id, {
+      grants,
+      sa_master_keys: manager ? await this.sealSaMasterKeys(orgId, principal, pub.encPk) : undefined,
+    });
+  }
+
+  /**
+   * Changes a member's org role. Promoting a confirmed member to owner/admin also hands over the SA
+   * master keys and manage on every org vault this account manages; the server drops their master
+   * keys on a demotion to member.
+   */
+  async setMemberRole(orgId: string, member: Member, role: OrgRole): Promise<Member> {
+    const principal: Principal = `user:${member.user_id}`;
+    const promote = isManager(role) && member.status === "confirmed" && !!member.public;
+    const pub = promote ? trustedPublicKeys(member.public!) : null;
+    const updated = await this.auth.setMemberRole(orgId, member.user_id, {
+      role,
+      sa_master_keys: pub ? await this.sealSaMasterKeys(orgId, principal, pub.encPk) : undefined,
+    });
+    if (pub) for (const v of await this.managedOrgVaults(orgId)) await this.share(v.id, { principal }, "manage");
+    return updated;
+  }
+
+  /**
+   * Removes a member, then rotates every org vault the server flagged (rotation_required) that this
+   * account manages, so the old key opens nothing new. Failed rotations are returned, not thrown.
+   */
+  async removeMember(orgId: string, userId: string): Promise<{ rotated: string[]; failed: { id: string; error: unknown }[] }> {
+    await this.auth.removeMember(orgId, userId);
+    const rotated: string[] = [];
+    const failed: { id: string; error: unknown }[] = [];
+    for (const v of await this.listVaults()) {
+      if (v.orgId !== orgId || !v.rotationRequired || v.role !== "manage") continue;
+      try {
+        await this.rotate(v.id);
+        rotated.push(v.id);
+      } catch (error) {
+        failed.push({ id: v.id, error });
+      }
+    }
+    return { rotated, failed };
+  }
+
+  private async managedOrgVaults(orgId: string): Promise<VaultInfo[]> {
+    return (await this.listVaults()).filter((v) => v.orgId === orgId && v.role === "manage");
+  }
+
+  /** Seals every SA master key of the org that this account holds to another owner/admin. */
+  private async sealSaMasterKeys(orgId: string, principal: Principal, encPk: Uint8Array): Promise<SaMasterGrant[]> {
+    const { service_accounts } = await this.auth.listServiceAccounts(orgId);
+    const grants: SaMasterGrant[] = [];
+    for (const listed of service_accounts) {
+      const sa = listed.master_key ? listed : await this.auth.getServiceAccount(listed.id);
+      if (!sa.master_key) continue;
+      const master = unsealSaMaster(this.requireKeyset().encSk, sa.id, fromB64u(sa.master_key));
+      try {
+        grants.push({ sa_id: sa.id, principal, sealed_key: b64u(sealSaMaster(encPk, sa.id, master)) });
+      } finally {
+        wipe(master);
+      }
+    }
+    return grants;
   }
 
   // ------------------------------------------------------------------------------------- events

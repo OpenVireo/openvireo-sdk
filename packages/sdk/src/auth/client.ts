@@ -26,6 +26,7 @@ import type {
   TokenPair,
   Vault,
   VaultAccess,
+  VaultGrant,
   WrappedKeysetJson,
 } from "./types.js";
 
@@ -178,7 +179,7 @@ export class AuthClient {
   removeMember(org: string, user: string) {
     return this.authed<void>("DELETE", `orgs/${seg(org)}/members/${seg(user)}`);
   }
-  confirmMember(org: string, user: string, body: { grants?: Grant[]; sa_master_keys?: SaMasterGrant[] }) {
+  confirmMember(org: string, user: string, body: { grants?: VaultGrant[]; sa_master_keys?: SaMasterGrant[] }) {
     return this.authed<Member>("POST", `orgs/${seg(org)}/members/${seg(user)}/confirm`, body);
   }
   listInvitations(org: string) {
