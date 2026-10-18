@@ -147,6 +147,47 @@ describe("Account settings (SPEC.md §16)", () => {
     expect(resumed.email).toBe("alice@example.com");
   });
 
+  it("changes the email: the new one signs in, keys and vaults stay, other devices follow", async () => {
+    const { auth, fetch } = servers();
+    const storage = new MemoryStorage();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, storage, device: { name: "web", platform: "web" } });
+    const { secretKey } = await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    const vault = await alice.createVault("Personal");
+    await vault.sync();
+    // a second device that stays signed in
+    const laptopStorage = new MemoryStorage();
+    const laptop = await Account.connect({ issuer: ISSUER, fetch, storage: laptopStorage, device: { name: "cli", platform: "cli" } });
+    await laptop.login({ email: "alice@example.com", password: "pw", secretKey });
+
+    await expect(alice.requestEmailChange("alice@example.com")).rejects.toMatchObject({ status: 409 });
+    await alice.requestEmailChange("Alice@New.example");
+    const { code } = auth.emailCodes.get(alice.userId!)!;
+    // a wrong password is caught before anything is sent
+    await expect(alice.changeEmail({ email: "alice@new.example", code, password: "nope" })).rejects.toMatchObject({ code: "unauthorized" });
+    expect(auth.users.has("alice@new.example")).toBe(false);
+    await expect(alice.changeEmail({ email: "alice@new.example", code: "00000000", password: "pw" })).rejects.toMatchObject({ code: "invalid_code" });
+    await alice.changeEmail({ email: "alice@new.example", code, password: "pw" });
+    expect(alice.email).toBe("alice@new.example");
+    expect(await alice.secretKey()).toBe(secretKey);
+
+    // a fresh device signs in with the new email
+    const phone = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await phone.login({ email: "alice@new.example", password: "pw", secretKey });
+    expect(phone.fingerprint).toBe(alice.fingerprint);
+    expect((await phone.openVault(vault.id)).id).toBe(vault.id);
+
+    // the laptop follows on its next unlock, without asking for the Secret Key again
+    laptop.lock();
+    const resumed = await Account.connect({ issuer: ISSUER, fetch, storage: laptopStorage, device: { name: "cli", platform: "cli" } });
+    await resumed.unlock("pw");
+    expect(resumed.email).toBe("alice@new.example");
+    resumed.lock();
+    await resumed.logout();
+    const again = await Account.connect({ issuer: ISSUER, fetch, storage: laptopStorage, device: { name: "cli", platform: "cli" } });
+    await again.login({ email: "alice@new.example", password: "pw" });
+    expect(again.unlocked).toBe(true);
+  });
+
   it("makes a one-time link to the auth website", async () => {
     const { fetch } = servers();
     const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });

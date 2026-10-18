@@ -60,6 +60,13 @@ export class TokenManager {
     await this.opts.storage.set(this.key, JSON.stringify(session));
   }
 
+  /** Changes fields of the stored session, e.g. the email after it changed (SPEC §16). */
+  async update(patch: Partial<Omit<StoredSession, "userId">>): Promise<void> {
+    if (!this.session) return;
+    this.session = { ...this.session, ...patch };
+    await this.opts.storage.set(this.key, JSON.stringify(this.session));
+  }
+
   private setAccess(token: string, expiresIn: number) {
     let expiresAt = this.now() + expiresIn * 1000;
     try {

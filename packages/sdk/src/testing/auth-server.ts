@@ -30,6 +30,8 @@ export class FakeAuthServer extends MockServer {
   /** email → TOTP code; those users get an MFA challenge (SPEC.md §8) */
   totp = new Map<string, string>();
   mfa = new Map<string, { email: string; wrong: number }>();
+  /** user id → the pending email change and its mailed code (SPEC.md §16) */
+  emailCodes = new Map<string, { email: string; code: string }>();
   onToken: (t: string) => void = () => {};
 
   private issue(principal: string) {
@@ -157,6 +159,32 @@ export class FakeAuthServer extends MockServer {
       const pub = (k: any) => [k.enc_pk, k.sign_pk, k.sig].join();
       if (pub(req.json.keyset) !== pub(u.keyset)) return json(400, { error: "keyset must keep the same public keys", code: "invalid_request" });
       Object.assign(u, { rec: await OS.storeRecord(s.sec, fromB64u(req.json.record)), kdf: req.json.kdf, keyset: req.json.keyset });
+      return new Response(null, { status: 204 });
+    }));
+    this.on("POST", P + "me/email", A((req, _p, pr) => {
+      const email = String(req.json.email).trim().toLowerCase();
+      if (this.users.has(email)) return json(409, { error: "Another account uses this email", code: "conflict" });
+      const code = String(Math.floor(Math.random() * 1e8)).padStart(8, "0");
+      this.emailCodes.set(pr.split(":")[1]!, { email, code });
+      return json(202, { expires_in: 1800 });
+    }));
+    this.on("POST", P + "me/email/start", A(async (req, _p, pr) => {
+      const pending = this.emailCodes.get(pr.split(":")[1]!);
+      if (!pending || pending.email !== String(req.json.email).trim().toLowerCase()) return json(410, { error: "Ask for a new code", code: "session_expired" });
+      if (pending.code !== req.json.code) return json(400, { error: "The code is incorrect", code: "invalid_code" });
+      this.emailCodes.delete(pr.split(":")[1]!);
+      const { sec, response } = await OS.registrationResponse(fromB64u(req.json.request));
+      const sid = randomUuid();
+      this.sessions.set(sid, { sec, principal: pr, email: pending.email });
+      return json(200, { session_id: sid, response: b64u(response) });
+    }));
+    this.on("POST", P + "me/email/finish", A(async (req, _p, pr) => {
+      const s = this.sessions.get(req.json.session_id);
+      if (!s || s.principal !== pr) return json(410, { error: "expired", code: "session_expired" });
+      const u = this.userById(pr.split(":")[1]!);
+      this.users.delete(u.email);
+      Object.assign(u, { rec: await OS.storeRecord(s.sec, fromB64u(req.json.record)), email: s.email });
+      this.users.set(u.email, u);
       return new Response(null, { status: 204 });
     }));
     this.on("POST", P + "me/web-session", A(() => json(200, { code: `kpx_ws_${randomUuid()}`, expires_in: 60 })));
