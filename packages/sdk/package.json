@@ -10,6 +10,11 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "browser": {
+    "fs": false,
+    "path": false,
+    "crypto": false
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
