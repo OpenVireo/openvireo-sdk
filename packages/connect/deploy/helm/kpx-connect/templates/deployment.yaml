@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kpx-connect.fullname" . }}
+  labels: {{- include "kpx-connect.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "kpx-connect.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "kpx-connect.selector" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ printf "%s%s" .Values.serviceAccountToken (toJson .Values.connectTokens) | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: kpx-connect
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: KPX_CONNECT_HOST, value: "0.0.0.0" }
+            - { name: KPX_CONNECT_PORT, value: "8080" }
+            - { name: KPX_CONNECT_CACHE_TTL, value: {{ .Values.cacheTtlSeconds | quote }} }
+            - { name: KPX_SERVICE_ACCOUNT_TOKEN_FILE, value: /etc/kpx/sa-token }
+            - { name: KPX_CONNECT_TOKENS_FILE, value: /etc/kpx/tokens.json }
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: config, mountPath: /etc/kpx, readOnly: true }
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "kpx-connect.secret" . }}
+            defaultMode: 0400
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kpx-connect.fullname" . }}
+  labels: {{- include "kpx-connect.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "kpx-connect.selector" . | nindent 4 }}
+  ports:
+    - { name: http, port: {{ .Values.service.port }}, targetPort: http }

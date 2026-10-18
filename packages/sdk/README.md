@@ -72,6 +72,20 @@ sa.close();
 
 References are `kpx://<vault id or name>/[<group>/…]<entry uuid or title>/<field>`, percent-encoded.
 
+For long-running processes and whole entries (used by `kpx connect` and `kpx item`):
+
+```ts
+import { ServiceAccount, findEntry, itemOf, listItems, parseItemReference, setItemFields } from "@kpnx/sdk";
+
+const db = await sa.pull("Team Infra");             // HEAD with the last ETag; downloads only if changed
+listItems(db);                                      // [{id, title, group, fields: {}, protected, …}] without values
+itemOf(findEntry(db, parseItemReference("kpx://Team%20Infra/Deploy/Database")), { reveal: true });
+
+// any change, then the conditional PUT with merge/retry; one edit per vault at a time, and a failed
+// upload drops the cached copy. A `read` grant throws KpxError("forbidden") before anything is sent.
+await sa.edit("Team Infra", (db) => setItemFields(db, { groupPath: ["Apps"], entry: "Api" }, { username: "svc", token }, { create: true }));
+```
+
 ## Self-hosted sync server (no account)
 
 ```ts
