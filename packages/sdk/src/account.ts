@@ -2,11 +2,11 @@
  * High-level API for a KeePassXC account (hosted mode): register, log in, unlock/lock, list and open
  * vaults, share, revoke (with key rotation), and create service accounts.
  */
-import { KpxError } from "./errors.js";
+import { KpxError, isUnreachable } from "./errors.js";
 import { AuthClient, discover } from "./auth/client.js";
 import { MemoryStorage, NamespacedStorage, type KeyValueStorage } from "./auth/storage.js";
 import { TokenManager, type SignedOutReason } from "./auth/token-manager.js";
-import { type DeviceInfo, type Grant, type KpxConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type Vault, type VaultGrant, type VaultRole, isMfaChallenge } from "./auth/types.js";
+import { type DeviceInfo, type Grant, type KpxConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
 import type { HttpOptions } from "./http/request.js";
 import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
 import { sealSaMaster, sealVaultKey, unsealSaMaster, unsealVaultKey } from "./crypto/envelope.js";
@@ -19,7 +19,7 @@ import { finishLogin, finishRegistration, opaqueIds, startLogin, startRegistrati
 import { SyncClient } from "./sync/client.js";
 import { type EventStream, type SyncEvent, subscribeEvents } from "./sync/events.js";
 import { type SyncResult, type SyncState, deserializeSyncState, serializeSyncState, syncKdbx } from "./sync/engine.js";
-import { type Kdbx, type KeyVersion, createVaultKdbx, rekeyToVaultKey, vaultCredentials } from "./vault/kdbx.js";
+import { type Kdbx, type KeyVersion, copyKdbx, createVaultKdbx, dropServerRemotes, openWithKeyVersions, rekeyToVaultKey, saveKdbx, vaultCredentials } from "./vault/kdbx.js";
 import { parseReference, readField, writeField, type SecretReference } from "./vault/reference.js";
 
 const isManager = (role: OrgRole) => role === "owner" || role === "admin";
@@ -35,6 +35,40 @@ export interface AccountOptions extends HttpOptions {
   storage?: KeyValueStorage;
   /** skip discovery (tests) */
   config?: KpxConfiguration;
+  /**
+   * Keep what this device needs to unlock and open vaults without the network, all of it in
+   * `storage` and none of it in clear: the discovery document, the wrapped keyset and KDF params, the
+   * vault list as GET /vaults returned it (encrypted names, sealed keys), and per vault the sync
+   * state (whose base copy is the server's encrypted .kdbx) plus local edits not yet uploaded, as a
+   * .kdbx encrypted with the vault key. When a server can't be reached, `connect`, `unlock`,
+   * `listVaults` and `openVault` fall back to it and `offline` turns true; `reconnect` goes back
+   * online. Vaults no longer listed once online, and everything on sign-out, are dropped.
+   */
+  offline?: boolean;
+}
+
+/** The parts of a user's account record that unlocking needs (cached for offline unlock). */
+interface Profile {
+  kdf: Session["kdf"];
+  keyset: WrappedKeysetJson;
+}
+
+/** Storage keys of the offline cache (the sync state keys are `sync:<vault id>`, as before). */
+const OFFLINE = {
+  config: (issuer: string) => `offline:config:${issuer.replace(/\/+$/, "")}`,
+  profile: (userId: string) => `offline:profile:${userId}`,
+  vaults: (userId: string) => `offline:vaults:${userId}`,
+  pending: (vaultId: string) => `sync:${vaultId}:pending`,
+};
+
+/** Thrown by `importVault` when the vault was created but its first upload failed; `vault.sync()` retries it. */
+export class VaultUploadError extends KpxError {
+  constructor(
+    readonly vault: AccountVault,
+    cause: unknown,
+  ) {
+    super("vault_upload_failed", `the vault was created, but its first upload failed: ${(cause as Error)?.message ?? cause}`, (cause as KpxError)?.status, { cause });
+  }
 }
 
 export interface VaultInfo {
@@ -62,6 +96,9 @@ export class Account {
   private keyset: Keyset | null = null;
   private vaults = new Map<string, VaultEntry>();
   private readonly storage: KeyValueStorage;
+  private _offline = false;
+  // The user whose offline cache to drop when the session ends (the session is gone by then)
+  private cacheUser: string | undefined;
 
   private constructor(
     readonly config: KpxConfiguration,
@@ -72,14 +109,44 @@ export class Account {
     this.tokens = new TokenManager({ storage: new NamespacedStorage(this.storage, "kpx:"), refresh: (rt) => base.refresh(rt) });
     this.auth = base.withTokens(this.tokens);
     this.sync = new SyncClient({ ...opts, baseUrl: config.sync, token: this.tokens });
+    this.tokens.onSignedOut(() => {
+      const user = this.cacheUser;
+      this.cacheUser = undefined;
+      if (user) void this.clearOfflineData(user, [...this.vaults.keys()]).catch(() => undefined);
+    });
   }
 
-  /** Discovers the server and loads a stored session, if any (signed in but locked). */
+  /**
+   * Discovers the server and loads a stored session, if any (signed in but locked). With `offline`,
+   * an unreachable server falls back to the discovery document from the last successful connect.
+   */
   static async connect(opts: AccountOptions): Promise<Account> {
-    const config = opts.config ?? (await discover(opts.issuer, opts));
+    let config = opts.config;
+    let offline = false;
+    if (!config) {
+      const key = OFFLINE.config(opts.issuer);
+      try {
+        config = await discover(opts.issuer, opts);
+        if (opts.offline && opts.storage) await opts.storage.set(key, JSON.stringify(config));
+      } catch (e) {
+        const cached = opts.offline && isUnreachable(e) ? await opts.storage?.get(key) : null;
+        if (!cached) throw e;
+        config = JSON.parse(cached) as KpxConfiguration;
+        offline = true;
+      }
+    }
     const acct = new Account(config, opts);
-    await acct.tokens.load();
+    acct._offline = offline;
+    acct.cacheUser = (await acct.tokens.load())?.userId;
     return acct;
+  }
+
+  /**
+   * True while the servers can't be reached and this account works from the offline cache (only with
+   * the `offline` option). Edits are kept and upload once a sync succeeds again.
+   */
+  get offline(): boolean {
+    return this._offline;
   }
 
   get signedIn(): boolean {
@@ -123,14 +190,16 @@ export class Account {
     const auk = await deriveAuk(p.password, kdf, sk, { kdfMin: this.config.kdf_min });
     const keyset = generateKeyset();
     try {
+      const wrapped = wrapKeyset(auk, keyset);
       const session = await this.auth.registerFinish({
         session_id: started.session_id,
         record: b64u(record),
         kdf,
-        keyset: wrapKeyset(auk, keyset),
+        keyset: wrapped,
         device: this.opts.device,
       });
       await this.begin(p.email, session, sk, p.trustDevice ?? true);
+      await this.cacheProfile(session.user.id, { kdf, keyset: wrapped });
       this.keyset = keyset;
       return { secretKey: formatSecretKey(sk), userId: session.user.id };
     } catch (e) {
@@ -189,6 +258,8 @@ export class Account {
     try {
       await this.unlockWith(p.password, res.kdf, res.keyset, sk);
       await this.begin(p.email, res, sk, p.trustDevice ?? true);
+      await this.cacheProfile(res.user.id, { kdf: res.kdf, keyset: res.keyset });
+      this._offline = false;
     } finally {
       wipe(sk);
     }
@@ -196,6 +267,7 @@ export class Account {
 
   private async begin(email: string, s: Session, sk: Uint8Array, trust: boolean) {
     await this.tokens.start({ issuer: this.config.issuer, userId: s.user.id, email: s.user.email ?? email, deviceId: s.device_id, refreshToken: s.refresh_token }, s.access_token, s.expires_in);
+    this.cacheUser = s.user.id;
     await this.storage.set(this.devKey(email), s.device_id);
     if (trust) await this.storage.set(this.skKey(email), formatSecretKey(sk));
   }
@@ -213,19 +285,49 @@ export class Account {
     }
   }
 
-  /** Unlocks a signed-in (resumed) session with the master password; no OPAQUE round trip needed. */
+  /**
+   * Unlocks a signed-in (resumed) session with the master password; no OPAQUE round trip needed. With
+   * `offline`, an unreachable server falls back to the wrapped keyset cached at the last sign-in or
+   * unlock, so the password and Secret Key still have to be right.
+   */
   async unlock(password: string, secretKey?: string): Promise<void> {
     const session = await this.tokens.load();
     if (!session) throw new KpxError("signed_out", "not signed in");
+    this.cacheUser = session.userId;
     const skText = secretKey ?? (await this.storage.get(this.skKey(session.email)));
     if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
     const sk = parseSecretKey(skText);
     try {
-      const me = await this.auth.me();
-      await this.unlockWith(password, me.kdf, me.keyset, sk);
+      let profile: Profile;
+      let offline = false;
+      try {
+        const me = await this.auth.me();
+        profile = { kdf: me.kdf, keyset: me.keyset };
+      } catch (e) {
+        const cached = isUnreachable(e) ? await this.cachedProfile(session.userId) : null;
+        if (!cached) throw e;
+        profile = cached;
+        offline = true;
+      }
+      await this.unlockWith(password, profile.kdf, profile.keyset, sk);
+      if (!offline) await this.cacheProfile(session.userId, profile);
+      this._offline = offline;
     } finally {
       wipe(sk);
     }
+  }
+
+  /**
+   * Goes back online after working from the offline cache: re-reads the account record and the vault
+   * list. Vaults that are no longer listed (access revoked or the vault deleted meanwhile) are
+   * forgotten with their local copies and returned in `dropped`. Throws while still unreachable.
+   */
+  async reconnect(): Promise<{ vaults: VaultInfo[]; dropped: string[] }> {
+    const session = await this.tokens.load();
+    if (!session) throw new KpxError("signed_out", "not signed in");
+    const me = await this.auth.me();
+    await this.cacheProfile(session.userId, { kdf: me.kdf, keyset: me.keyset });
+    return this.loadVaultList();
   }
 
   /** Clears private keys and vault keys from memory (best effort). */
@@ -239,12 +341,19 @@ export class Account {
   /** Revokes this device's session on the server and forgets it locally (the trusted Secret Key stays unless `forgetDevice`). */
   async logout(opts: { forgetDevice?: boolean } = {}): Promise<void> {
     const email = this.tokens.current?.email;
+    const user = this.tokens.current?.userId;
     try {
       await this.auth.logout();
     } catch {
       /* best effort */
     }
+    const known = [...this.vaults.keys()];
     this.lock();
+    // The offline cache goes with the session (vault copies, wrapped keyset, vault list)
+    this.cacheUser = undefined;
+    if (user) await this.clearOfflineData(user, known);
+    this.vaults.clear();
+    this._offline = false;
     await this.tokens.clear("logout");
     if (opts.forgetDevice && email) {
       await this.storage.delete(this.skKey(email));
@@ -297,23 +406,71 @@ export class Account {
     return entry;
   }
 
-  /** GET /vaults: every vault this account can open, with names decrypted. */
+  /**
+   * GET /vaults: every vault this account can open, with names decrypted. With `offline`, an
+   * unreachable server falls back to the list from the last successful call.
+   */
   async listVaults(): Promise<VaultInfo[]> {
-    const { vaults } = await this.auth.listVaults();
+    return (await this.loadVaultList()).vaults;
+  }
+
+  private async loadVaultList(): Promise<{ vaults: VaultInfo[]; dropped: string[] }> {
+    let vaults: Vault[];
+    try {
+      ({ vaults } = await this.auth.listVaults());
+    } catch (e) {
+      const cached = isUnreachable(e) ? await this.cachedVaults() : null;
+      if (!cached) throw e;
+      this._offline = true;
+      return { vaults: cached.map((v) => this.ingest(v).info), dropped: [] };
+    }
+    this._offline = false;
     const seen = new Set(vaults.map((v) => v.id));
-    for (const id of [...this.vaults.keys()]) if (!seen.has(id)) this.vaults.delete(id);
-    return vaults.map((v) => this.ingest(v).info);
+    const known = new Set([...this.vaults.keys(), ...((await this.cachedVaults()) ?? []).map((v) => v.id)]);
+    const dropped = [...known].filter((id) => !seen.has(id));
+    for (const id of dropped) {
+      for (const k of this.vaults.get(id)?.keys ?? []) wipe(k.key);
+      this.vaults.delete(id);
+    }
+    if (this.opts.offline) {
+      // What this device kept for a vault it can no longer open goes with it
+      for (const id of dropped) await this.forgetVaultData(id);
+      if (this.tokens.current) await this.storage.set(OFFLINE.vaults(this.tokens.current.userId), JSON.stringify(vaults));
+    }
+    return { vaults: vaults.map((v) => this.ingest(v).info), dropped };
   }
 
   private async entry(vaultId: string): Promise<VaultEntry> {
-    return this.vaults.get(vaultId) ?? this.ingest(await this.auth.getVault(vaultId));
+    const known = this.vaults.get(vaultId);
+    if (known) return known;
+    try {
+      const v = await this.auth.getVault(vaultId);
+      await this.cacheVault(v);
+      return this.ingest(v);
+    } catch (e) {
+      const cached = isUnreachable(e) ? (await this.cachedVaults())?.find((v) => v.id === vaultId) : undefined;
+      if (!cached) throw e;
+      this._offline = true;
+      return this.ingest(cached);
+    }
   }
 
-  /** Opens a vault: downloads and decrypts it (newest key first). */
+  /**
+   * Opens a vault: downloads and decrypts it (newest key first). With `offline`, an unreachable server
+   * falls back to the copy this device kept (local edits not yet uploaded, else the server's copy at
+   * the last sync), and the vault's `offline` is true; a vault never synced here fails with
+   * `not_available_offline`.
+   */
   async openVault(vaultId: string): Promise<AccountVault> {
     const e = await this.entry(vaultId);
     const v = new AccountVault(this, e.info, () => this.vaults.get(vaultId)?.keys ?? e.keys);
-    await v.sync();
+    try {
+      await v.sync();
+    } catch (err) {
+      if (!this.opts.offline || !isUnreachable(err)) throw err;
+      await v.openLocalCopy(err);
+      this._offline = true;
+    }
     return v;
   }
 
@@ -324,26 +481,64 @@ export class Account {
 
   /** Creates a vault (personal, or in an org with `orgId`; owners/admins are sealed in automatically). */
   async createVault(name: string, opts: { orgId?: string } = {}): Promise<AccountVault> {
+    const { vault, key } = await this.registerVault(name, opts.orgId);
+    vault.db = createVaultKdbx(name, key);
+    await vault.sync();
+    return vault;
+  }
+
+  /**
+   * "Move to account": copies an open database (local, or synced with a self-hosted server), re-keys
+   * the copy to a fresh vault key, creates the vault (personal, or in an org this account manages,
+   * sealed to every confirmed owner and admin) and uploads it with `If-None-Match: *`. The original
+   * is never changed. As in Qt, the copy's root group takes the vault name (default: the root
+   * group's name) and its sync server remotes are dropped. If the vault was created but the upload
+   * failed, a VaultUploadError carries the vault, whose `sync()` uploads it later.
+   */
+  async importVault(source: Kdbx, opts: { name?: string; orgId?: string } = {}): Promise<AccountVault> {
+    this.requireKeyset();
+    const copy = await copyKdbx(source);
+    const root = copy.getDefaultGroup();
+    const name = opts.name?.trim() || root.name?.trim() || "Imported";
+    dropServerRemotes(copy);
+    const { vault, key } = await this.registerVault(name, opts.orgId);
+    try {
+      rekeyToVaultKey(copy, key);
+    } finally {
+      wipe(key);
+    }
+    root.name = name;
+    root.times.update();
+    vault.db = copy;
+    try {
+      await vault.sync();
+    } catch (e) {
+      throw new VaultUploadError(vault, e);
+    }
+    return vault;
+  }
+
+  /** POST /vaults with key version 1 sealed to this account (and an org's owners/admins); no blob yet. */
+  private async registerVault(name: string, orgId?: string): Promise<{ vault: AccountVault; key: Uint8Array }> {
     const ks = this.requireKeyset();
     const id = randomUuid();
     const key = randomBytes(32);
     const grants: Grant[] = [{ principal: this.principal, role: "manage", key_version: 1, sealed_key: b64u(sealVaultKey(ks.encPk, id, key)) }];
-    if (opts.orgId) {
-      const { members } = await this.auth.listMembers(opts.orgId);
+    if (orgId) {
+      const { members } = await this.auth.listMembers(orgId);
       for (const m of members) {
         const principal = `user:${m.user_id}`;
         if (principal === this.principal || (m.role !== "owner" && m.role !== "admin") || m.status !== "confirmed" || !m.public) continue;
         grants.push({ principal, role: "manage", key_version: 1, sealed_key: b64u(sealVaultKey(trustedPublicKeys(m.public).encPk, id, key)) });
       }
     }
-    const created = await this.auth.createVault({ id, org_id: opts.orgId ?? null, encrypted_name: encryptVaultName(key, id, name), grants });
-    const entry = this.ingest({ ...created, keys: created.keys?.length ? created.keys : [{ key_version: 1, sealed_key: grants[0]!.sealed_key }] });
+    const created = await this.auth.createVault({ id, org_id: orgId ?? null, encrypted_name: encryptVaultName(key, id, name), grants });
+    const listed: Vault = { ...created, keys: created.keys?.length ? created.keys : [{ key_version: 1, sealed_key: grants[0]!.sealed_key }] };
+    await this.cacheVault(listed);
+    const entry = this.ingest(listed);
     // The new vault is only in the next token's vlt claim
     await this.tokens.refreshNow();
-    const vault = new AccountVault(this, entry.info, () => this.vaults.get(id)?.keys ?? entry.keys);
-    vault.db = createVaultKdbx(name, key);
-    await vault.sync();
-    return vault;
+    return { vault: new AccountVault(this, entry.info, () => this.vaults.get(id)?.keys ?? entry.keys), key };
   }
 
   /** Grants (or changes) access: seals the current vault key to the grantee after checking their keys. */
@@ -389,6 +584,8 @@ export class Account {
     // The name is encrypted under the vault key too
     await this.auth.renameVault(vaultId, encryptVaultName(key, vaultId, e.info.name));
     e.info = { ...e.info, currentKeyVersion: version, pendingKeyVersion: null, rotationRequired: false };
+    // The cached vault list must hold the new sealed key, or the re-keyed copy won't open offline
+    if (this.opts.offline) await this.auth.getVault(vaultId).then((v) => this.cacheVault(v), () => undefined);
     return result;
   }
 
@@ -566,12 +763,74 @@ export class Account {
   async saveState(vaultId: string, state: SyncState): Promise<void> {
     await this.storage.set(`sync:${vaultId}`, serializeSyncState(state));
   }
+
+  // ------------------------------------------------------------------------------ offline cache
+
+  /** @internal whether the offline cache is on */
+  get keepsOfflineData(): boolean {
+    return !!this.opts.offline;
+  }
+
+  /** @internal local edits not yet uploaded: a .kdbx encrypted with the vault key */
+  async loadPending(vaultId: string): Promise<Uint8Array | null> {
+    if (!this.opts.offline) return null;
+    const raw = await this.storage.get(OFFLINE.pending(vaultId));
+    return raw ? fromB64u(raw) : null;
+  }
+  /** @internal */
+  async savePending(vaultId: string, data: Uint8Array): Promise<void> {
+    if (this.opts.offline) await this.storage.set(OFFLINE.pending(vaultId), b64u(data));
+  }
+  /** @internal */
+  async deletePending(vaultId: string): Promise<void> {
+    if (this.opts.offline) await this.storage.delete(OFFLINE.pending(vaultId));
+  }
+
+  private async forgetVaultData(vaultId: string): Promise<void> {
+    await this.storage.delete(`sync:${vaultId}`);
+    await this.storage.delete(OFFLINE.pending(vaultId));
+  }
+
+  private async cacheProfile(userId: string, profile: Profile): Promise<void> {
+    if (this.opts.offline) await this.storage.set(OFFLINE.profile(userId), JSON.stringify({ kdf: profile.kdf, keyset: profile.keyset }));
+  }
+  private async cachedProfile(userId: string): Promise<Profile | null> {
+    if (!this.opts.offline) return null;
+    const raw = await this.storage.get(OFFLINE.profile(userId));
+    return raw ? (JSON.parse(raw) as Profile) : null;
+  }
+  /** Adds or replaces one vault in the cached vault list (after create, rotation or GET /vaults/{id}). */
+  private async cacheVault(v: Vault): Promise<void> {
+    const userId = this.tokens.current?.userId;
+    if (!this.opts.offline || !userId) return;
+    const list = ((await this.cachedVaults()) ?? []).filter((x) => x.id !== v.id);
+    await this.storage.set(OFFLINE.vaults(userId), JSON.stringify([...list, v]));
+  }
+  private async cachedVaults(): Promise<Vault[] | null> {
+    const userId = this.tokens.current?.userId;
+    if (!this.opts.offline || !userId) return null;
+    const raw = await this.storage.get(OFFLINE.vaults(userId));
+    return raw ? (JSON.parse(raw) as Vault[]) : null;
+  }
+
+  /** Drops everything the offline cache holds for a user (on sign-out, or when the session is rejected). */
+  private async clearOfflineData(userId: string, known: string[] = []): Promise<void> {
+    if (!this.opts.offline) return;
+    const raw = await this.storage.get(OFFLINE.vaults(userId));
+    const ids = new Set([...known, ...(raw ? (JSON.parse(raw) as Vault[]) : []).map((v) => v.id)]);
+    for (const id of ids) await this.forgetVaultData(id);
+    await this.storage.delete(OFFLINE.vaults(userId));
+    await this.storage.delete(OFFLINE.profile(userId));
+  }
 }
 
 /** An opened account vault: a kdbxweb database kept in sync with `vaults/<id>`. */
 export class AccountVault {
   db: Kdbx | null = null;
+  /** true when the last sync couldn't reach the server (or the vault was opened from the offline cache) */
+  offline = false;
   private state: SyncState | null | undefined = undefined;
+  private hasPending = false;
 
   constructor(
     private readonly account: Account,
@@ -600,27 +859,74 @@ export class AccountVault {
     const keys = [...this.keys()].sort((a, b) => b.version - a.version);
     const credentials = keys.map((k) => vaultCredentials(k.key));
     const blob = this.account.sync.vault(this.id);
-    let db = this.db;
+    let db = this.db ?? (await this.openPending(keys));
     if (!db) {
       // Nothing local yet: the server copy becomes the working copy
-      const got = await blob.get();
+      const got = await blob.get().catch((e: unknown) => {
+        if (isUnreachable(e)) this.offline = true;
+        throw e;
+      });
       if (got.status !== 200) throw new KpxError("not_found", `vault ${this.id} has no data on the sync server`, 404);
-      const { openWithKeyVersions } = await import("./vault/kdbx.js");
       db = (await openWithKeyVersions(got.data, keys)).db;
-      this.db = db;
     }
-    const result = await syncKdbx({
-      blob,
-      db,
-      credentials,
-      state: this.state,
-      localChanged: opts.localChanged,
-      beforeUpload: opts.rekeyTo ? (d) => rekeyToVaultKey(d, opts.rekeyTo!) : undefined,
-    });
+    this.db = db;
+    let result: SyncResult;
+    try {
+      result = await syncKdbx({
+        blob,
+        db,
+        credentials,
+        state: this.state,
+        localChanged: opts.localChanged,
+        beforeUpload: opts.rekeyTo ? (d) => rekeyToVaultKey(d, opts.rekeyTo!) : undefined,
+      });
+    } catch (e) {
+      if (isUnreachable(e)) {
+        this.offline = true;
+        // Keep local edits on this device (encrypted with the vault key) until an upload succeeds
+        if (this.account.keepsOfflineData && (opts.localChanged !== false || this.hasPending)) {
+          await this.account.savePending(this.id, await saveKdbx(db));
+          this.hasPending = true;
+        }
+      }
+      throw e;
+    }
+    this.offline = false;
     this.db = result.db;
     this.state = result.state;
     await this.account.saveState(this.id, result.state);
+    if (this.hasPending) {
+      await this.account.deletePending(this.id);
+      this.hasPending = false;
+    }
     return result;
+  }
+
+  /** Local edits kept from an earlier session that couldn't upload them; they merge in on this sync. */
+  private async openPending(keys: KeyVersion[]): Promise<Kdbx | null> {
+    const pending = await this.account.loadPending(this.id);
+    if (!pending) return null;
+    this.hasPending = true;
+    try {
+      return (await openWithKeyVersions(pending, keys)).db;
+    } catch {
+      // Encrypted under a key this account no longer holds (rotated twice meanwhile): nothing to merge
+      return null;
+    }
+  }
+
+  /**
+   * @internal Offline open: local edits not yet uploaded (already loaded by `sync`), else the server's
+   * bytes at the last sync. `cause` is the network error to report when there is neither.
+   */
+  async openLocalCopy(cause: unknown): Promise<void> {
+    this.offline = true;
+    if (this.db) return;
+    const base = this.state?.base;
+    if (!base) {
+      throw new KpxError("not_available_offline", `vault "${this.name || this.id}" was never synced on this device, so it can't be opened offline`, undefined, { cause });
+    }
+    this.db = (await openWithKeyVersions(base, [...this.keys()])).db;
   }
 
   read(ref: string | Pick<SecretReference, "groupPath" | "entry" | "field">): string {
