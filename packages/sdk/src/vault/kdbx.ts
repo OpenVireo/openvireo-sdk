@@ -108,10 +108,56 @@ export function createVaultKdbx(name: string, vaultKey: Uint8Array): Kdbx {
   return db;
 }
 
-/** Re-keys a database to a new vault key (rotation, "Move to account"); the next save uses it. */
+/**
+ * Re-keys a database to a new vault key (rotation, "Move to account"); the next save uses it. A KDBX 3
+ * database is upgraded to KDBX 4 first, since vaults are KDBX 4 files with an Argon2id KDF (SPEC §7).
+ */
 export function rekeyToVaultKey(db: Kdbx, vaultKey: Uint8Array): void {
+  if (db.header.versionMajor < 4) db.upgrade();
   db.credentials = vaultCredentials(vaultKey)();
   applyVaultKdf(db);
+}
+
+/**
+ * A separate copy of an open database, with its unsaved changes and the same key, so changes to the
+ * copy (re-keying it, say) leave the original as it is. Costs one save and one load (two KDF runs).
+ */
+export async function copyKdbx(db: Kdbx): Promise<Kdbx> {
+  initKdbx();
+  const data = await db.save();
+  try {
+    return await kdbxweb.Kdbx.load(data, db.credentials);
+  } catch (e) {
+    mapError(e);
+  }
+}
+
+/** KeePassXC's remote sync settings in the database's custom data (Qt `CustomData::RemoteProgramSettings`). */
+export const REMOTE_SETTINGS_KEY = "KPXC_REMOTE_SYNC_SETTINGS";
+
+/**
+ * Drops the sync server and account vault remotes from KeePassXC's remote settings, keeping
+ * command-based ones, as Qt does when it moves a database to an account. A copy moved into a vault
+ * must not keep syncing to the self-hosted database it came from (it would upload a file under the
+ * vault key over the password-protected one).
+ */
+export function dropServerRemotes(db: Kdbx): void {
+  const raw = db.meta.customData.get(REMOTE_SETTINGS_KEY)?.value;
+  if (raw === undefined) return;
+  let kept: unknown[] = [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      kept = parsed.filter((r) => {
+        const type = (r as { type?: unknown } | null)?.type;
+        return type !== "syncServer" && type !== "accountVault";
+      });
+    }
+  } catch {
+    kept = []; // unreadable settings: drop them rather than risk keeping a server remote
+  }
+  if (kept.length) db.meta.customData.set(REMOTE_SETTINGS_KEY, { value: JSON.stringify(kept) });
+  else db.meta.customData.delete(REMOTE_SETTINGS_KEY);
 }
 
 export interface KeyVersion {
