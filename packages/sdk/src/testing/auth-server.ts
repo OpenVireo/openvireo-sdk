@@ -144,6 +144,22 @@ export class FakeAuthServer extends MockServer {
       const orgs = [...this.orgs].filter(([, o]) => o.members.has(u.id)).map(([id, o]) => ({ id, name: o.name, ...o.members.get(u.id)! }));
       return json(200, { id: u.id, email: u.email, kdf: u.kdf, keyset: u.keyset, mfa: { totp: false }, orgs });
     }));
+    this.on("POST", P + "me/password/start", A(async (req, _p, pr) => {
+      const { sec, response } = await OS.registrationResponse(fromB64u(req.json.request));
+      const sid = randomUuid();
+      this.sessions.set(sid, { sec, principal: pr });
+      return json(200, { session_id: sid, response: b64u(response) });
+    }));
+    this.on("POST", P + "me/password/finish", A(async (req, _p, pr) => {
+      const s = this.sessions.get(req.json.session_id);
+      if (!s || s.principal !== pr) return json(410, { error: "expired", code: "session_expired" });
+      const u = this.userById(pr.split(":")[1]!);
+      const pub = (k: any) => [k.enc_pk, k.sign_pk, k.sig].join();
+      if (pub(req.json.keyset) !== pub(u.keyset)) return json(400, { error: "keyset must keep the same public keys", code: "invalid_request" });
+      Object.assign(u, { rec: await OS.storeRecord(s.sec, fromB64u(req.json.record)), kdf: req.json.kdf, keyset: req.json.keyset });
+      return new Response(null, { status: 204 });
+    }));
+    this.on("POST", P + "me/web-session", A(() => json(200, { code: `kpx_ws_${randomUuid()}`, expires_in: 60 })));
     this.on("GET", P + "users/lookup", A((req) => {
       const u = this.users.get(req.query.get("email"));
       return u ? json(200, this.pub(`user:${u.id}`)) : json(404, { error: "no such user", code: "not_found" });
