@@ -18971,7 +18971,7 @@ async function send(http, url, opts = {}) {
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
   let res;
   try {
-    res = await f(url, { method: opts.method ?? "GET", headers, body, signal: opts.signal, redirect: "manual" });
+    res = await f(url, { method: opts.method ?? "GET", headers, body, signal: opts.signal, redirect: "manual", ...opts.cache ? { cache: opts.cache } : {} });
   } catch (e) {
     if (e?.name === "AbortError") throw new KpxError("aborted", "request aborted", void 0, { cause: e });
     throw new KpxError("network_error", `could not reach ${new URL(url).host}: ${String(e?.message ?? e)}`, 0, { cause: e });
@@ -19663,9 +19663,7 @@ var Merger = class {
     return changes;
   }
   resolveGroupConflict(source, target, ctx) {
-    const tExisting = target.times.lastModTime?.getTime() ?? 0;
-    const tOther = source.times.lastModTime?.getTime() ?? 0;
-    if (!(tExisting < tOther)) return [];
+    if (!(seconds(target.times.lastModTime) < seconds(source.times.lastModTime))) return [];
     const mods = [];
     if (target.name !== source.name) {
       mods.push("Group name");
@@ -19687,7 +19685,7 @@ var Merger = class {
       target.icon = source.icon;
       target.customIcon = void 0;
     }
-    if ((target.times.expiryTime?.getTime() ?? 0) !== (source.times.expiryTime?.getTime() ?? 0)) {
+    if (seconds(target.times.expiryTime) !== seconds(source.times.expiryTime)) {
       mods.push("Expiry time");
       target.times.expiryTime = source.times.expiryTime;
     }
@@ -20018,6 +20016,10 @@ async function syncKdbx(opts) {
     const merged = await mergeDatabases(local, remote, base, opts.merge);
     changes = merged.changes;
     if (!merged.remoteChanged && !opts.beforeUpload) {
+      if (merged.changes.length) {
+        setSyncGeneration(local, remoteGeneration);
+        setSyncGeneration(remote, remoteGeneration);
+      }
       return finish(opts.localChanged === false && !merged.localChanged ? "unchanged" : "pulled", remote, got.etag, got.revision, got.data, index, attempt, remoteGeneration);
     }
     await opts.beforeUpload?.(remote);
