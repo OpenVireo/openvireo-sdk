@@ -22,6 +22,9 @@ import { type SyncResult, type SyncState, deserializeSyncState, serializeSyncSta
 import { type Kdbx, type KeyVersion, createVaultKdbx, rekeyToVaultKey, vaultCredentials } from "./vault/kdbx.js";
 import { parseReference, readField, writeField, type SecretReference } from "./vault/reference.js";
 
+/** Asks for a TOTP code; asked again with the previous `invalid_mfa` error after a wrong code. */
+export type TotpPrompt = (ctx: { attempt: number; error?: KpxError }) => Promise<string>;
+
 export interface AccountOptions extends HttpOptions {
   /** the hosted issuer, e.g. https://accounts.keepassxc.org */
   issuer: string;
@@ -140,7 +143,7 @@ export class Account {
    * OPAQUE login (+ TOTP when the account has it), then unlock. The Secret Key is needed the first time
    * on a device; with `trustDevice` (default) it is kept in storage for next time.
    */
-  async login(p: { email: string; password: string; secretKey?: string; totp?: string | (() => Promise<string>); trustDevice?: boolean }): Promise<void> {
+  async login(p: { email: string; password: string; secretKey?: string; totp?: string | TotpPrompt; trustDevice?: boolean }): Promise<void> {
     const stored = await this.storage.get(this.skKey(p.email));
     const skText = p.secretKey ?? stored;
     if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
@@ -160,8 +163,19 @@ export class Account {
     let res = await this.auth.loginFinish({ session_id: started.session_id, auth_u: b64u(authU), device });
     if (isMfaChallenge(res)) {
       if (!p.totp) throw new KpxError("mfa_required", "a TOTP code is required");
-      const code = typeof p.totp === "string" ? p.totp : await p.totp();
-      res = await this.auth.loginMfa({ mfa_token: res.mfa_token, totp: code });
+      const mfaToken = res.mfa_token;
+      // SPEC.md §8: a wrong code (invalid_mfa) keeps the token, so a prompt is asked again; any other
+      // error (the 5th wrong code drops the token) ends the login
+      for (let attempt = 1, error: KpxError | undefined; ; attempt++) {
+        const code = typeof p.totp === "string" ? p.totp : await p.totp({ attempt, error });
+        try {
+          res = await this.auth.loginMfa({ mfa_token: mfaToken, totp: code });
+          break;
+        } catch (e) {
+          if (typeof p.totp === "string" || !(e instanceof KpxError) || e.code !== "invalid_mfa") throw e;
+          error = e;
+        }
+      }
     }
     try {
       await this.unlockWith(p.password, res.kdf, res.keyset, sk);

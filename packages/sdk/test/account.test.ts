@@ -89,6 +89,38 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
   });
 });
 
+describe("Account.login with TOTP", () => {
+  async function aliceWithTotp() {
+    const { auth, fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    const { secretKey } = await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    auth.totp.set("alice@example.com", "123456");
+    const device = await Account.connect({ issuer: ISSUER, fetch, device: { name: "cli", platform: "cli" } });
+    return { device, secretKey };
+  }
+  const login = { email: "alice@example.com", password: "pw" };
+
+  it("asks the prompt again after a wrong code, with the invalid_mfa error", async () => {
+    const { device, secretKey } = await aliceWithTotp();
+    const asked: { attempt: number; code?: string }[] = [];
+    await device.login({ ...login, secretKey, totp: async ({ attempt, error }) => (asked.push({ attempt, code: error?.code }), attempt < 3 ? "000000" : "123456") });
+    expect(asked).toEqual([{ attempt: 1, code: undefined }, { attempt: 2, code: "invalid_mfa" }, { attempt: 3, code: "invalid_mfa" }]);
+    expect(device.unlocked).toBe(true);
+  });
+
+  it("fails at once with a fixed wrong code", async () => {
+    const { device, secretKey } = await aliceWithTotp();
+    await expect(device.login({ ...login, secretKey, totp: "000000" })).rejects.toMatchObject({ code: "invalid_mfa" });
+  });
+
+  it("ends the login once the server drops the token after the 5th wrong code", async () => {
+    const { device, secretKey } = await aliceWithTotp();
+    let asked = 0;
+    await expect(device.login({ ...login, secretKey, totp: async () => (++asked, "000000") })).rejects.toMatchObject({ code: "unauthorized" });
+    expect(asked).toBe(6);
+  });
+});
+
 describe("SelfHostedSync", () => {
   it("pairs with a code and syncs a password database through databases/<id>", async () => {
     const { sync } = servers();
