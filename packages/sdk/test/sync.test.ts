@@ -219,6 +219,22 @@ describe("SSE", () => {
     expect(statuses.at(-1)).toBe("closed");
   });
 
+  it("sends only CORS-allowed headers, so browsers need no refused preflight", async () => {
+    const seen: RequestInit[] = [];
+    const fetch = async (_u: string, init: RequestInit = {}) => {
+      seen.push(init);
+      return streamResponse([], false);
+    };
+    const client = new SyncClient({ baseUrl: "https://sync.example/api/v1", fetch, token: { getAccessToken: async () => "jwt" } });
+    const stream = subscribeEvents(client, { onEvent: () => {}, initialRetryMs: 5 });
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    stream.close();
+    // CORS-safelisted (Accept) plus sync-openapi.yaml's allow list
+    const allowed = ["accept", "authorization", "content-type", "if-match", "if-none-match"];
+    expect([...new Headers(seen[0]!.headers).keys()].filter((h) => !allowed.includes(h))).toEqual([]);
+    expect(seen[0]!.cache).toBe("no-store");
+  });
+
   it("backs off after errors and forces a token refresh after a 401", async () => {
     const forced: boolean[] = [];
     let n = 0;

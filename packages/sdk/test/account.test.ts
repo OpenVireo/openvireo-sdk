@@ -89,6 +89,122 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
   });
 });
 
+describe("Account.login with TOTP", () => {
+  async function aliceWithTotp() {
+    const { auth, fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    const { secretKey } = await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    auth.totp.set("alice@example.com", "123456");
+    const device = await Account.connect({ issuer: ISSUER, fetch, device: { name: "cli", platform: "cli" } });
+    return { device, secretKey };
+  }
+  const login = { email: "alice@example.com", password: "pw" };
+
+  it("asks the prompt again after a wrong code, with the invalid_mfa error", async () => {
+    const { device, secretKey } = await aliceWithTotp();
+    const asked: { attempt: number; code?: string }[] = [];
+    await device.login({ ...login, secretKey, totp: async ({ attempt, error }) => (asked.push({ attempt, code: error?.code }), attempt < 3 ? "000000" : "123456") });
+    expect(asked).toEqual([{ attempt: 1, code: undefined }, { attempt: 2, code: "invalid_mfa" }, { attempt: 3, code: "invalid_mfa" }]);
+    expect(device.unlocked).toBe(true);
+  });
+
+  it("fails at once with a fixed wrong code", async () => {
+    const { device, secretKey } = await aliceWithTotp();
+    await expect(device.login({ ...login, secretKey, totp: "000000" })).rejects.toMatchObject({ code: "invalid_mfa" });
+  });
+
+  it("ends the login once the server drops the token after the 5th wrong code", async () => {
+    const { device, secretKey } = await aliceWithTotp();
+    let asked = 0;
+    await expect(device.login({ ...login, secretKey, totp: async () => (++asked, "000000") })).rejects.toMatchObject({ code: "unauthorized" });
+    expect(asked).toBe(6);
+  });
+});
+
+describe("AccountVault.sync with no local edits", () => {
+  it("checks with a HEAD and skips the download when the ETag still matches", async () => {
+    const { sync, fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    const { secretKey } = await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    const vault = await alice.createVault("Infra");
+    expect(vault.etag).toMatch(/.+/);
+    const before = sync.calls.length;
+    const result = await vault.sync({ localChanged: false });
+    expect(result.outcome).toBe("unchanged");
+    expect(sync.calls.slice(before).map((c) => c.method)).toEqual(["HEAD"]);
+
+    // another device changed it: the HEAD misses, so it downloads
+    const other = await Account.connect({ issuer: ISSUER, fetch, device: { name: "cli", platform: "cli" } });
+    await other.login({ email: "alice@example.com", password: "pw", secretKey });
+    const theirs = await other.openVault(vault.id);
+    addEntry(theirs.db!, "New", { Password: "x" }, 2000);
+    await theirs.sync();
+    const mark = sync.calls.length;
+    await vault.sync({ localChanged: false });
+    expect(sync.calls.slice(mark).map((c) => c.method)).toContain("GET");
+    // a pull doesn't upload (no spurious Recycle Bin time change), and the next full sync doesn't take
+    // the server for a rollback (the merge's generation bump never reached it)
+    expect(sync.calls.slice(mark).map((c) => c.method)).not.toContain("PUT");
+    expect(vault.etag).toBe(theirs.etag);
+    const mark2 = sync.calls.length;
+    expect((await vault.sync()).outcome).toBe("pulled");
+    expect((await theirs.sync()).outcome).toBe("pulled");
+    expect(sync.calls.slice(mark2).map((c) => c.method)).not.toContain("PUT");
+  });
+});
+
+describe("Org members", () => {
+  it("confirm with chosen vaults → promote to admin → remove and rotate", async () => {
+    const { auth, fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    const org = await alice.auth.createOrg("Acme");
+    const infra = await alice.createVault("Infra", { orgId: org.id });
+    addEntry(infra.db!, "GitHub", { Password: "s3cret" }, 1000);
+    await infra.sync();
+    const payroll = await alice.createVault("Payroll", { orgId: org.id });
+    const { serviceAccount } = await alice.createServiceAccount(org.id, { name: "ci" });
+
+    const bob = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
+    auth.addMember(org.id, "bob@example.com");
+    const pending = (await alice.auth.listMembers(org.id)).members.find((m) => m.email === "bob@example.com")!;
+    expect(pending.status).toBe("accepted");
+
+    // a member gets only the vaults picked for them, and no SA master keys
+    const confirmed = await alice.confirmMember(org.id, pending, [{ id: infra.id, role: "read" }]);
+    expect(confirmed.status).toBe("confirmed");
+    expect((await bob.listVaults()).map((v) => [v.name, v.role])).toEqual([["Infra", "read"]]);
+    expect((await bob.openVault(infra.id)).read("kpx://Infra/GitHub/password")).toBe("s3cret");
+    await expect(bob.issueServiceAccountSecret(serviceAccount.id)).rejects.toMatchObject({ code: "forbidden" });
+
+    // promotion: manage on every org vault, and the SA master key
+    await alice.setMemberRole(org.id, confirmed, "admin");
+    expect((await bob.listVaults()).map((v) => [v.name, v.role]).sort()).toEqual([["Infra", "manage"], ["Payroll", "manage"]]);
+    expect((await bob.issueServiceAccountSecret(serviceAccount.id)).token).toMatch(/^kpx_sa_/);
+
+    // removal: access goes at once, and both vault keys rotate
+    const { rotated, failed } = await alice.removeMember(org.id, confirmed.user_id);
+    expect([rotated.sort(), failed]).toEqual([[infra.id, payroll.id].sort(), []]);
+    expect(await bob.listVaults()).toEqual([]);
+    expect(auth.vaults.get(infra.id)!.current).toBe(2);
+  });
+
+  it("refuses a vault from another org or a member without keys", async () => {
+    const { auth, fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    const org = await alice.auth.createOrg("Acme");
+    const personal = await alice.createVault("Personal");
+    const bob = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
+    auth.addMember(org.id, "bob@example.com");
+    const m = (await alice.auth.listMembers(org.id)).members.find((x) => x.email === "bob@example.com")!;
+    await expect(alice.confirmMember(org.id, m, [{ id: personal.id, role: "read" }])).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(alice.confirmMember(org.id, { ...m, public: undefined })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+});
+
 describe("SelfHostedSync", () => {
   it("pairs with a code and syncs a password database through databases/<id>", async () => {
     const { sync } = servers();

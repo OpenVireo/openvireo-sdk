@@ -6,7 +6,7 @@ import { KpxError } from "./errors.js";
 import { AuthClient, discover } from "./auth/client.js";
 import { MemoryStorage, NamespacedStorage, type KeyValueStorage } from "./auth/storage.js";
 import { TokenManager, type SignedOutReason } from "./auth/token-manager.js";
-import { type DeviceInfo, type Grant, type KpxConfiguration, type Principal, type Session, type Vault, type VaultRole, isMfaChallenge } from "./auth/types.js";
+import { type DeviceInfo, type Grant, type KpxConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type Vault, type VaultGrant, type VaultRole, isMfaChallenge } from "./auth/types.js";
 import type { HttpOptions } from "./http/request.js";
 import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
 import { sealSaMaster, sealVaultKey, unsealSaMaster, unsealVaultKey } from "./crypto/envelope.js";
@@ -21,6 +21,11 @@ import { type EventStream, type SyncEvent, subscribeEvents } from "./sync/events
 import { type SyncResult, type SyncState, deserializeSyncState, serializeSyncState, syncKdbx } from "./sync/engine.js";
 import { type Kdbx, type KeyVersion, createVaultKdbx, rekeyToVaultKey, vaultCredentials } from "./vault/kdbx.js";
 import { parseReference, readField, writeField, type SecretReference } from "./vault/reference.js";
+
+const isManager = (role: OrgRole) => role === "owner" || role === "admin";
+
+/** Asks for a TOTP code; asked again with the previous `invalid_mfa` error after a wrong code. */
+export type TotpPrompt = (ctx: { attempt: number; error?: KpxError }) => Promise<string>;
 
 export interface AccountOptions extends HttpOptions {
   /** the hosted issuer, e.g. https://accounts.keepassxc.org */
@@ -140,7 +145,7 @@ export class Account {
    * OPAQUE login (+ TOTP when the account has it), then unlock. The Secret Key is needed the first time
    * on a device; with `trustDevice` (default) it is kept in storage for next time.
    */
-  async login(p: { email: string; password: string; secretKey?: string; totp?: string | (() => Promise<string>); trustDevice?: boolean }): Promise<void> {
+  async login(p: { email: string; password: string; secretKey?: string; totp?: string | TotpPrompt; trustDevice?: boolean }): Promise<void> {
     const stored = await this.storage.get(this.skKey(p.email));
     const skText = p.secretKey ?? stored;
     if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
@@ -160,8 +165,19 @@ export class Account {
     let res = await this.auth.loginFinish({ session_id: started.session_id, auth_u: b64u(authU), device });
     if (isMfaChallenge(res)) {
       if (!p.totp) throw new KpxError("mfa_required", "a TOTP code is required");
-      const code = typeof p.totp === "string" ? p.totp : await p.totp();
-      res = await this.auth.loginMfa({ mfa_token: res.mfa_token, totp: code });
+      const mfaToken = res.mfa_token;
+      // SPEC.md §8: a wrong code (invalid_mfa) keeps the token, so a prompt is asked again; any other
+      // error (the 5th wrong code drops the token) ends the login
+      for (let attempt = 1, error: KpxError | undefined; ; attempt++) {
+        const code = typeof p.totp === "string" ? p.totp : await p.totp({ attempt, error });
+        try {
+          res = await this.auth.loginMfa({ mfa_token: mfaToken, totp: code });
+          break;
+        } catch (e) {
+          if (typeof p.totp === "string" || !(e instanceof KpxError) || e.code !== "invalid_mfa") throw e;
+          error = e;
+        }
+      }
     }
     try {
       await this.unlockWith(p.password, res.kdf, res.keyset, sk);
@@ -421,6 +437,91 @@ export class Account {
     }
   }
 
+  // --------------------------------------------------------------------------------------- orgs
+
+  /**
+   * Confirms an accepted member (owner/admin) after checking their key signature. Owners and admins
+   * get every org vault this account manages, with manage, and the org's SA master keys; a member
+   * gets the vaults in `vaults` only.
+   */
+  async confirmMember(orgId: string, member: Member, vaults: { id: string; role: VaultRole }[] = []): Promise<Member> {
+    if (!member.public) throw new KpxError("invalid_request", "this member has no public keys yet", 400);
+    const pub = trustedPublicKeys(member.public);
+    const principal: Principal = `user:${member.user_id}`;
+    const manager = isManager(member.role);
+    const chosen = manager ? (await this.managedOrgVaults(orgId)).map((v) => ({ id: v.id, role: "manage" as VaultRole })) : vaults;
+    const grants: VaultGrant[] = [];
+    for (const g of chosen) {
+      const e = await this.entry(g.id);
+      if (e.info.orgId !== orgId) throw new KpxError("invalid_request", `vault ${g.id} is not a vault of this org`, 400);
+      const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
+      if (!current) throw new KpxError("no_vault_key", `no current key for vault ${g.id}`);
+      grants.push({ vault_id: g.id, principal, role: g.role, key_version: current.version, sealed_key: b64u(sealVaultKey(pub.encPk, g.id, current.key)) });
+    }
+    return this.auth.confirmMember(orgId, member.user_id, {
+      grants,
+      sa_master_keys: manager ? await this.sealSaMasterKeys(orgId, principal, pub.encPk) : undefined,
+    });
+  }
+
+  /**
+   * Changes a member's org role. Promoting a confirmed member to owner/admin also hands over the SA
+   * master keys and manage on every org vault this account manages; the server drops their master
+   * keys on a demotion to member.
+   */
+  async setMemberRole(orgId: string, member: Member, role: OrgRole): Promise<Member> {
+    const principal: Principal = `user:${member.user_id}`;
+    const promote = isManager(role) && member.status === "confirmed" && !!member.public;
+    const pub = promote ? trustedPublicKeys(member.public!) : null;
+    const updated = await this.auth.setMemberRole(orgId, member.user_id, {
+      role,
+      sa_master_keys: pub ? await this.sealSaMasterKeys(orgId, principal, pub.encPk) : undefined,
+    });
+    if (pub) for (const v of await this.managedOrgVaults(orgId)) await this.share(v.id, { principal }, "manage");
+    return updated;
+  }
+
+  /**
+   * Removes a member, then rotates every org vault the server flagged (rotation_required) that this
+   * account manages, so the old key opens nothing new. Failed rotations are returned, not thrown.
+   */
+  async removeMember(orgId: string, userId: string): Promise<{ rotated: string[]; failed: { id: string; error: unknown }[] }> {
+    await this.auth.removeMember(orgId, userId);
+    const rotated: string[] = [];
+    const failed: { id: string; error: unknown }[] = [];
+    for (const v of await this.listVaults()) {
+      if (v.orgId !== orgId || !v.rotationRequired || v.role !== "manage") continue;
+      try {
+        await this.rotate(v.id);
+        rotated.push(v.id);
+      } catch (error) {
+        failed.push({ id: v.id, error });
+      }
+    }
+    return { rotated, failed };
+  }
+
+  private async managedOrgVaults(orgId: string): Promise<VaultInfo[]> {
+    return (await this.listVaults()).filter((v) => v.orgId === orgId && v.role === "manage");
+  }
+
+  /** Seals every SA master key of the org that this account holds to another owner/admin. */
+  private async sealSaMasterKeys(orgId: string, principal: Principal, encPk: Uint8Array): Promise<SaMasterGrant[]> {
+    const { service_accounts } = await this.auth.listServiceAccounts(orgId);
+    const grants: SaMasterGrant[] = [];
+    for (const listed of service_accounts) {
+      const sa = listed.master_key ? listed : await this.auth.getServiceAccount(listed.id);
+      if (!sa.master_key) continue;
+      const master = unsealSaMaster(this.requireKeyset().encSk, sa.id, fromB64u(sa.master_key));
+      try {
+        grants.push({ sa_id: sa.id, principal, sealed_key: b64u(sealSaMaster(encPk, sa.id, master)) });
+      } finally {
+        wipe(master);
+      }
+    }
+    return grants;
+  }
+
   // ------------------------------------------------------------------------------------- events
 
   /**
@@ -478,8 +579,16 @@ export class AccountVault {
     return this.info.name;
   }
 
-  /** Downloads, merges local edits and uploads them (conditional PUT, merge and retry on 412). */
-  async sync(opts: { rekeyTo?: Uint8Array } = {}): Promise<SyncResult> {
+  /** The server ETag at the last sync (compare with a `vault` event's etag), or undefined before one. */
+  get etag(): string | undefined {
+    return this.state?.etag;
+  }
+
+  /**
+   * Downloads, merges local edits and uploads them (conditional PUT, merge and retry on 412). With
+   * `localChanged: false` it first asks the server with a HEAD and stops there when nothing changed.
+   */
+  async sync(opts: { rekeyTo?: Uint8Array; localChanged?: boolean } = {}): Promise<SyncResult> {
     if (this.state === undefined) this.state = await this.account.loadState(this.id);
     const keys = [...this.keys()].sort((a, b) => b.version - a.version);
     const credentials = keys.map((k) => vaultCredentials(k.key));
@@ -498,6 +607,7 @@ export class AccountVault {
       db,
       credentials,
       state: this.state,
+      localChanged: opts.localChanged,
       beforeUpload: opts.rekeyTo ? (d) => rekeyToVaultKey(d, opts.rekeyTo!) : undefined,
     });
     this.db = result.db;

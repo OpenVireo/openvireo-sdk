@@ -278,9 +278,9 @@ class Merger {
   }
 
   private resolveGroupConflict(source: KdbxGroup, target: KdbxGroup, ctx: Ctx): MergeChange[] {
-    const tExisting = target.times.lastModTime?.getTime() ?? 0;
-    const tOther = source.times.lastModTime?.getTime() ?? 0;
-    if (!(tExisting < tOther)) return [];
+    // KDBX keeps whole seconds: an in-memory group (a new Recycle Bin) has milliseconds its saved
+    // copy lost, which would count as a change on every sync
+    if (!(seconds(target.times.lastModTime) < seconds(source.times.lastModTime))) return [];
     const mods: string[] = [];
     if (target.name !== source.name) {
       mods.push("Group name");
@@ -302,7 +302,7 @@ class Merger {
       target.icon = source.icon;
       target.customIcon = undefined;
     }
-    if ((target.times.expiryTime?.getTime() ?? 0) !== (source.times.expiryTime?.getTime() ?? 0)) {
+    if (seconds(target.times.expiryTime) !== seconds(source.times.expiryTime)) {
       mods.push("Expiry time");
       target.times.expiryTime = source.times.expiryTime;
     }

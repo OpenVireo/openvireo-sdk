@@ -24,9 +24,12 @@ export class FakeAuthServer extends MockServer {
   sessions = new Map<string, any>();
   refresh = new Map<string, { principal: string; used: boolean }>();
   tokens = new Map<string, string>(); // access token → principal
-  vaults = new Map<string, { org_id: string | null; encrypted_name: string; current: number; pending: number | null; access: Map<string, Access> }>();
-  orgs = new Map<string, { name: string; members: Map<string, string> }>();
+  vaults = new Map<string, { org_id: string | null; encrypted_name: string; current: number; pending: number | null; access: Map<string, Access>; rotationRequired?: boolean }>();
+  orgs = new Map<string, { name: string; members: Map<string, { role: string; status: string }> }>();
   sas = new Map<string, any>();
+  /** email → TOTP code; those users get an MFA challenge (SPEC.md §8) */
+  totp = new Map<string, string>();
+  mfa = new Map<string, { email: string; wrong: number }>();
   onToken: (t: string) => void = () => {};
 
   private issue(principal: string) {
@@ -39,6 +42,16 @@ export class FakeAuthServer extends MockServer {
     const rt = `kpx_rt_${randomUuid()}`;
     this.refresh.set(rt, { principal: `user:${user.id}`, used: false });
     return json(status, { access_token: this.issue(`user:${user.id}`), refresh_token: rt, expires_in: 600, device_id: "dev-" + user.id.slice(0, 4), user: { id: user.id, email: user.email }, kdf: user.kdf, keyset: user.keyset });
+  }
+  /** Adds a user to an org as accepted (invitation flow skipped), to be confirmed by an admin */
+  addMember(org: string, email: string, role = "member") {
+    this.orgs.get(org)!.members.set(this.users.get(email).id, { role, status: "accepted" });
+  }
+  private memberJson(uid: string, m: { role: string; status: string }) {
+    return { user_id: uid, email: this.userById(uid).email, role: m.role, status: m.status, public: this.pub(`user:${uid}`) };
+  }
+  private storeSaMasterKeys(keys: { sa_id: string; principal: string; sealed_key: string }[] = []) {
+    for (const k of keys) this.sas.get(k.sa_id).master.set(k.principal, k.sealed_key);
   }
   private userById = (id: string) => [...this.users.values()].find((u) => u.id === id);
   private pub(principal: string) {
@@ -54,7 +67,7 @@ export class FakeAuthServer extends MockServer {
     const v = this.vaults.get(id)!;
     const a = v.access.get(principal)!;
     const keys = [...a.keys].filter(([k]) => k === v.current || k === v.pending).sort((x, y) => y[0] - x[0]).map(([key_version, sealed_key]) => ({ key_version, sealed_key }));
-    return { id, org_id: v.org_id, encrypted_name: v.encrypted_name, role: a.role, current_key_version: v.current, pending_key_version: v.pending, keys };
+    return { id, org_id: v.org_id, encrypted_name: v.encrypted_name, role: a.role, current_key_version: v.current, pending_key_version: v.pending, rotation_required: !!v.rotationRequired, keys };
   }
 
   constructor() {
@@ -93,7 +106,22 @@ export class FakeAuthServer extends MockServer {
     this.on("POST", P + "auth/login/finish", async (req) => {
       const s = this.sessions.get(req.json.session_id);
       if (!s || !(await OS.userAuth(s.sec, fromB64u(req.json.auth_u)))) return json(401, { error: "wrong email or password", code: "unauthorized" });
+      if (this.totp.has(s.email)) {
+        const mfa_token = `mfa-${randomUuid()}`;
+        this.mfa.set(mfa_token, { email: s.email, wrong: 0 });
+        return json(200, { mfa_required: true, mfa_token, methods: ["totp"] });
+      }
       return this.session(this.users.get(s.email));
+    });
+    this.on("POST", P + "auth/login/mfa", (req) => {
+      const m = this.mfa.get(req.json.mfa_token);
+      if (!m) return json(401, { error: "The MFA token is invalid or expired", code: "unauthorized" });
+      if (req.json.totp !== this.totp.get(m.email)) {
+        if (++m.wrong >= 5) this.mfa.delete(req.json.mfa_token);
+        return json(401, { error: "The code is incorrect", code: "invalid_mfa" });
+      }
+      this.mfa.delete(req.json.mfa_token);
+      return this.session(this.users.get(m.email));
     });
     this.on("POST", P + "auth/refresh", (req) => {
       const r = this.refresh.get(req.json.refresh_token);
@@ -122,11 +150,40 @@ export class FakeAuthServer extends MockServer {
     this.on("GET", P + "principals/{p}/public-key", A((_r, p) => json(200, this.pub(p.p))));
     this.on("POST", P + "orgs", A((req, _p, pr) => {
       const id = randomUuid();
-      this.orgs.set(id, { name: req.json.name, members: new Map([[pr.split(":")[1]!, "owner"]]) });
+      this.orgs.set(id, { name: req.json.name, members: new Map([[pr.split(":")[1]!, { role: "owner", status: "confirmed" }]]) });
       return json(201, { id, name: req.json.name, role: "owner" });
     }));
     this.on("GET", P + "orgs/{org}/members", A((_r, p) =>
-      json(200, { members: [...this.orgs.get(p.org)!.members].map(([uid, role]) => ({ user_id: uid, email: this.userById(uid).email, role, status: "confirmed", public: this.pub(`user:${uid}`) })) }),
+      json(200, { members: [...this.orgs.get(p.org)!.members].map(([uid, m]) => this.memberJson(uid, m)) }),
+    ));
+    // Confirm: grants name their vault (VaultGrant); owners/admins also get SA master keys
+    this.on("POST", P + "orgs/{org}/members/{u}/confirm", A((req, p) => {
+      const m = this.orgs.get(p.org)!.members.get(p.u)!;
+      for (const g of req.json.grants ?? []) {
+        const v = this.vaults.get(g.vault_id);
+        if (!v || v.org_id !== p.org) return json(400, { error: "not an org vault", code: "invalid_request" });
+        if (g.principal !== `user:${p.u}`) return json(400, { error: "grants must be sealed to the member", code: "invalid_request" });
+        if (g.key_version !== v.current) return json(409, { error: "not current", code: "conflict" });
+        v.access.set(g.principal, { role: g.role, keys: new Map([[g.key_version, g.sealed_key]]) });
+      }
+      this.storeSaMasterKeys(req.json.sa_master_keys);
+      m.status = "confirmed";
+      return json(200, this.memberJson(p.u, m));
+    }));
+    this.on("PATCH", P + "orgs/{org}/members/{u}", A((req, p) => {
+      const m = this.orgs.get(p.org)!.members.get(p.u)!;
+      m.role = req.json.role;
+      if (m.role === "member") for (const sa of this.sas.values()) if (sa.org_id === p.org) sa.master.delete(`user:${p.u}`);
+      this.storeSaMasterKeys(req.json.sa_master_keys);
+      return json(200, this.memberJson(p.u, m));
+    }));
+    this.on("DELETE", P + "orgs/{org}/members/{u}", A((_r, p) => {
+      this.orgs.get(p.org)!.members.delete(p.u);
+      for (const v of this.vaults.values()) if (v.org_id === p.org && v.access.delete(`user:${p.u}`)) v.rotationRequired = true;
+      return new Response(null, { status: 204 });
+    }));
+    this.on("GET", P + "orgs/{org}/service-accounts", A((_r, p, pr) =>
+      json(200, { service_accounts: [...this.sas.values()].filter((sa) => sa.org_id === p.org).map((sa) => ({ id: sa.id, org_id: sa.org_id, name: sa.name, master_key: sa.master.get(pr) })) }),
     ));
     this.on("GET", P + "vaults", A((_r, _p, pr) => json(200, { vaults: [...this.vaults].filter(([, v]) => v.access.has(pr)).map(([id]) => this.vaultJson(id, pr)) })));
     this.on("POST", P + "vaults", A((req, _p, pr) => {
@@ -161,6 +218,7 @@ export class FakeAuthServer extends MockServer {
       const v = this.vaults.get(p.v)!;
       v.current = Number(p.n);
       v.pending = null;
+      v.rotationRequired = false;
       for (const a of v.access.values()) for (const k of [...a.keys.keys()]) if (k < v.current) a.keys.delete(k);
       return new Response(null, { status: 204 });
     }));
