@@ -27,6 +27,9 @@ export class FakeAuthServer extends MockServer {
   vaults = new Map<string, { org_id: string | null; encrypted_name: string; current: number; pending: number | null; access: Map<string, Access> }>();
   orgs = new Map<string, { name: string; members: Map<string, string> }>();
   sas = new Map<string, any>();
+  /** email → TOTP code; those users get an MFA challenge (SPEC.md §8) */
+  totp = new Map<string, string>();
+  mfa = new Map<string, { email: string; wrong: number }>();
   onToken: (t: string) => void = () => {};
 
   private issue(principal: string) {
@@ -93,7 +96,22 @@ export class FakeAuthServer extends MockServer {
     this.on("POST", P + "auth/login/finish", async (req) => {
       const s = this.sessions.get(req.json.session_id);
       if (!s || !(await OS.userAuth(s.sec, fromB64u(req.json.auth_u)))) return json(401, { error: "wrong email or password", code: "unauthorized" });
+      if (this.totp.has(s.email)) {
+        const mfa_token = `mfa-${randomUuid()}`;
+        this.mfa.set(mfa_token, { email: s.email, wrong: 0 });
+        return json(200, { mfa_required: true, mfa_token, methods: ["totp"] });
+      }
       return this.session(this.users.get(s.email));
+    });
+    this.on("POST", P + "auth/login/mfa", (req) => {
+      const m = this.mfa.get(req.json.mfa_token);
+      if (!m) return json(401, { error: "The MFA token is invalid or expired", code: "unauthorized" });
+      if (req.json.totp !== this.totp.get(m.email)) {
+        if (++m.wrong >= 5) this.mfa.delete(req.json.mfa_token);
+        return json(401, { error: "The code is incorrect", code: "invalid_mfa" });
+      }
+      this.mfa.delete(req.json.mfa_token);
+      return this.session(this.users.get(m.email));
     });
     this.on("POST", P + "auth/refresh", (req) => {
       const r = this.refresh.get(req.json.refresh_token);
