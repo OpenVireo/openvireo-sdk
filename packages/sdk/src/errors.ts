@@ -38,6 +38,8 @@ export type KpxErrorCode =
   | "too_many_conflicts"
   | "invalid_reference"
   | "entry_not_found"
+  | "not_available_offline"
+  | "vault_upload_failed"
   | "aborted";
 
 export class KpxError extends Error {
@@ -54,3 +56,12 @@ export class KpxError extends Error {
 
 export const isKpxError = (e: unknown, code?: string): e is KpxError =>
   e instanceof KpxError && (code === undefined || e.code === code);
+
+/**
+ * Whether an error means the server could not be reached (no network, DNS, a refused connection, or
+ * a gateway in front of it answering 502/503/504), as opposed to the server refusing the request.
+ */
+export const isUnreachable = (e: unknown): boolean => {
+  const err = e as { code?: unknown; status?: unknown } | null | undefined;
+  return err?.code === "network_error" || err?.status === 502 || err?.status === 503 || err?.status === 504;
+};
