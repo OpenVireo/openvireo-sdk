@@ -78,7 +78,7 @@ describe("new vaults and rotation", () => {
   });
 });
 
-describe("entry helpers (moved from keepassxc-web)", () => {
+describe("entry helpers (moved from openvireo-web)", () => {
   it("password databases: create, add, edit with history, collect", async () => {
     const created = await createNewKdbx("Personal", "pw");
     const opened = await decryptKdbx(created.fileBuffer, "pw");

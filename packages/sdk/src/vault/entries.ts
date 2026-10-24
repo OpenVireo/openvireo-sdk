@@ -1,5 +1,5 @@
 /**
- * Entry and group helpers moved from keepassxc-web/src/lib/keepass-crypto.ts, with the same names and
+ * Entry and group helpers moved from openvireo-web/src/lib/keepass-crypto.ts, with the same names and
  * shapes so the web app can switch its imports. Behaviour is unchanged except where noted.
  */
 import { kdbxweb, type CredentialsFactory, type Kdbx, openKdbx, passwordCredentials, saveKdbx, initKdbx } from "./kdbx.js";

@@ -2,7 +2,7 @@
  * WASM client (this SDK) against the libopaque C core through its Python binding, as used by Flask.
  * Runs only when the binding is available:
  *   OPENVIREO_OPAQUE_PYTHON=<python with pysodium>  OPENVIREO_OPAQUE_PYBINDING=<libopaque/python>  LIBOPAQUE=<libopaque.dylib>
- * (see keepassxc/docs/plans/accounts/opaque-spike/README.md for the build).
+ * (see openvireo/docs/plans/accounts/opaque-spike/README.md for the build).
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
