@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseReference } from "@kpnx/sdk";
+import { parseReference } from "@openvireo/sdk";
 import { CHARSETS, MASK, Masker, findReferences, generatePassword, maskPatterns, parseCharsets, parseEnvFile } from "../src/index.js";
 
 const enc = new TextEncoder();

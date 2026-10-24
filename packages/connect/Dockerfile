@@ -5,7 +5,7 @@ WORKDIR /src
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages ./packages
 RUN bun install --ignore-scripts
-# Bun resolves @kpnx/sdk through the workspace link, i.e. the SDK's dist/
+# Bun resolves @openvireo/sdk through the workspace link, i.e. the SDK's dist/
 RUN cd packages/sdk && bunx tsup && cd ../connect && bunx tsup
 RUN bun build --compile --minify --sourcemap packages/connect/src/bin.ts --outfile /out/kpx-connect
 

@@ -6,8 +6,8 @@
     "types": ["node"],
     // Type-check against the SDK's sources, so no build is needed first
     "paths": {
-      "@kpnx/sdk": ["../sdk/src/index.ts"],
-      "@kpnx/sdk/storage/node": ["../sdk/src/auth/storage-node.ts"]
+      "@openvireo/sdk": ["../sdk/src/index.ts"],
+      "@openvireo/sdk/storage/node": ["../sdk/src/auth/storage-node.ts"]
     }
   },
   "include": ["src", "test", "tsup.config.ts", "vitest.config.ts", "../sdk/src/vendor.d.ts"]

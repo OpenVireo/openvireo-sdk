@@ -18957,6 +18957,19 @@ var AuthClient = class _AuthClient {
   passwordFinish(body) {
     return this.authed("POST", "me/password/finish", body);
   }
+  emailRequest(email) {
+    return this.authed("POST", "me/email", { email });
+  }
+  emailStart(body) {
+    return this.authed("POST", "me/email/start", body);
+  }
+  emailFinish(body) {
+    return this.authed("POST", "me/email/finish", body);
+  }
+  /** A one-time code that signs the browser in to the auth website (SPEC.md §16) */
+  createWebSession() {
+    return this.authed("POST", "me/web-session");
+  }
   totpStart() {
     return this.authed("POST", "me/totp");
   }

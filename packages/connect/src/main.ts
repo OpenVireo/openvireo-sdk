@@ -1,6 +1,6 @@
 /** `kpx connect [serve]` and `kpx connect token`: shared by the kpx-connect bin and the kpx CLI. */
 import { parseArgs } from "node:util";
-import { KpxError, type FetchLike } from "@kpnx/sdk";
+import { KpxError, type FetchLike } from "@openvireo/sdk";
 import { configFromEnv, startConnect } from "./server.js";
 import { newConnectToken } from "./tokens.js";
 

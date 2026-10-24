@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { ServiceAccount } from "@kpnx/sdk";
+import { ServiceAccount } from "@openvireo/sdk";
 import { type World, editBetweenGetAndPut, makeWorld } from "../../sdk/test/helpers/world.js";
 import { type ConnectToken, configFromEnv, connectMain, createConnectHandler, hashConnectToken, newConnectToken, parseConnectTokens, startConnect } from "../src/index.js";
 

@@ -1,4 +1,4 @@
-# @kpnx/cli: `kpx`
+# @openvireo/cli: `kpx`
 
 Read, inject and rotate KeePassXC vault secrets from scripts, CI and servers, with a **service
 account** (`KPX_SERVICE_ACCOUNT_TOKEN=kpx_sa_…`) or your own **login**. Vaults are downloaded and
@@ -79,9 +79,9 @@ environment for non-interactive use; prefer a service account for automation.
 ## Single binary
 
 ```sh
-npm run build:binary -w @kpnx/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/kpx
+npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/kpx
 ./packages/cli/dist/kpx version        # kpx 0.1.0
-npm run smoke -w @kpnx/cli            # runs dist/kpx against the in-memory servers over HTTP
+npm run smoke -w @openvireo/cli            # runs dist/kpx against the in-memory servers over HTTP
 # cross-compile: add --target=bun-linux-x64 | bun-linux-arm64 | bun-darwin-arm64 | bun-windows-x64
 ```
 
@@ -91,7 +91,7 @@ works without Node. `npm run build` also produces `dist/bin.js` for Node ≥ 20 
 ## Development
 
 ```sh
-npm run typecheck -w @kpnx/cli && npm test -w @kpnx/cli
+npm run typecheck -w @openvireo/cli && npm test -w @openvireo/cli
 ```
 
 Tests run `main()` against the SDK's in-memory auth and sync servers

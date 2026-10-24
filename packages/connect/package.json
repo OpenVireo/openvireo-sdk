@@ -1,5 +1,5 @@
 {
-  "name": "@kpnx/connect",
+  "name": "@openvireo/connect",
   "version": "0.1.0",
   "description": "kpx connect: a self-hosted REST server that holds one KeePassXC service account token",
   "license": "GPL-3.0-or-later",
@@ -29,6 +29,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@kpnx/sdk": "0.1.0"
+    "@openvireo/sdk": "0.1.0"
   }
 }

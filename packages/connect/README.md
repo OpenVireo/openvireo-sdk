@@ -1,4 +1,4 @@
-# @kpnx/connect: `kpx connect`
+# @openvireo/connect: `kpx connect`
 
 A small self-hosted REST server that holds **one service account token** and gives any language
 HTTP access to the vaults that service account can open. Callers use connect's **own bearer tokens**
@@ -102,8 +102,8 @@ The image is built from the repository root with `docker build -f packages/conne
 ## Library
 
 ```ts
-import { createConnectHandler, newConnectToken } from "@kpnx/connect";
-import { ServiceAccount } from "@kpnx/sdk";
+import { createConnectHandler, newConnectToken } from "@openvireo/connect";
+import { ServiceAccount } from "@openvireo/sdk";
 
 const sa = await ServiceAccount.fromToken(process.env.KPX_SERVICE_ACCOUNT_TOKEN!);
 const { token, entry } = newConnectToken({ name: "app", access: "write" });
@@ -114,7 +114,7 @@ Bun.serve({ port: 8080, fetch: handler });
 ## Development
 
 ```sh
-npm run typecheck -w @kpnx/connect && npm test -w @kpnx/connect && npm run build -w @kpnx/connect
+npm run typecheck -w @openvireo/connect && npm test -w @openvireo/connect && npm run build -w @openvireo/connect
 helm lint deploy/helm/kpx-connect --set serviceAccountToken=x --set 'connectTokens[0].name=a' --set "connectTokens[0].sha256=$(printf 'a%.0s' {1..64})"
 kubectl kustomize deploy/kubernetes
 ```

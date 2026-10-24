@@ -1,5 +1,5 @@
 /** Secret references in templates (`kpx inject`) and env files (`kpx run`). */
-import { KpxError, REFERENCE_PATTERN, parseReference, readField } from "@kpnx/sdk";
+import { KpxError, REFERENCE_PATTERN, parseReference, readField } from "@openvireo/sdk";
 import type { VaultSource } from "./source.js";
 
 /** `{{ kpx://… }}` (any spacing); needed when a reference is followed by text, e.g. `{{ kpx://v/db/password }}@host`. */

@@ -1,4 +1,4 @@
-/** @kpnx/sdk: KeePassXC accounts, vault sync and sharing (kpx v1). Subpaths: crypto, opaque, auth, sync, vault, merge. */
+/** @openvireo/sdk: KeePassXC accounts, vault sync and sharing (kpx v1). Subpaths: crypto, opaque, auth, sync, vault, merge. */
 export * from "./errors.js";
 export * as crypto from "./crypto/index.js";
 export * from "./crypto/index.js";
