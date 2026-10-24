@@ -19,6 +19,6 @@ export default defineConfig({
   clean: true,
   splitting: true,
   treeshake: true,
-  // The vendored libopaque build stays a separate file next to dist/ (see vendor/libopaque/SOURCE.md)
-  external: ["@openvireo/sdk/vendor/libopaque.cjs", "node:fs/promises", "node:path", "node:os"],
+  // The OPAQUE WASM module stays a separate file next to dist/ (see vendor/opaque/SOURCE.md)
+  external: ["@openvireo/sdk/vendor/opaque-wasm.js", "node:fs/promises", "node:path", "node:os"],
 });

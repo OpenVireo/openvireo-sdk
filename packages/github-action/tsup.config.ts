@@ -11,8 +11,8 @@ export default defineConfig({
   target: "node20",
   tsconfig: "tsconfig.json",
   noExternal: [/.*/],
-  // OPAQUE (user login) is never used by a service account: leave the 250 KB WASM build out
-  external: ["@openvireo/sdk/vendor/libopaque.cjs"],
+  // OPAQUE (user login) is never used by a service account: leave the WASM module out
+  external: ["@openvireo/sdk/vendor/opaque-wasm.js"],
   splitting: false,
   sourcemap: false,
   clean: true,

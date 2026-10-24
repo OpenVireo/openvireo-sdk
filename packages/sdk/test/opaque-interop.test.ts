@@ -1,5 +1,6 @@
 /**
- * WASM client (this SDK) against the libopaque C core through its Python binding, as used by Flask.
+ * The opaque-ke WASM client (this SDK) against the libopaque C core through its Python binding, as used by
+ * Flask; the C client is what Qt uses.
  * Runs only when the binding is available:
  *   OPENVIREO_OPAQUE_PYTHON=<python with pysodium>  OPENVIREO_OPAQUE_PYBINDING=<libopaque/python>  LIBOPAQUE=<libopaque.dylib>
  * (see openvireo/docs/plans/accounts/opaque-spike/README.md for the build).
@@ -10,22 +11,14 @@ import { existsSync } from "node:fs";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  OpaqueClientState,
-  finishLogin,
-  finishRegistration,
-  opaqueIds,
-  opaqueServerForTests,
-  startLogin,
-  startRegistration,
-} from "../src/opaque/index.js";
+import { finishLogin, finishRegistration, opaqueIds, startLogin, startRegistration } from "../src/opaque/index.js";
 import { fromHex, toHex, utf8 } from "../src/util/bytes.js";
 
 const py = process.env.OPENVIREO_OPAQUE_PYTHON;
 const binding = process.env.OPENVIREO_OPAQUE_PYBINDING;
 const enabled = !!(py && binding && process.env.LIBOPAQUE && existsSync(py) && existsSync(binding));
 
-describe.skipIf(!enabled)("OPAQUE interop: WASM client ↔ C core (Python binding)", () => {
+describe.skipIf(!enabled)("OPAQUE interop: opaque-ke WASM client ↔ libopaque C core (Python binding)", () => {
   let proc: ChildProcessByStdio<Writable, Readable, null>;
   let lines: AsyncIterableIterator<string>;
   const ids = opaqueIds("alice@example.com", "openvireo.example");
@@ -79,13 +72,4 @@ describe.skipIf(!enabled)("OPAQUE interop: WASM client ↔ C core (Python bindin
       expect(await wasmLogin(pw)).toBe(true);
     });
   }
-
-  it("the stock libopaque.js wrapper does NOT interoperate for non-ASCII passwords (why the SDK bypasses it)", async () => {
-    const pw = "Ünïcödé pässwörd ﬁ";
-    const { sec, M } = await opaqueServerForTests.stockRegistrationRequest(pw);
-    const { pub } = await call({ op: "reg", M: toHex(M) });
-    const { record } = await finishRegistration(new OpaqueClientState(sec), fromHex(pub), ids);
-    await call({ op: "store", rec: toHex(record) });
-    expect((await call({ op: "c_login", pw: nfkc(pw) })).ok).toBe(false);
-  });
 });

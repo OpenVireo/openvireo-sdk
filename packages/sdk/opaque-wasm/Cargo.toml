@@ -1,0 +1,27 @@
+[package]
+name = "openvireo-opaque-wasm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "OPAQUE (RFC 9807) for @openvireo/sdk: opaque-ke compiled to a dependency-free WASM module"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+opaque-ke = { version = "=4.0.1", default-features = false, features = ["argon2", "ristretto255"] }
+argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
+rand_core = { version = "0.6", default-features = false }
+rand_chacha = { version = "0.3", default-features = false }
+zeroize = { version = "1", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false

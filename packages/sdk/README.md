@@ -9,7 +9,7 @@ keysets and sealed keys.
 |---|---|
 | `@openvireo/sdk` | everything below, plus `Account`, `ServiceAccount`, `SelfHostedSync` |
 | `@openvireo/sdk/crypto` | Secret Key, AUK (Argon2id), wrap/seal, keysets, fingerprints, vault names, SA/refresh tokens, JWT verify |
-| `@openvireo/sdk/opaque` | OPAQUE client over the vendored libopaque WASM build (lazy-loaded) |
+| `@openvireo/sdk/opaque` | OPAQUE client (opaque-ke compiled to WASM, lazy-loaded) |
 | `@openvireo/sdk/auth` | `AuthClient` (all of `openapi.yaml`), discovery, `TokenManager`, storage adapters |
 | `@openvireo/sdk/storage/node` | `FileStorage` (0600 JSON file) for the CLI and connect |
 | `@openvireo/sdk/sync` | `SyncClient` (vault + legacy routes), `syncKdbx` merge/retry loop, SSE `subscribeEvents` |
@@ -137,17 +137,13 @@ server.events({ onEvent: (e) => e.type === "database" && resync(e.id) });
 - The web app's `keepass-crypto.ts` helpers (`decryptKdbx`, `collectAllDbData`, `addEntryToDb`, …) are
   in `@openvireo/sdk/vault` with the same names and shapes. `editEntryInDb` now pushes history first.
 
-## OPAQUE build: read before shipping
+## OPAQUE module
 
-`vendor/libopaque/libopaque.cjs` is a release build of libopaque 6e9ac92 (`DEFINES=` empty). Upstream's
-own `js/dist/libopaque.js` at that commit was built with **`-DTRACE -DNORANDOM`** (constant login
-nonces and keys, passwords traced to the console) and must never be used. The SDK refuses to run a
-build with fixed randomness by default (`setOpaqueBuildPolicy("warn" | "allow")` relaxes that for
-tests). It also silences trace output and works around the wrapper's non-ASCII password bug. See
-`vendor/libopaque/SOURCE.md` for how the file was built and its checksum.
-
-Bundlers: the module is plain CommonJS with the WASM inlined. Webpack may need
-`resolve.fallback = { crypto: false }` for its unused Node branch.
+OPAQUE runs in a small WASM module (~118 KB, no imports) built from `opaque-wasm/` with opaque-ke 4.0.1.
+It uses the same suite as the libopaque server and the Qt client (ristretto255, SHA-512, Argon2id at
+libsodium's interactive setting), so records and logins work across all three. Rebuild it with
+`opaque-wasm/build.sh` (needs Rust; the toolchain is pinned) and see `vendor/opaque/SOURCE.md` for the
+checksums. Bundlers need nothing special: `vendor/opaque/opaque-wasm.js` is a plain ES module.
 
 ## Development
 
@@ -156,8 +152,8 @@ npm install
 npm run typecheck -w @openvireo/sdk      # tsc --noEmit
 npm test -w @openvireo/sdk               # vitest
 npm run build -w @openvireo/sdk && npm run smoke -w @openvireo/sdk   # dist/ in Node and Bun
-# OPAQUE against the C core (Python binding), see opaque-spike/README.md:
+# OPAQUE against libopaque's C core (Python binding), see opaque-spike/README.md:
 OPENVIREO_OPAQUE_PYTHON=…/venv/bin/python3 OPENVIREO_OPAQUE_PYBINDING=…/libopaque/python LIBOPAQUE=…/libopaque.dylib npm test -w @openvireo/sdk
 ```
 
-License: GPL-3.0-or-later (it bundles the GPL-3.0 libopaque JS build).
+License: GPL-3.0-or-later.

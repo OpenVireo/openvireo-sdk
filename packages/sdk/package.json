@@ -52,7 +52,7 @@
       "types": "./dist/auth/storage-node.d.ts",
       "default": "./dist/auth/storage-node.js"
     },
-    "./vendor/libopaque.cjs": "./vendor/libopaque/libopaque.cjs"
+    "./vendor/opaque-wasm.js": "./vendor/opaque/opaque-wasm.js"
   },
   "files": [
     "dist",
