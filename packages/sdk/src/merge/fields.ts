@@ -1,5 +1,5 @@
 /**
- * Port of the field model of keepassxc/src/gui/remote/SyncEngine.cpp (fieldsOf, applyField,
+ * Port of the field model of openvireo/src/gui/remote/SyncEngine.cpp (fieldsOf, applyField,
  * resolveFields, combineEntries) on kdbxweb entries.
  */
 import { sha256 } from "@noble/hashes/sha2.js";

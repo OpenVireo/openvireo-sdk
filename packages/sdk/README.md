@@ -1,7 +1,7 @@
 # @openvireo/sdk
 
 TypeScript SDK for OpenVireo accounts, vault sync and sharing (**ov v1**, see
-`keepassxc/docs/plans/accounts/SPEC.md`). It runs in browsers, Node ≥ 20 and Bun (also when compiled
+`openvireo/docs/plans/accounts/SPEC.md`). It runs in browsers, Node ≥ 20 and Bun (also when compiled
 into a single binary). The server only ever receives OPAQUE messages, encrypted `.kdbx` blobs, wrapped
 keysets and sealed keys.
 
