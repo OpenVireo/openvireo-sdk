@@ -1,6 +1,6 @@
 /**
- * Cases derived from SyncEngine::mergeDatabases / combineEntries / resolveFields and core/Merger.cpp.
- * These still need cross-checking against the Qt merge fixtures (tests/data/merge-fixtures) once they exist.
+ * Cases for SyncEngine::mergeDatabases / combineEntries / resolveFields and the structure merge
+ * (docs/merge-behaviour.md). merge-fixtures.test.ts checks the same code against the Qt client's results.
  */
 import { describe, expect, it } from "vitest";
 import { conflictingFields, findConflicts, mergeDatabases, needsCommonBase, resolveFields, snapshotOf } from "../src/merge/index.js";

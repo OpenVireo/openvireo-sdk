@@ -2430,14 +2430,14 @@ var init_u64 = __esm({
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array" && "BYTES_PER_ELEMENT" in a && a.BYTES_PER_ELEMENT === 1;
 }
-function anumber(n, title2 = "") {
+function anumber(n, title = "") {
   if (typeof n !== "number")
-    throw new TypeError(atitle(title2) + "expected number, got " + typeof n);
+    throw new TypeError(atitle(title) + "expected number, got " + typeof n);
   if (!Number.isSafeInteger(n) || n < 0)
-    throw new RangeError(atitle(title2) + "expected integer >= 0, got " + n);
+    throw new RangeError(atitle(title) + "expected integer >= 0, got " + n);
   return n;
 }
-function abytes(value, length, title2 = "") {
+function abytes(value, length, title = "") {
   if (isBytes(value) && (length === void 0 || value.length === length))
     return value;
   if (length !== void 0)
@@ -2445,7 +2445,7 @@ function abytes(value, length, title2 = "") {
   const bytes = isBytes(value);
   const ofLen = length !== void 0 ? ` of length ${length}` : "";
   const got = bytes ? `length=${value.length}` : `type=${typeof value}`;
-  const message = atitle(title2) + "expected Uint8Array" + ofLen + ", got " + got;
+  const message = atitle(title) + "expected Uint8Array" + ofLen + ", got " + got;
   if (!bytes)
     throw new TypeError(message);
   throw new RangeError(message);
@@ -2538,10 +2538,10 @@ function concatBytes(...arrays) {
   }
   return res;
 }
-function checkOpts(defaults, opts, title2 = "opts") {
+function checkOpts(defaults, opts, title = "opts") {
   aopts(defaults, "defaults");
   if (opts !== void 0)
-    aopts(opts, title2);
+    aopts(opts, title);
   const merged = Object.assign(/* @__PURE__ */ Object.create(null), defaults, opts);
   return merged;
 }
@@ -2571,7 +2571,7 @@ var atitle, aobject, aopts, hasHexBuiltin, hexes, oidNist;
 var init_utils = __esm({
   "../../node_modules/@noble/hashes/utils.js"() {
     "use strict";
-    atitle = (title2) => title2 ? `"${title2}" ` : "";
+    atitle = (title) => title ? `"${title}" ` : "";
     aobject = (value, label) => {
       if (value === null || typeof value !== "object" || Array.isArray(value))
         throw new TypeError((label === "object" ? "" : `"${label}" `) + "expected object, got type=" + typeof value);
@@ -16159,24 +16159,24 @@ init_utils();
 
 // ../../node_modules/@noble/curves/utils.js
 init_utils();
-function aarray(item, title2, inner = () => {
+function aarray(item, title, inner = () => {
 }) {
   if (!Array.isArray(item))
-    throw new TypeError(`"${title2}" expected array, got type=${typeof item}`);
+    throw new TypeError(`"${title}" expected array, got type=${typeof item}`);
   for (let i = 0; i < item.length; i++)
-    inner(item[i], `${title2}[${i}]`);
+    inner(item[i], `${title}[${i}]`);
   return item;
 }
-var abytes2 = (value, length, title2) => abytes(value, length, title2);
+var abytes2 = (value, length, title) => abytes(value, length, title);
 var anumber2 = anumber;
-function aobject2(value, title2 = "object") {
+function aobject2(value, title = "object") {
   if (value === null || typeof value !== "object" || Array.isArray(value))
-    throw new TypeError(title2 === "object" ? "expected valid options object" : `"${title2}" expected object, got type=${typeof value}`);
+    throw new TypeError(title === "object" ? "expected valid options object" : `"${title}" expected object, got type=${typeof value}`);
   return value;
 }
-function afunction(value, title2) {
+function afunction(value, title) {
   if (typeof value !== "function")
-    throw new TypeError(`"${title2}" is invalid: expected function, got ${typeof value}`);
+    throw new TypeError(`"${title}" is invalid: expected function, got ${typeof value}`);
   return value;
 }
 var bytesToHex2 = bytesToHex;
@@ -16186,10 +16186,10 @@ var isBytes2 = isBytes;
 var randomBytes2 = (bytesLength) => randomBytes(bytesLength);
 var _0n = /* @__PURE__ */ BigInt(0);
 var _1n = /* @__PURE__ */ BigInt(1);
-var atitle2 = (title2) => title2 ? `"${title2}" ` : "";
-function abool(value, title2 = "") {
+var atitle2 = (title) => title ? `"${title}" ` : "";
+function abool(value, title = "") {
   if (typeof value !== "boolean")
-    throw new TypeError(atitle2(title2) + "expected boolean, got type=" + typeof value);
+    throw new TypeError(atitle2(title) + "expected boolean, got type=" + typeof value);
   return value;
 }
 function abignumber(n) {
@@ -16200,13 +16200,13 @@ function abignumber(n) {
     anumber2(n);
   return n;
 }
-function asafenumber(value, title2 = "") {
+function asafenumber(value, title = "") {
   if (typeof value !== "number") {
-    const prefix = title2 && `"${title2}" `;
+    const prefix = title && `"${title}" `;
     throw new TypeError(prefix + "expected number, got type=" + typeof value);
   }
   if (!Number.isSafeInteger(value)) {
-    const prefix = title2 && `"${title2}" `;
+    const prefix = title && `"${title}" `;
     throw new RangeError(prefix + "expected safe integer, got " + value);
   }
 }
@@ -16244,9 +16244,9 @@ function isPosBig(n) {
 function inRange(n, min, max) {
   return isPosBig(n) && isPosBig(min) && isPosBig(max) && min <= n && n < max;
 }
-function aInRange(title2, n, min, max) {
+function aInRange(title, n, min, max) {
   if (!inRange(n, min, max))
-    throw new RangeError("expected valid " + title2 + ": " + min + " <= n < " + max + ", got " + n);
+    throw new RangeError("expected valid " + title + ": " + min + " <= n < " + max + ", got " + n);
 }
 function bitLen(n) {
   if (n < _0n)
@@ -16257,12 +16257,12 @@ var bitMask = (n) => {
   asafenumber(n, "n");
   return (_1n << BigInt(n)) - _1n;
 };
-function validateObject(object, fields = {}, optFields = {}, title2 = "object") {
-  aobject2(object, title2);
+function validateObject(object, fields = {}, optFields = {}, title = "object") {
+  aobject2(object, title);
   aobject2(fields, "fields");
   aobject2(optFields, "optFields");
   function checkField(fieldName2, expectedType, isOpt) {
-    const label = title2 === "object" ? `param "${String(fieldName2)}"` : `"${title2}.${String(fieldName2)}"`;
+    const label = title === "object" ? `param "${String(fieldName2)}"` : `"${title}.${String(fieldName2)}"`;
     const val = object[fieldName2];
     if (!Object.hasOwn(object, fieldName2) && (isOpt ? val !== void 0 : expectedType !== "function")) {
       throw new TypeError(`${label} is invalid: expected own property`);
@@ -17136,9 +17136,9 @@ function edwards(params, extraOpts = {}) {
   if (!isEdValidXY(Fp2, CURVE, CURVE.Gx, CURVE.Gy))
     throw new Error("bad curve params: generator point");
   const mulA = Fp2.eql(CURVE.a, Fp2.neg(Fp2.ONE)) ? (x) => Fp2.neg(x) : Fp2.eql(CURVE.a, Fp2.ONE) ? (x) => x : (x) => Fp2.mul(CURVE.a, x);
-  function acoord(title2, n, banZero = false) {
+  function acoord(title, n, banZero = false) {
     const min = banZero ? _1n4 : _0n4;
-    aInRange("coordinate " + title2, n, min, MASK2);
+    aInRange("coordinate " + title, n, min, MASK2);
     return n;
   }
   function aedpoint(other) {
@@ -17796,20 +17796,20 @@ var x25519 = /* @__PURE__ */ (() => {
 function isBytes3(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array" && "BYTES_PER_ELEMENT" in a && a.BYTES_PER_ELEMENT === 1;
 }
-var atitle3 = (title2) => title2 ? `"${title2}" ` : "";
-function abool2(value, title2 = "") {
+var atitle3 = (title) => title ? `"${title}" ` : "";
+function abool2(value, title = "") {
   if (typeof value !== "boolean")
-    throw new TypeError(atitle3(title2) + "expected boolean, got type=" + typeof value);
+    throw new TypeError(atitle3(title) + "expected boolean, got type=" + typeof value);
   return value;
 }
-function anumber3(n, title2 = "") {
+function anumber3(n, title = "") {
   if (typeof n !== "number")
-    throw new TypeError(atitle3(title2) + "expected number, got " + typeof n);
+    throw new TypeError(atitle3(title) + "expected number, got " + typeof n);
   if (!Number.isSafeInteger(n) || n < 0)
-    throw new RangeError(atitle3(title2) + "expected integer >= 0, got " + n);
+    throw new RangeError(atitle3(title) + "expected integer >= 0, got " + n);
   return n;
 }
-function abytes3(value, length, title2 = "") {
+function abytes3(value, length, title = "") {
   if (isBytes3(value) && (length === void 0 || value.length === length))
     return value;
   if (length !== void 0)
@@ -17817,7 +17817,7 @@ function abytes3(value, length, title2 = "") {
   const bytes = isBytes3(value);
   const ofLen = length !== void 0 ? ` of length ${length}` : "";
   const got = bytes ? `length=${value.length}` : `type=${typeof value}`;
-  const message = atitle3(title2) + "expected Uint8Array" + ofLen + ", got " + got;
+  const message = atitle3(title) + "expected Uint8Array" + ofLen + ", got " + got;
   if (!bytes)
     throw new TypeError(message);
   throw new RangeError(message);
@@ -19426,86 +19426,324 @@ function conflictingFields(local, remote, base) {
   return resolveFields(local, remote, base, true).conflicts;
 }
 
-// ../sdk/src/merge/merger.ts
-var title = (e) => {
+// ../sdk/src/merge/tree.ts
+var entryTitle = (e) => {
   const t = e.fields.get("Title");
   return t instanceof kdbxweb.ProtectedValue ? t.getText() : t ?? "";
 };
-var change = (type, item, details) => {
-  if (!item) return { type, details };
-  if (item instanceof kdbxweb.KdbxEntry) return { type, uuid: item.uuid.id, title: title(item), group: item.parentGroup?.name, details };
-  return { type, uuid: item.uuid.id, group: item.name, details };
-};
-function* allEntries(group) {
-  yield* group.entries;
-  for (const g of group.groups) yield* allEntries(g);
+function record(type, item, details) {
+  if (item instanceof kdbxweb.KdbxEntry) return { type, uuid: item.uuid.id, title: entryTitle(item), group: item.parentGroup?.name, details };
+  if (item) return { type, uuid: item.uuid.id, group: item.name, details };
+  return { type, details };
 }
-function* allGroups(group) {
-  for (const g of group.groups) {
-    yield g;
-    yield* allGroups(g);
+function* entriesUnder(group) {
+  const stack = [group];
+  while (stack.length) {
+    const g = stack.pop();
+    yield* g.entries;
+    for (let i = g.groups.length - 1; i >= 0; i--) stack.push(g.groups[i]);
   }
 }
-var findEntryByUuid = (db, id) => {
-  for (const e of allEntries(db.getDefaultGroup())) if (e.uuid.id === id) return e;
+function* groupsUnder(group) {
+  for (const child of group.groups) {
+    yield child;
+    yield* groupsUnder(child);
+  }
+}
+function findEntryByUuid(db, id) {
+  for (const e of entriesUnder(db.getDefaultGroup())) if (e.uuid.id === id) return e;
   return void 0;
-};
-var findGroupByUuid = (root, id) => {
+}
+function findGroup(db, id) {
+  const root = db.getDefaultGroup();
   if (root.uuid.id === id) return root;
-  for (const g of allGroups(root)) if (g.uuid.id === id) return g;
+  for (const g of groupsUnder(root)) if (g.uuid.id === id) return g;
   return void 0;
-};
-function copyEntryData(dst, src, srcDb, dstDb) {
+}
+function detach(item, list) {
+  const parent = item.parentGroup;
+  if (!parent) return;
+  const siblings = list(parent);
+  const i = siblings.indexOf(item);
+  if (i >= 0) siblings.splice(i, 1);
+  item.parentGroup = void 0;
+}
+function appendEntry(entry, group) {
+  if (entry.parentGroup === group) return;
+  detach(entry, (g) => g.entries);
+  group.entries.push(entry);
+  entry.parentGroup = group;
+}
+function appendGroup(child, group) {
+  if (child.parentGroup === group) return;
+  detach(child, (g) => g.groups);
+  group.groups.push(child);
+  child.parentGroup = group;
+}
+function removeEntry(entry) {
+  detach(entry, (g) => g.entries);
+}
+function bringIcon(id, from, to) {
+  if (!id || !from || from === to || to.meta.customIcons.has(id)) return;
+  const icon = from.meta.customIcons.get(id);
+  if (icon) to.meta.customIcons.set(id, icon);
+}
+function overwriteEntryData(dst, src, srcDb, dstDb) {
   dst.copyFrom(src);
-  dst.customData = src.customData ? new Map([...src.customData].map(([k, v]) => [k, { ...v }])) : void 0;
+  dst.customData = src.customData && new Map([...src.customData].map(([k, item]) => [k, { ...item }]));
   dst.qualityCheck = src.qualityCheck;
   dst.previousParentGroup = src.previousParentGroup;
-  importAssets(dst, srcDb, dstDb);
-}
-function importAssets(e, srcDb, dstDb) {
   if (srcDb === dstDb) return;
-  for (const b of e.binaries.values()) {
-    if (kdbxweb.KdbxBinaries.isKdbxBinaryWithHash(b) && !dstDb.binaries.getValueByHash(b.hash)) dstDb.binaries.addWithHash(b);
+  for (const bin of src.binaries.values()) {
+    if (kdbxweb.KdbxBinaries.isKdbxBinaryWithHash(bin) && !dstDb.binaries.getValueByHash(bin.hash)) dstDb.binaries.addWithHash(bin);
   }
-  const icon = e.customIcon?.id;
-  if (icon && srcDb && !dstDb.meta.customIcons.has(icon)) {
-    const ci = srcDb.meta.customIcons.get(icon);
-    if (ci) dstDb.meta.customIcons.set(icon, ci);
-  }
+  bringIcon(src.customIcon?.id, srcDb, dstDb);
 }
-function cloneEntry(src, srcDb, dstDb, withHistory) {
-  const e = new kdbxweb.KdbxEntry();
-  copyEntryData(e, src, srcDb, dstDb);
-  e.history = withHistory ? src.history.map((h) => cloneEntry(h, srcDb, dstDb, false)) : [];
-  return e;
+function copyEntry(src, srcDb, dstDb, kind) {
+  const out = new kdbxweb.KdbxEntry();
+  overwriteEntryData(out, src, srcDb, dstDb);
+  out.parentGroup = void 0;
+  out.history = kind === "full" ? src.history.map((h) => copyEntry(h, srcDb, dstDb, "plain")) : [];
+  return out;
 }
-var customDataJson = (m) => JSON.stringify([...m ?? /* @__PURE__ */ new Map()].map(([k, v]) => [k, v.value]).sort());
-function entryEquals(a, b, ignoreHistory = false, ignoreTimes = false) {
-  if (a.uuid.id !== b.uuid.id) return false;
-  const fa = fieldsOf(a);
-  const fb = fieldsOf(b);
-  if (fa.size !== fb.size) return false;
-  for (const [k, v] of fa) {
-    const w = fb.get(k);
-    if (!sameValue(v, w)) return false;
-    if (v.kind === "attribute" && w?.kind === "attribute" && a.fields.get(k.slice(10)) instanceof kdbxweb.ProtectedValue !== b.fields.get(k.slice(10)) instanceof kdbxweb.ProtectedValue) return false;
+function trimHistory(entry, db) {
+  const limit = db.meta.historyMaxItems;
+  if (limit === void 0 || limit < 0) return;
+  const extra = entry.history.length - limit;
+  if (extra > 0) entry.history = entry.history.slice(extra);
+}
+var customDataKey = (m) => JSON.stringify([...m ?? []].map(([k, item]) => [k, item.value]).sort());
+function entryDigest(e) {
+  const fields = [...fieldsOf(e)].map(([k, v]) => {
+    const raw = k.startsWith("attribute/") ? e.fields.get(k.slice("attribute/".length)) : void 0;
+    return [k, v.cmp, raw instanceof kdbxweb.ProtectedValue];
+  });
+  fields.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  const t = e.times;
+  return JSON.stringify([
+    e.uuid.id,
+    fields,
+    [t.lastModTime, t.creationTime, t.lastAccessTime, t.locationChanged].map(seconds),
+    t.usageCount ?? 0,
+    e.overrideUrl ?? "",
+    e.autoType ?? null,
+    customDataKey(e.customData),
+    e.previousParentGroup?.id ?? ""
+  ]);
+}
+function entriesEqual(a, b) {
+  if (entryDigest(a) !== entryDigest(b) || a.history.length !== b.history.length) return false;
+  return a.history.every((h, i) => entriesEqual(h, b.history[i]));
+}
+function mergeHistoryInto(kept, keptDb, other, otherDb) {
+  const keptAt = entrySeconds(kept);
+  const otherAt = entrySeconds(other);
+  const byTime = /* @__PURE__ */ new Map();
+  for (const h of kept.history) byTime.set(entrySeconds(h), copyEntry(h, keptDb, keptDb, "plain"));
+  for (const h of other.history) {
+    const at = entrySeconds(h);
+    if (!byTime.has(at) || otherAt > keptAt) byTime.set(at, copyEntry(h, otherDb, keptDb, "plain"));
   }
-  const t = (x) => [x.times.lastModTime, x.times.creationTime, x.times.lastAccessTime, x.times.locationChanged].map(seconds).concat(x.times.usageCount ?? 0).join(",");
-  if (!ignoreTimes && t(a) !== t(b)) return false;
-  if ((a.overrideUrl ?? "") !== (b.overrideUrl ?? "")) return false;
-  if (JSON.stringify(a.autoType) !== JSON.stringify(b.autoType)) return false;
-  if (customDataJson(a.customData) !== customDataJson(b.customData)) return false;
-  if ((a.previousParentGroup?.id ?? "") !== (b.previousParentGroup?.id ?? "")) return false;
-  if (!ignoreHistory) {
-    if (a.history.length !== b.history.length) return false;
-    for (let i = 0; i < a.history.length; i++) if (!entryEquals(a.history[i], b.history[i])) return false;
+  if (keptAt < otherAt && !byTime.has(keptAt)) byTime.set(keptAt, copyEntry(kept, keptDb, keptDb, "plain"));
+  if (keptAt > otherAt && !byTime.has(otherAt)) byTime.set(otherAt, copyEntry(other, otherDb, keptDb, "plain"));
+  const next = [...byTime].sort(([x], [y]) => x - y).map(([, e]) => e);
+  const window2 = (keptDb.meta.historyMaxItems ?? 10) - 1;
+  const old = kept.history;
+  let changed = false;
+  for (let back = 1; back <= window2 && !changed; back++) {
+    const a = old[old.length - back];
+    const b = next[next.length - back];
+    changed = a && b ? !entriesEqual(a, b) : a !== b;
   }
+  if (!changed) return false;
+  kept.history = next;
+  trimHistory(kept, keptDb);
   return true;
 }
-function truncateHistory(e, db) {
-  const max = db.meta.historyMaxItems;
-  if (max !== void 0 && max > -1 && e.history.length > max) e.history.splice(0, e.history.length - max);
+var Pass = class _Pass {
+  constructor(from, into) {
+    this.from = from;
+    this.into = into;
+  }
+  changes = [];
+  /** §1: walks `src` (a group of `from`) into `dst` (its counterpart in `into`). */
+  walk(src, dst) {
+    for (const entry of [...src.entries]) this.entry(entry, dst);
+    for (const child of [...src.groups]) this.walk(child, this.group(child, dst));
+  }
+  static movedLater(src, dst) {
+    return (dst.times.locationChanged?.getTime() ?? 0) < (src.times.locationChanged?.getTime() ?? 0);
+  }
+  /** §1.1 */
+  entry(src, dst) {
+    const existing = findEntryByUuid(this.into, src.uuid.id);
+    if (!existing) {
+      this.changes.push(record("added", src, ""));
+      appendEntry(copyEntry(src, this.from, this.into, "full"), dst);
+      return;
+    }
+    if (_Pass.movedLater(src, existing) && existing.parentGroup !== dst) {
+      this.changes.push(record("moved", src, `Previous location: ${existing.parentGroup?.name ?? ""}`));
+      appendEntry(existing, dst);
+    }
+    if (entrySeconds(existing) < entrySeconds(src)) {
+      const replacement = copyEntry(src, this.from, this.into, "full");
+      mergeHistoryInto(replacement, this.into, existing, this.into);
+      this.changes.push(record("modified", existing, "Add local modifications to new entry"));
+      const home = existing.parentGroup;
+      removeEntry(existing);
+      appendEntry(replacement, home);
+    } else if (mergeHistoryInto(existing, this.into, src, this.from)) {
+      this.changes.push(record("modified", existing, "Add new modifications to existing entry"));
+    }
+  }
+  /** §1.2: returns the target group to walk `src`'s contents into. */
+  group(src, dst) {
+    const existing = findGroup(this.into, src.uuid.id);
+    if (!existing) {
+      this.changes.push(record("added", src, `Number of entries in group: ${src.entries.length}`));
+      const made = new kdbxweb.KdbxGroup();
+      made.copyFrom(src);
+      made.groups = [];
+      made.entries = [];
+      made.parentGroup = void 0;
+      appendGroup(made, dst);
+      made.times.locationChanged = src.times.locationChanged;
+      bringIcon(src.customIcon?.id, this.from, this.into);
+      return made;
+    }
+    if (_Pass.movedLater(src, existing) && existing.parentGroup !== dst) {
+      this.changes.push(record("moved", src, `Previous location: ${existing.name ?? ""}`));
+      appendGroup(existing, dst);
+      existing.times.locationChanged = src.times.locationChanged;
+    }
+    if (seconds(existing.times.lastModTime) < seconds(src.times.lastModTime)) this.updateGroup(src, existing);
+    return existing;
+  }
+  updateGroup(src, dst) {
+    const what = [];
+    if (dst.name !== src.name) {
+      what.push("Group name");
+      dst.name = src.name;
+    }
+    if ((dst.notes ?? "") !== (src.notes ?? "")) {
+      what.push("Notes");
+      dst.notes = src.notes;
+    }
+    const custom = src.customIcon && !src.customIcon.empty ? src.customIcon : void 0;
+    if (custom) {
+      if (dst.customIcon?.id !== custom.id) {
+        what.push("Icon (UUID)");
+        dst.customIcon = custom;
+        bringIcon(custom.id, this.from, this.into);
+      }
+    } else if (dst.icon !== src.icon || dst.customIcon) {
+      what.push("Icon (Number)");
+      dst.icon = src.icon;
+      dst.customIcon = void 0;
+    }
+    if (seconds(dst.times.expiryTime) !== seconds(src.times.expiryTime)) {
+      what.push("Expiry time");
+      dst.times.expiryTime = src.times.expiryTime;
+    }
+    what.push("Modification time");
+    dst.times.lastModTime = src.times.lastModTime;
+    this.changes.push(record("modified", src, what.join(", ")));
+  }
+  /** §4 */
+  deletions() {
+    const root = this.into.getDefaultGroup();
+    const earliest = /* @__PURE__ */ new Map();
+    const kept = [];
+    const entries = [];
+    const groups = [];
+    for (const rec of [...this.into.deletedObjects, ...this.from.deletedObjects]) {
+      const id = rec.uuid?.id;
+      if (!id || !rec.deletionTime) continue;
+      const seen = earliest.get(id);
+      if (seen) {
+        if (seen.deletionTime > rec.deletionTime) earliest.set(id, rec);
+        continue;
+      }
+      earliest.set(id, rec);
+      const entry = findEntryByUuid(this.into, id);
+      const group = entry ? void 0 : findGroup(this.into, id);
+      if (entry) entries.push(entry);
+      else if (group && group !== root) groups.push(group);
+      else kept.push(rec);
+    }
+    const deletedAt = (item) => earliest.get(item.uuid.id);
+    const editedAfter = (item) => (item.times.lastModTime?.getTime() ?? 0) > deletedAt(item).deletionTime.getTime();
+    for (const entry of entries) {
+      if (editedAfter(entry)) continue;
+      kept.push(deletedAt(entry));
+      this.changes.push(record("deleted", entry, "Explicit deletion"));
+      removeEntry(entry);
+    }
+    const waiting = [...groups];
+    while (waiting.length) {
+      const group = waiting.shift();
+      if (group.groups.some((c) => waiting.includes(c))) {
+        waiting.push(group);
+        continue;
+      }
+      if (editedAfter(group) || group.entries.length || group.groups.length) continue;
+      kept.push(deletedAt(group));
+      this.changes.push(record("deleted", group, "Explicit deletion"));
+      detach(group, (g) => g.groups);
+    }
+    const listKey = (l) => l.map((r) => `${r.uuid?.id}@${r.deletionTime?.getTime()}`).join(",");
+    if (listKey(kept) !== listKey(this.into.deletedObjects)) {
+      this.changes.push(record("metadata", null, "Changed deleted objects"));
+      this.into.deletedObjects = kept;
+    }
+  }
+  /** §5 */
+  metadata() {
+    const src = this.from.meta;
+    const dst = this.into.meta;
+    for (const [id, icon] of src.customIcons) {
+      if (dst.customIcons.has(id)) continue;
+      this.changes.push(record("metadata", null, `Adding new icon ${id}`));
+      dst.customIcons.set(id, icon);
+    }
+    const dstTime = customDataTime(dst.customData);
+    const srcTime = customDataTime(src.customData);
+    const apply = !dst.customData.has("_LAST_MODIFIED") || dstTime !== void 0 && srcTime !== void 0 && dstTime < srcTime;
+    if (!apply) return;
+    for (const key of [...dst.customData.keys()]) {
+      if (src.customData.has(key) || PROTECTED_KEYS.has(key) || key.startsWith("KPXC_BROWSER_")) continue;
+      this.changes.push(record("metadata", null, `Removed custom data ${key} [${dst.customData.get(key)?.value ?? ""}]`));
+      dst.customData.delete(key);
+    }
+    for (const [key, item] of src.customData) {
+      if (GENERATED_KEYS.has(key) || item.value === dst.customData.get(key)?.value) continue;
+      this.changes.push(record("metadata", null, `Adding custom data ${key} [${item.value ?? ""}]`));
+      dst.customData.set(key, { ...item });
+    }
+  }
+};
+var PROTECTED_KEYS = /* @__PURE__ */ new Set(["_CREATED_", "FDO_SECRETS_EXPOSED_GROUP", "KPXC_REMOTE_SYNC_SETTINGS", "KPXC_SYNC_GENERATION"]);
+var GENERATED_KEYS = /* @__PURE__ */ new Set(["_LAST_MODIFIED", "KPXC_RANDOM_SLUG", "KPXC_SYNC_GENERATION"]);
+function customDataTime(m) {
+  const stamp = Date.parse(m.get("_LAST_MODIFIED")?.value ?? "");
+  if (!Number.isNaN(stamp)) return stamp;
+  let latest;
+  for (const item of m.values()) {
+    const t = item.lastModified?.getTime();
+    if (t !== void 0 && (latest === void 0 || t > latest)) latest = t;
+  }
+  return latest;
 }
+function mergeInto(source, target, mode = "keep-newer") {
+  const pass = new Pass(source, target);
+  pass.walk(source.getDefaultGroup(), target.getDefaultGroup());
+  if (mode === "synchronize") pass.deletions();
+  pass.metadata();
+  return pass.changes;
+}
+
+// ../sdk/src/merge/merger.ts
 async function combineEntries(local, localDb, remote, remoteDb, base, now = () => /* @__PURE__ */ new Date()) {
   const localIsNewer = entrySeconds(local) >= entrySeconds(remote);
   const { merged, conflicts } = resolveFields(local, remote, base, localIsNewer, { local: localDb, remote: remoteDb });
@@ -19516,13 +19754,13 @@ async function combineEntries(local, localDb, remote, remoteDb, base, now = () =
     [older, olderDb],
     [newer, newerDb]
   ]) {
-    const before = cloneEntry(entry, db, db, false);
+    const before = copyEntry(entry, db, db, "plain");
     let modified = false;
     if (entry === older) {
       modified = emittingDataDiffers(entry, newer);
       const history = entry.history;
       const parent = entry.parentGroup;
-      copyEntryData(entry, newer, newerDb, db);
+      overwriteEntryData(entry, newer, newerDb, db);
       entry.history = history;
       entry.parentGroup = parent;
     }
@@ -19536,7 +19774,7 @@ async function combineEntries(local, localDb, remote, remoteDb, base, now = () =
     entry.times.lastModTime = when;
     if (modified) {
       entry.history.push(before);
-      truncateHistory(entry, db);
+      trimHistory(entry, db);
     }
   }
   return conflicts;
@@ -19550,276 +19788,16 @@ function emittingDataDiffers(a, b) {
       const prot = k.startsWith("attribute/") && e.fields.get(k.slice(10)) instanceof kdbxweb.ProtectedValue;
       parts.push(`${k}=${v.cmp}${prot ? "/p" : ""}`);
     }
-    return parts.join("\n") + "|" + customDataJson(e.customData) + "|" + JSON.stringify(e.autoType);
+    return parts.join("\n") + "|" + customDataKey(e.customData) + "|" + JSON.stringify(e.autoType);
   };
   return pick(a) !== pick(b);
-}
-var Merger = class {
-  constructor(sourceDb, targetDb, mode) {
-    this.sourceDb = sourceDb;
-    this.targetDb = targetDb;
-    this.mode = mode;
-  }
-  merge() {
-    const ctx = { sourceDb: this.sourceDb, targetDb: this.targetDb, sourceGroup: this.sourceDb.getDefaultGroup(), targetGroup: this.targetDb.getDefaultGroup() };
-    return [...this.mergeGroup(ctx), ...this.mergeDeletions(), ...this.mergeMetadata()];
-  }
-  moveEntry(entry, to) {
-    const from = entry.parentGroup;
-    if (from === to) return;
-    if (from) from.entries.splice(from.entries.indexOf(entry), 1);
-    to.entries.push(entry);
-    entry.parentGroup = to;
-  }
-  moveGroup(group, to) {
-    const from = group.parentGroup;
-    if (from === to) return;
-    if (from) from.groups.splice(from.groups.indexOf(group), 1);
-    to.groups.push(group);
-    group.parentGroup = to;
-  }
-  eraseEntry(entry) {
-    const p = entry.parentGroup;
-    if (p) p.entries.splice(p.entries.indexOf(entry), 1);
-    entry.parentGroup = void 0;
-  }
-  mergeGroup(ctx) {
-    const changes = [];
-    const targetRoot = ctx.targetDb.getDefaultGroup();
-    for (const sourceEntry of [...ctx.sourceGroup.entries]) {
-      let targetEntry = findEntryByUuid(ctx.targetDb, sourceEntry.uuid.id);
-      if (!targetEntry) {
-        changes.push(change("added", sourceEntry, ""));
-        targetEntry = cloneEntry(sourceEntry, ctx.sourceDb, ctx.targetDb, true);
-        targetEntry.parentGroup = void 0;
-        this.moveEntry(targetEntry, ctx.targetGroup);
-      } else {
-        const locationChanged = (targetEntry.times.locationChanged?.getTime() ?? 0) < (sourceEntry.times.locationChanged?.getTime() ?? 0);
-        if (locationChanged && targetEntry.parentGroup !== ctx.targetGroup) {
-          changes.push(change("moved", sourceEntry, `Previous location: ${targetEntry.parentGroup?.name ?? ""}`));
-          this.moveEntry(targetEntry, ctx.targetGroup);
-        }
-        changes.push(...this.resolveEntryConflict(sourceEntry, targetEntry));
-      }
-    }
-    for (const sourceChild of [...ctx.sourceGroup.groups]) {
-      let targetChild = findGroupByUuid(targetRoot, sourceChild.uuid.id);
-      if (!targetChild) {
-        changes.push(change("added", sourceChild, `Number of entries in group: ${sourceChild.entries.length}`));
-        targetChild = new kdbxweb.KdbxGroup();
-        targetChild.copyFrom(sourceChild);
-        targetChild.groups = [];
-        targetChild.entries = [];
-        this.moveGroup(targetChild, ctx.targetGroup);
-        targetChild.times.locationChanged = sourceChild.times.locationChanged;
-        if (sourceChild.customIcon && !ctx.targetDb.meta.customIcons.has(sourceChild.customIcon.id)) {
-          const ci = ctx.sourceDb.meta.customIcons.get(sourceChild.customIcon.id);
-          if (ci) ctx.targetDb.meta.customIcons.set(sourceChild.customIcon.id, ci);
-        }
-      } else {
-        const locationChanged = (targetChild.times.locationChanged?.getTime() ?? 0) < (sourceChild.times.locationChanged?.getTime() ?? 0);
-        if (locationChanged && targetChild.parentGroup !== ctx.targetGroup) {
-          changes.push(change("moved", sourceChild, `Previous location: ${targetChild.name ?? ""}`));
-          this.moveGroup(targetChild, ctx.targetGroup);
-          targetChild.times.locationChanged = sourceChild.times.locationChanged;
-        }
-        changes.push(...this.resolveGroupConflict(sourceChild, targetChild, ctx));
-      }
-      changes.push(...this.mergeGroup({ ...ctx, sourceGroup: sourceChild, targetGroup: targetChild }));
-    }
-    return changes;
-  }
-  resolveGroupConflict(source, target, ctx) {
-    if (!(seconds(target.times.lastModTime) < seconds(source.times.lastModTime))) return [];
-    const mods = [];
-    if (target.name !== source.name) {
-      mods.push("Group name");
-      target.name = source.name;
-    }
-    if ((target.notes ?? "") !== (source.notes ?? "")) {
-      mods.push("Notes");
-      target.notes = source.notes;
-    }
-    if (source.customIcon && !source.customIcon.empty) {
-      if (target.customIcon?.id !== source.customIcon.id) {
-        mods.push("Icon (UUID)");
-        target.customIcon = source.customIcon;
-        const ci = ctx.sourceDb.meta.customIcons.get(source.customIcon.id);
-        if (ci && !ctx.targetDb.meta.customIcons.has(source.customIcon.id)) ctx.targetDb.meta.customIcons.set(source.customIcon.id, ci);
-      }
-    } else if (target.icon !== source.icon || target.customIcon) {
-      mods.push("Icon (Number)");
-      target.icon = source.icon;
-      target.customIcon = void 0;
-    }
-    if (seconds(target.times.expiryTime) !== seconds(source.times.expiryTime)) {
-      mods.push("Expiry time");
-      target.times.expiryTime = source.times.expiryTime;
-    }
-    mods.push("Modification time");
-    target.times.lastModTime = source.times.lastModTime;
-    return [change("modified", source, mods.join(", "))];
-  }
-  resolveEntryConflict(source, target) {
-    const cmp = Math.sign(entrySeconds(target) - entrySeconds(source));
-    const maxItems = this.targetDb.meta.historyMaxItems ?? 10;
-    if (cmp < 0) {
-      const group = target.parentGroup;
-      const cloned = cloneEntry(source, this.sourceDb, this.targetDb, true);
-      this.mergeHistory(target, cloned, maxItems);
-      this.eraseEntry(target);
-      this.moveEntry(cloned, group);
-      return [change("modified", target, "Add local modifications to new entry")];
-    }
-    const changed = this.mergeHistory(source, target, maxItems);
-    return changed ? [change("modified", target, "Add new modifications to existing entry")] : [];
-  }
-  /** Merger::mergeHistory, keyed by whole seconds like Clock::serialized. Returns whether it changed. */
-  mergeHistory(source, target, maxItems) {
-    const targetHistory = target.history;
-    const cmp = Math.sign(entrySeconds(source) - entrySeconds(target));
-    const preferLocal = cmp < 0;
-    const preferRemote = cmp > 0;
-    const merged = /* @__PURE__ */ new Map();
-    const srcDb = source === target ? this.targetDb : this.sourceDb;
-    for (const h of targetHistory) merged.set(entrySeconds(h), cloneEntry(h, this.targetDb, this.targetDb, false));
-    for (const h of source.history) {
-      const t = entrySeconds(h);
-      if (preferRemote && merged.has(t)) merged.delete(t);
-      if (!merged.has(t)) merged.set(t, cloneEntry(h, srcDb, this.targetDb, false));
-    }
-    const tt = entrySeconds(target);
-    const st = entrySeconds(source);
-    if (tt < st) {
-      if (preferLocal && merged.has(tt)) merged.delete(tt);
-      if (!merged.has(tt)) merged.set(tt, cloneEntry(target, this.targetDb, this.targetDb, false));
-    } else if (tt > st) {
-      if (!merged.has(st)) merged.set(st, cloneEntry(source, srcDb, this.targetDb, false));
-    }
-    const updated = [...merged.entries()].sort((a, b) => a[0] - b[0]).map(([, e]) => e);
-    let changed = false;
-    for (let i = 0; i < maxItems; i++) {
-      const o = targetHistory[targetHistory.length - i];
-      const n = updated[updated.length - i];
-      if (!o && !n) continue;
-      if (o && n && entryEquals(o, n)) continue;
-      changed = true;
-      break;
-    }
-    if (!changed) return false;
-    target.history = updated;
-    truncateHistory(target, this.targetDb);
-    return true;
-  }
-  mergeDeletions() {
-    if (this.mode !== "synchronize") return [];
-    const changes = [];
-    const targetRoot = this.targetDb.getDefaultGroup();
-    const all = [...this.targetDb.deletedObjects, ...this.sourceDb.deletedObjects];
-    const merged = /* @__PURE__ */ new Map();
-    const deletions = [];
-    const entries = [];
-    const groups = [];
-    for (const o of all) {
-      const id = o.uuid?.id;
-      if (!id || !o.deletionTime) continue;
-      if (!merged.has(id)) {
-        merged.set(id, o);
-        const e = findEntryByUuid(this.targetDb, id);
-        if (e) {
-          entries.push(e);
-          continue;
-        }
-        const g = findGroupByUuid(targetRoot, id);
-        if (g && g !== targetRoot) {
-          groups.push(g);
-          continue;
-        }
-        deletions.push(o);
-        continue;
-      }
-      if (merged.get(id).deletionTime > o.deletionTime) merged.set(id, o);
-    }
-    for (const e of entries) {
-      const o = merged.get(e.uuid.id);
-      if ((e.times.lastModTime?.getTime() ?? 0) > o.deletionTime.getTime()) continue;
-      deletions.push(o);
-      changes.push(change("deleted", e, e.parentGroup ? "Explicit deletion" : "Implicit deletion (e.g. removal of parent group)"));
-      this.eraseEntry(e);
-    }
-    const pending = [...groups];
-    while (pending.length) {
-      const g = pending.shift();
-      if (g.groups.some((c) => pending.includes(c))) {
-        pending.push(g);
-        continue;
-      }
-      const o = merged.get(g.uuid.id);
-      if ((g.times.lastModTime?.getTime() ?? 0) > o.deletionTime.getTime()) continue;
-      if ([...allEntries(g)].length || [...allGroups(g)].length) continue;
-      deletions.push(o);
-      changes.push(change("deleted", g, g.parentGroup ? "Explicit deletion" : "Implicit deletion (e.g. removal of parent group)"));
-      const p = g.parentGroup;
-      if (p) p.groups.splice(p.groups.indexOf(g), 1);
-    }
-    const key = (l) => l.map((o) => `${o.uuid?.id}@${o.deletionTime?.getTime()}`).join(",");
-    if (key(deletions) !== key(this.targetDb.deletedObjects)) {
-      changes.push(change("metadata", null, "Changed deleted objects"));
-      this.targetDb.deletedObjects = deletions;
-    }
-    return changes;
-  }
-  mergeMetadata() {
-    const changes = [];
-    const s = this.sourceDb.meta;
-    const t = this.targetDb.meta;
-    for (const [id, icon] of s.customIcons) {
-      if (!t.customIcons.has(id)) {
-        changes.push(change("metadata", null, `Adding new icon ${id}`));
-        t.customIcons.set(id, icon);
-      }
-    }
-    const lm = (m) => {
-      const v = m.get("_LAST_MODIFIED")?.value;
-      if (v) {
-        const d = Date.parse(v);
-        if (!Number.isNaN(d)) return d;
-      }
-      let latest;
-      for (const item of m.values()) if (item.lastModified && (latest === void 0 || item.lastModified.getTime() > latest)) latest = item.lastModified.getTime();
-      return latest;
-    };
-    const tl = lm(t.customData);
-    const sl = lm(s.customData);
-    if (!t.customData.has("_LAST_MODIFIED") || tl !== void 0 && sl !== void 0 && tl < sl) {
-      const isProtected = (k) => k.startsWith("KPXC_BROWSER_") || ["_CREATED_", "FDO_SECRETS_EXPOSED_GROUP", "KPXC_REMOTE_SYNC_SETTINGS", "KPXC_SYNC_GENERATION"].includes(k);
-      const isAutoGenerated = (k) => ["_LAST_MODIFIED", "KPXC_RANDOM_SLUG", "KPXC_SYNC_GENERATION"].includes(k);
-      for (const k of [...t.customData.keys()]) {
-        if (!s.customData.has(k) && !isProtected(k)) {
-          changes.push(change("metadata", null, `Removed custom data ${k} [${t.customData.get(k)?.value ?? ""}]`));
-          t.customData.delete(k);
-        }
-      }
-      for (const [k, item] of s.customData) {
-        if (isAutoGenerated(k)) continue;
-        if (item.value !== t.customData.get(k)?.value) {
-          changes.push(change("metadata", null, `Adding custom data ${k} [${item.value ?? ""}]`));
-          t.customData.set(k, { ...item });
-        }
-      }
-    }
-    return changes;
-  }
-};
-function mergeInto(source, target, mode = "keep-newer") {
-  return new Merger(source, target, mode).merge();
 }
 async function mergeDatabases(local, remote, base, opts = {}) {
   const changes = [];
   const conflicts = /* @__PURE__ */ new Map();
   let combined = 0;
   if (base) {
-    for (const localEntry of [...allEntries(local.getDefaultGroup())]) {
+    for (const localEntry of [...entriesUnder(local.getDefaultGroup())]) {
       const remoteEntry = findEntryByUuid(remote, localEntry.uuid.id);
       const baseEntry = findEntryByUuid(base, localEntry.uuid.id);
       if (!remoteEntry || !baseEntry) continue;
@@ -19833,7 +19811,7 @@ async function mergeDatabases(local, remote, base, opts = {}) {
         const c = await combineEntries(localEntry, local, remoteEntry, remote, baseEntry, opts.now);
         if (c.length) conflicts.set(localEntry.uuid.id, c);
         combined++;
-        changes.push(change("modified", localEntry, "Combined the changes made on both devices"));
+        changes.push(record("modified", localEntry, "Combined the changes made on both devices"));
       }
     }
   }
@@ -19850,7 +19828,7 @@ async function mergeDatabases(local, remote, base, opts = {}) {
 }
 function snapshotOf(db) {
   const s = {};
-  for (const e of allEntries(db.getDefaultGroup())) s[e.uuid.id] = e.times.lastModTime?.getTime() ?? 0;
+  for (const e of entriesUnder(db.getDefaultGroup())) s[e.uuid.id] = e.times.lastModTime?.getTime() ?? 0;
   return s;
 }
 function changesSince(local, remote, snapshotMs) {
@@ -19880,11 +19858,11 @@ function findConflicts(local, remote, snapshot) {
     if (l && r) {
       const c = changesSince(l, r, ms);
       if (!c.local || !c.remote || sameFields(l, r)) continue;
-      out.push({ uuid: id, kind: "edited-on-both", title: title(l), fields: [] });
+      out.push({ uuid: id, kind: "edited-on-both", title: entryTitle(l), fields: [] });
     } else if (r && deletedIn(local, id) && changedSince(r, ms)) {
-      out.push({ uuid: id, kind: "deleted-here-edited-there", title: title(r), fields: [] });
+      out.push({ uuid: id, kind: "deleted-here-edited-there", title: entryTitle(r), fields: [] });
     } else if (l && deletedIn(remote, id) && changedSince(l, ms)) {
-      out.push({ uuid: id, kind: "edited-here-deleted-there", title: title(l), fields: [] });
+      out.push({ uuid: id, kind: "edited-here-deleted-there", title: entryTitle(l), fields: [] });
     }
   }
   return out;
@@ -20048,10 +20026,10 @@ function uuidMatches(entry, id) {
   }
   return getUuidString(entry.uuid) === id;
 }
-function* entriesUnder(group, recycleBin) {
+function* entriesUnder2(group, recycleBin) {
   if (recycleBin && group.uuid.toString() === recycleBin) return;
   yield* group.entries;
-  for (const g of group.groups) yield* entriesUnder(g, recycleBin);
+  for (const g of group.groups) yield* entriesUnder2(g, recycleBin);
 }
 function findEntry(db, ref) {
   let group = db.getDefaultGroup();
@@ -20061,7 +20039,7 @@ function findEntry(db, ref) {
     group = next;
   }
   const rb = db.meta.recycleBinUuid?.toString();
-  const all = [...entriesUnder(group, rb)];
+  const all = [...entriesUnder2(group, rb)];
   const byId = all.find((e) => uuidMatches(e, ref.entry));
   if (byId) return byId;
   const byTitle = all.filter((e) => fieldText(e.fields.get("Title")) === ref.entry);
