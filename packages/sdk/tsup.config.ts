@@ -20,5 +20,5 @@ export default defineConfig({
   splitting: true,
   treeshake: true,
   // The vendored libopaque build stays a separate file next to dist/ (see vendor/libopaque/SOURCE.md)
-  external: ["@kpnx/sdk/vendor/libopaque.cjs", "node:fs/promises", "node:path", "node:os"],
+  external: ["@openvireo/sdk/vendor/libopaque.cjs", "node:fs/promises", "node:path", "node:os"],
 });

@@ -6,8 +6,8 @@
 import { readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
-import { Account, KpxError, ServiceAccount, type FetchLike } from "@kpnx/sdk";
-import { FileStorage } from "@kpnx/sdk/storage/node";
+import { Account, KpxError, ServiceAccount, type FetchLike } from "@openvireo/sdk";
+import { FileStorage } from "@openvireo/sdk/storage/node";
 import { type VaultSource, serviceAccountSource, userSource } from "./source.js";
 
 export const DEFAULT_ISSUER = "https://accounts.keepassxc.org";

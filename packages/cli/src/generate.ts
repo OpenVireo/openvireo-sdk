@@ -1,5 +1,5 @@
 /** Password generation for `kpx rotate --generate` and `kpx item create|edit --generate`. */
-import { KpxError, randomBytes } from "@kpnx/sdk";
+import { KpxError, randomBytes } from "@openvireo/sdk";
 
 export const CHARSETS = {
   lower: "abcdefghijklmnopqrstuvwxyz",

@@ -1,5 +1,5 @@
 {
-  "name": "@kpnx/github-action",
+  "name": "@openvireo/github-action",
   "version": "0.1.0",
   "private": true,
   "description": "GitHub Action: load KeePassXC vault secrets into the environment with a kpx service account, masked",
@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@kpnx/cli": "0.1.0",
-    "@kpnx/sdk": "0.1.0"
+    "@openvireo/cli": "0.1.0",
+    "@openvireo/sdk": "0.1.0"
   }
 }

@@ -53,11 +53,11 @@ workflow (`kpx rotate`), use the CLI with a `write` grant instead:
 ## Development
 
 ```sh
-npm run typecheck -w @kpnx/github-action
-npm test -w @kpnx/github-action
-npm run build -w @kpnx/github-action   # rebuilds dist/index.mjs: commit it with the source change
+npm run typecheck -w @openvireo/github-action
+npm test -w @openvireo/github-action
+npm run build -w @openvireo/github-action   # rebuilds dist/index.mjs: commit it with the source change
 ```
 
-The bundle maps `@kpnx/sdk` and `@kpnx/cli` to their sources and leaves out the libopaque WASM build
+The bundle maps `@openvireo/sdk` and `@openvireo/cli` to their sources and leaves out the libopaque WASM build
 (a service account never runs OPAQUE). Tests run the action against the SDK's in-memory auth and sync
 servers and check that the committed bundle loads in plain Node.

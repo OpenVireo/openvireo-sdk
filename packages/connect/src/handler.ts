@@ -13,7 +13,7 @@
  * {vault} is a vault id or name, {entry} an entry UUID or title; segments are percent-encoded.
  * Errors are {"error","code"} as in openapi.yaml.
  */
-import { KpxError, type Item, type Kdbx, type SaVault, type ServiceAccount, findEntry, itemOf, listItems, resolveFieldName, setItemFields } from "@kpnx/sdk";
+import { KpxError, type Item, type Kdbx, type SaVault, type ServiceAccount, findEntry, itemOf, listItems, resolveFieldName, setItemFields } from "@openvireo/sdk";
 import { type ConnectToken, allowsVault, authenticate } from "./tokens.js";
 
 /** The part of ServiceAccount the server uses (a fake in tests). */

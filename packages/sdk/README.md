@@ -1,4 +1,4 @@
-# @kpnx/sdk
+# @openvireo/sdk
 
 TypeScript SDK for KeePassXC accounts, vault sync and sharing (**kpx v1**, see
 `keepassxc/docs/plans/accounts/SPEC.md`). It runs in browsers, Node ≥ 20 and Bun (also when compiled
@@ -7,20 +7,20 @@ keysets and sealed keys.
 
 | Subpath | What it contains |
 |---|---|
-| `@kpnx/sdk` | everything below, plus `Account`, `ServiceAccount`, `SelfHostedSync` |
-| `@kpnx/sdk/crypto` | Secret Key, AUK (Argon2id), wrap/seal, keysets, fingerprints, vault names, SA/refresh tokens, JWT verify |
-| `@kpnx/sdk/opaque` | OPAQUE client over the vendored libopaque WASM build (lazy-loaded) |
-| `@kpnx/sdk/auth` | `AuthClient` (all of `openapi.yaml`), discovery, `TokenManager`, storage adapters |
-| `@kpnx/sdk/storage/node` | `FileStorage` (0600 JSON file) for the CLI and connect |
-| `@kpnx/sdk/sync` | `SyncClient` (vault + legacy routes), `syncKdbx` merge/retry loop, SSE `subscribeEvents` |
-| `@kpnx/sdk/vault` | kdbxweb open/save, vault-key credentials, rotation helpers, entry helpers, `kpx://` references |
-| `@kpnx/sdk/merge` | port of KeePassXC's three-way merge (`SyncEngine::mergeDatabases` + `Merger`) |
-| `@kpnx/sdk/testing` | in-memory auth and sync servers (`FakeAuthServer`, `FakeSyncServer`) for app tests; not for production |
+| `@openvireo/sdk` | everything below, plus `Account`, `ServiceAccount`, `SelfHostedSync` |
+| `@openvireo/sdk/crypto` | Secret Key, AUK (Argon2id), wrap/seal, keysets, fingerprints, vault names, SA/refresh tokens, JWT verify |
+| `@openvireo/sdk/opaque` | OPAQUE client over the vendored libopaque WASM build (lazy-loaded) |
+| `@openvireo/sdk/auth` | `AuthClient` (all of `openapi.yaml`), discovery, `TokenManager`, storage adapters |
+| `@openvireo/sdk/storage/node` | `FileStorage` (0600 JSON file) for the CLI and connect |
+| `@openvireo/sdk/sync` | `SyncClient` (vault + legacy routes), `syncKdbx` merge/retry loop, SSE `subscribeEvents` |
+| `@openvireo/sdk/vault` | kdbxweb open/save, vault-key credentials, rotation helpers, entry helpers, `kpx://` references |
+| `@openvireo/sdk/merge` | port of KeePassXC's three-way merge (`SyncEngine::mergeDatabases` + `Merger`) |
+| `@openvireo/sdk/testing` | in-memory auth and sync servers (`FakeAuthServer`, `FakeSyncServer`) for app tests; not for production |
 
 ## Hosted account
 
 ```ts
-import { Account, browserStorage } from "@kpnx/sdk";
+import { Account, browserStorage } from "@openvireo/sdk";
 
 const account = await Account.connect({
   issuer: "https://accounts.keepassxc.org",       // discovery: /.well-known/kpx-configuration
@@ -81,7 +81,7 @@ const { vaults, dropped } = await account.reconnect(); // back online; revoked v
 ## Service accounts (CLI, connect, GitHub Action)
 
 ```ts
-import { Account, ServiceAccount } from "@kpnx/sdk";
+import { Account, ServiceAccount } from "@openvireo/sdk";
 
 // An org owner/admin creates it; the token is shown once
 const { token } = await account.createServiceAccount(orgId, { name: "ci", vaults: [{ id: vaultId, role: "read" }] });
@@ -99,7 +99,7 @@ References are `kpx://<vault id or name>/[<group>/…]<entry uuid or title>/<fie
 For long-running processes and whole entries (used by `kpx connect` and `kpx item`):
 
 ```ts
-import { ServiceAccount, findEntry, itemOf, listItems, parseItemReference, setItemFields } from "@kpnx/sdk";
+import { ServiceAccount, findEntry, itemOf, listItems, parseItemReference, setItemFields } from "@openvireo/sdk";
 
 const db = await sa.pull("Team Infra");             // HEAD with the last ETag; downloads only if changed
 listItems(db);                                      // [{id, title, group, fields: {}, protected, …}] without values
@@ -113,7 +113,7 @@ await sa.edit("Team Infra", (db) => setItemFields(db, { groupPath: ["Apps"], ent
 ## Self-hosted sync server (no account)
 
 ```ts
-import { SelfHostedSync, decryptKdbx, passwordCredentials } from "@kpnx/sdk";
+import { SelfHostedSync, decryptKdbx, passwordCredentials } from "@openvireo/sdk";
 
 const server = await SelfHostedSync.pair("https://sync.example.org", "ABCD-EFGH", "Web", { storage });
 const { dbInstance } = await decryptKdbx(fileBytes, password);
@@ -135,7 +135,7 @@ server.events({ onEvent: (e) => e.type === "database" && resync(e.id) });
   `@noble/hashes` (Node 24 and Bun 1.3, M-series Mac). `setArgon2Impl(nobleArgon2)` switches to
   pure JS, and kdbxweb uses the same implementation (`initKdbx()`).
 - The web app's `keepass-crypto.ts` helpers (`decryptKdbx`, `collectAllDbData`, `addEntryToDb`, …) are
-  in `@kpnx/sdk/vault` with the same names and shapes. `editEntryInDb` now pushes history first.
+  in `@openvireo/sdk/vault` with the same names and shapes. `editEntryInDb` now pushes history first.
 
 ## OPAQUE build: read before shipping
 
@@ -153,11 +153,11 @@ Bundlers: the module is plain CommonJS with the WASM inlined. Webpack may need
 
 ```sh
 npm install
-npm run typecheck -w @kpnx/sdk      # tsc --noEmit
-npm test -w @kpnx/sdk               # vitest
-npm run build -w @kpnx/sdk && npm run smoke -w @kpnx/sdk   # dist/ in Node and Bun
+npm run typecheck -w @openvireo/sdk      # tsc --noEmit
+npm test -w @openvireo/sdk               # vitest
+npm run build -w @openvireo/sdk && npm run smoke -w @openvireo/sdk   # dist/ in Node and Bun
 # OPAQUE against the C core (Python binding), see opaque-spike/README.md:
-KPX_OPAQUE_PYTHON=…/venv/bin/python3 KPX_OPAQUE_PYBINDING=…/libopaque/python LIBOPAQUE=…/libopaque.dylib npm test -w @kpnx/sdk
+KPX_OPAQUE_PYTHON=…/venv/bin/python3 KPX_OPAQUE_PYBINDING=…/libopaque/python LIBOPAQUE=…/libopaque.dylib npm test -w @openvireo/sdk
 ```
 
 License: GPL-3.0-or-later (it bundles the GPL-3.0 libopaque JS build).

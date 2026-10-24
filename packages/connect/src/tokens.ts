@@ -3,7 +3,7 @@
  * `kpx_ct_` + base64url(32 random bytes), stored only as its SHA-256, and scoped to some vaults with
  * read or write access.
  */
-import { KpxError, b64u, ctEqual, fromHex, randomBytes, sha256, toHex, utf8 } from "@kpnx/sdk";
+import { KpxError, b64u, ctEqual, fromHex, randomBytes, sha256, toHex, utf8 } from "@openvireo/sdk";
 
 export const CONNECT_TOKEN_PREFIX = "kpx_ct_";
 

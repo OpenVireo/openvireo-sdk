@@ -1,5 +1,5 @@
 {
-  "name": "kpnx-sdk",
+  "name": "openvireo-sdk",
   "private": true,
   "type": "module",
   "workspaces": [

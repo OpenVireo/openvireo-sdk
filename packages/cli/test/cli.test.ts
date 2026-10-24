@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ServiceAccount } from "@kpnx/sdk";
+import { ServiceAccount } from "@openvireo/sdk";
 import { type World, editBetweenGetAndPut, makeWorld } from "../../sdk/test/helpers/world.js";
 import { MASK, main } from "../src/index.js";
 

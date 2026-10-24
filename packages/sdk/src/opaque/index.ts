@@ -81,7 +81,7 @@ export function loadOpaque(): Promise<LibOpaque> {
     con.log = () => {};
     con.warn = () => {};
     try {
-      const mod = (await import("@kpnx/sdk/vendor/libopaque.cjs")) as { default?: LibOpaque } & LibOpaque;
+      const mod = (await import("@openvireo/sdk/vendor/libopaque.cjs")) as { default?: LibOpaque } & LibOpaque;
       lib = (mod.default ?? mod) as LibOpaque;
       await lib.ready;
     } finally {
@@ -138,7 +138,7 @@ async function checkBuild(): Promise<void> {
   if (policy === "refuse") throw new KpxError("opaque_failed", "the libopaque build uses fixed randomness (-DNORANDOM) and must not be used in production");
   if (!warned) {
     warned = true;
-    globalThis.console?.warn?.("[@kpnx/sdk] WARNING: the loaded libopaque build uses fixed randomness (-DNORANDOM); OPAQUE logins are not secure with it. See vendor/libopaque/SOURCE.md.");
+    globalThis.console?.warn?.("[@openvireo/sdk] WARNING: the loaded libopaque build uses fixed randomness (-DNORANDOM); OPAQUE logins are not secure with it. See vendor/libopaque/SOURCE.md.");
   }
 }
 

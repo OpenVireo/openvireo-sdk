@@ -3,8 +3,8 @@
  * reference, plus the `secrets` input lines. Each value (and each line of a multi-line value) is masked
  * before it is exported, so it can't show up unmasked in any later log line.
  */
-import { ServiceAccount, type FetchLike } from "@kpnx/sdk";
-import { findReferences, maskPatterns, resolveTemplate, serviceAccountSource } from "@kpnx/cli";
+import { ServiceAccount, type FetchLike } from "@openvireo/sdk";
+import { findReferences, maskPatterns, resolveTemplate, serviceAccountSource } from "@openvireo/cli";
 import { type ActionIo, addMask, error, exportVariable, getBooleanInput, getInput, info, setOutput } from "./core.js";
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;

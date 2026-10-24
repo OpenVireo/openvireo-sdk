@@ -10,5 +10,5 @@ export default defineConfig({
   dts: { entry: { index: "src/index.ts" } },
   sourcemap: true,
   clean: true,
-  external: ["@kpnx/sdk", "@kpnx/sdk/storage/node", "@kpnx/connect"],
+  external: ["@openvireo/sdk", "@openvireo/sdk/storage/node", "@openvireo/connect"],
 });

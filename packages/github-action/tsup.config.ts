@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 // One self-contained file (GitHub runs dist/index.mjs from the checkout, without npm install).
-// tsconfig.json maps @kpnx/* to their sources, so this doesn't depend on the other builds.
+// tsconfig.json maps @openvireo/* to their sources, so this doesn't depend on the other builds.
 export default defineConfig({
   entry: { index: "src/index.ts" },
   outDir: "dist",
@@ -12,7 +12,7 @@ export default defineConfig({
   tsconfig: "tsconfig.json",
   noExternal: [/.*/],
   // OPAQUE (user login) is never used by a service account: leave the 250 KB WASM build out
-  external: ["@kpnx/sdk/vendor/libopaque.cjs"],
+  external: ["@openvireo/sdk/vendor/libopaque.cjs"],
   splitting: false,
   sourcemap: false,
   clean: true,

@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import { KpxError, ServiceAccount, type FetchLike } from "@kpnx/sdk";
+import { KpxError, ServiceAccount, type FetchLike } from "@openvireo/sdk";
 import { type Handler, createConnectHandler } from "./handler.js";
 import { type ConnectToken, hashConnectToken, parseConnectTokens } from "./tokens.js";
 

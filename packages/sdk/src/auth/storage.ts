@@ -1,7 +1,7 @@
 /**
  * Pluggable persistent storage for sessions (refresh tokens), trusted-device Secret Keys and sync state.
  * Values are strings (JSON). Adapters: MemoryStorage (anywhere), IndexedDbStorage (browser),
- * FileStorage (Node/Bun, in "@kpnx/sdk/storage/node"), and EncryptedStorage, which wraps another
+ * FileStorage (Node/Bun, in "@openvireo/sdk/storage/node"), and EncryptedStorage, which wraps another
  * storage with a non-extractable WebCrypto AES-GCM key (SPEC §2: the web keeps the Secret Key that way).
  */
 import { b64u, fromB64u, fromUtf8, randomBytes, utf8 } from "../util/bytes.js";

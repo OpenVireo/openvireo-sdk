@@ -2,8 +2,8 @@
 import { writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { type ParseArgsOptionsConfig, parseArgs } from "node:util";
-import { KpxError, type FetchLike, findEntry, formatReference, itemOf, listItems, parseItemReference, parseReference, setItemFields, writeField } from "@kpnx/sdk";
-import { connectMain } from "@kpnx/connect";
+import { KpxError, type FetchLike, findEntry, formatReference, itemOf, listItems, parseItemReference, parseReference, setItemFields, writeField } from "@openvireo/sdk";
+import { connectMain } from "@openvireo/connect";
 import { generatePassword, parseCharsets } from "./generate.js";
 import { Masker } from "./mask.js";
 import { STRIPPED_ENV, runCommand } from "./run.js";
