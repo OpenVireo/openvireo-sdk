@@ -6,9 +6,9 @@ import { type ConnectToken, configFromEnv, connectMain, createConnectHandler, ha
 let w: World;
 let readSa: ServiceAccount;
 let writeSa: ServiceAccount;
-const READ = "kpx_ct_read";
-const WRITE = "kpx_ct_write";
-const SCOPED = "kpx_ct_scoped";
+const READ = "ov_ct_read";
+const WRITE = "ov_ct_write";
+const SCOPED = "ov_ct_scoped";
 const tokens: ConnectToken[] = [
   { name: "eso", sha256: hashConnectToken(READ), vaults: ["*"], access: "read" },
   { name: "app", sha256: hashConnectToken(WRITE), vaults: ["Team Infra"], access: "write" },
@@ -40,7 +40,7 @@ function client(source: ServiceAccount, opts: { cacheTtlMs?: number; log?: strin
   };
 }
 
-describe("kpx connect REST API", () => {
+describe("openvireo connect REST API", () => {
   it("needs one of its own bearer tokens, except for /health", async () => {
     const c = client(readSa);
     expect((await c("GET", "/health")).body).toEqual({ status: "ok" });
@@ -133,7 +133,7 @@ describe("kpx connect REST API", () => {
 
   it("serves over HTTP with startConnect", async () => {
     const { token, entry } = newConnectToken({ name: "eso", vaults: ["Team Infra"] });
-    const config = configFromEnv({ KPX_SERVICE_ACCOUNT_TOKEN: w.readToken, KPX_CONNECT_TOKENS: JSON.stringify({ tokens: [entry] }), KPX_CONNECT_PORT: "0" });
+    const config = configFromEnv({ OPENVIREO_SERVICE_ACCOUNT_TOKEN: w.readToken, OPENVIREO_CONNECT_TOKENS: JSON.stringify({ tokens: [entry] }), OPENVIREO_CONNECT_PORT: "0" });
     const running = await startConnect(config, { fetch: w.fetch });
     try {
       const res = await fetch(`${running.url}/v1/vaults/Team%20Infra/items/Deploy/Database?field=username`, { headers: { Authorization: `Bearer ${token}` } });
@@ -152,20 +152,20 @@ describe("connect configuration", () => {
     expect(() => parseConnectTokens('[{"name":"a","sha256":"xyz"}]')).toThrow(/sha256/);
     expect(() => parseConnectTokens(`[{"name":"a","sha256":"${"a".repeat(64)}","access":"admin"}]`)).toThrow(/access/);
     expect(parseConnectTokens(`[{"name":"a","sha256":"${"a".repeat(64)}"}]`)).toEqual([{ name: "a", sha256: "a".repeat(64), vaults: ["*"], access: "read" }]);
-    expect(() => configFromEnv({})).toThrow(/KPX_SERVICE_ACCOUNT_TOKEN/);
-    expect(() => configFromEnv({ KPX_SERVICE_ACCOUNT_TOKEN: "kpx_sa_x" })).toThrow(/no connect tokens/);
-    const c = configFromEnv({ KPX_SERVICE_ACCOUNT_TOKEN: "kpx_sa_x", KPX_CONNECT_TOKEN: "t", KPX_CONNECT_TOKEN_ACCESS: "write" });
+    expect(() => configFromEnv({})).toThrow(/OPENVIREO_SERVICE_ACCOUNT_TOKEN/);
+    expect(() => configFromEnv({ OPENVIREO_SERVICE_ACCOUNT_TOKEN: "ov_sa_x" })).toThrow(/no connect tokens/);
+    const c = configFromEnv({ OPENVIREO_SERVICE_ACCOUNT_TOKEN: "ov_sa_x", OPENVIREO_CONNECT_TOKEN: "t", OPENVIREO_CONNECT_TOKEN_ACCESS: "write" });
     expect([c.host, c.port, c.cacheTtlMs, c.tokens[0]!.access]).toEqual(["127.0.0.1", 8080, 5000, "write"]);
-    expect(() => configFromEnv({ KPX_SERVICE_ACCOUNT_TOKEN: "x", KPX_CONNECT_TOKEN: "t", KPX_CONNECT_PORT: "70000" })).toThrow(/PORT/);
+    expect(() => configFromEnv({ OPENVIREO_SERVICE_ACCOUNT_TOKEN: "x", OPENVIREO_CONNECT_TOKEN: "t", OPENVIREO_CONNECT_PORT: "70000" })).toThrow(/PORT/);
   });
 
-  it("`kpx connect token` prints a token and its config entry", async () => {
+  it("`openvireo connect token` prints a token and its config entry", async () => {
     let out = "";
     let err = "";
     const code = await connectMain(["token", "--name", "eso", "--vault", "Team Infra", "--write"], { env: {}, stdout: (s) => (out += s), stderr: (s) => (err += s) });
     expect(code).toBe(0);
     const token = out.trim();
-    expect(token).toMatch(/^kpx_ct_[A-Za-z0-9_-]{43}$/);
+    expect(token).toMatch(/^ov_ct_[A-Za-z0-9_-]{43}$/);
     const entry = JSON.parse(err.trim().split("\n").at(-1)!);
     expect(entry).toEqual({ name: "eso", sha256: hashConnectToken(token), vaults: ["Team Infra"], access: "write" });
     expect(err).not.toContain(token);

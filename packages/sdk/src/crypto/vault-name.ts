@@ -3,7 +3,7 @@ import { b64u, fromB64u, fromUtf8, utf8, wipe } from "../util/bytes.js";
 import { AAD, unwrap, wrap } from "./envelope.js";
 import { hkdf } from "./primitives.js";
 
-export const vaultNameKey = (vaultKey: Uint8Array): Uint8Array => hkdf(vaultKey, new Uint8Array(0), "kpx-vault-name-v1", 32);
+export const vaultNameKey = (vaultKey: Uint8Array): Uint8Array => hkdf(vaultKey, new Uint8Array(0), "ov-vault-name-v1", 32);
 
 export function encryptVaultName(vaultKey: Uint8Array, vaultId: string, name: string, nonce?: Uint8Array): string {
   const k = vaultNameKey(vaultKey);

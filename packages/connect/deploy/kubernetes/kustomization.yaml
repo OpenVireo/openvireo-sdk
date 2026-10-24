@@ -1,10 +1,10 @@
-# kpx connect + External Secrets Operator webhook stores (ESO itself is installed separately, see ../README.md).
+# openvireo connect + External Secrets Operator webhook stores (ESO itself is installed separately, see ../README.md).
 # kubectl apply -k packages/connect/deploy/kubernetes   (after filling in secrets.example.yaml or creating the Secrets)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: kpx-connect
+namespace: openvireo-connect
 resources:
   - namespace.yaml
   - secrets.example.yaml
-  - kpx-connect.yaml
+  - openvireo-connect.yaml
   - cluster-secret-store.yaml

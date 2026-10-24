@@ -9,7 +9,7 @@ import { b64u, fromB64u, fromHex, toHex } from "../src/util/bytes.js";
 import { conflictingFields } from "../src/merge/fields.js";
 import { findEntryByUuid } from "../src/merge/merger.js";
 
-const dir = process.env.KPX_MERGE_FIXTURES ?? fileURLToPath(new URL("./fixtures/merge-fixtures/", import.meta.url));
+const dir = process.env.OPENVIREO_MERGE_FIXTURES ?? fileURLToPath(new URL("./fixtures/merge-fixtures/", import.meta.url));
 const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
 const ROOT = "6e3a9f40-1c2b-4d5e-8f70-9a1b2c3d4e5f";
 const T0 = new Date("2026-01-01T00:00:00Z");

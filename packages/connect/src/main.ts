@@ -1,4 +1,4 @@
-/** `kpx connect [serve]` and `kpx connect token`: shared by the kpx-connect bin and the kpx CLI. */
+/** `openvireo connect [serve]` and `openvireo connect token`: shared by the openvireo-connect bin and the openvireo CLI. */
 import { parseArgs } from "node:util";
 import { KpxError, type FetchLike } from "@openvireo/sdk";
 import { configFromEnv, startConnect } from "./server.js";
@@ -14,8 +14,8 @@ export interface ConnectIo {
 }
 
 export const CONNECT_USAGE = `Usage:
-  kpx connect [serve]                      run the REST server (configured by environment, see README)
-  kpx connect token [--name N] [--vault V]... [--write]
+  openvireo connect [serve]                      run the REST server (configured by environment, see README)
+  openvireo connect token [--name N] [--vault V]... [--write]
                                            create a bearer token; prints it and its config entry
 `;
 
@@ -35,7 +35,7 @@ export async function connectMain(argv: string[], io: ConnectIo): Promise<number
     const { values } = parseArgs({ args: rest, options: { name: { type: "string" }, vault: { type: "string", multiple: true }, write: { type: "boolean" } }, strict: true });
     const { token, entry } = newConnectToken({ name: values.name ?? "default", vaults: values.vault, access: values.write ? "write" : "read" });
     io.stdout(`${token}\n`);
-    io.stderr(`Give the token above to the client and add this entry to KPX_CONNECT_TOKENS_FILE (the token itself is not stored):\n${JSON.stringify(entry)}\n`);
+    io.stderr(`Give the token above to the client and add this entry to OPENVIREO_CONNECT_TOKENS_FILE (the token itself is not stored):\n${JSON.stringify(entry)}\n`);
     return 0;
   }
   if (cmd !== "serve") {
@@ -45,7 +45,7 @@ export async function connectMain(argv: string[], io: ConnectIo): Promise<number
   if (rest.length) throw new KpxError("invalid_request", `unexpected arguments: ${rest.join(" ")}`);
   const config = configFromEnv(io.env);
   const running = await startConnect(config, { fetch: io.fetch, log: (l) => io.stderr(`${new Date().toISOString()} ${l}\n`) });
-  io.stderr(`kpx connect listening on ${running.url} (${config.tokens.length} token${config.tokens.length === 1 ? "" : "s"})\n`);
+  io.stderr(`openvireo connect listening on ${running.url} (${config.tokens.length} token${config.tokens.length === 1 ? "" : "s"})\n`);
   await (io.stopSignal ?? untilSignal());
   await running.close();
   return 0;

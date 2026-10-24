@@ -35,20 +35,20 @@ export interface AccessTokenSource {
 }
 
 export interface AuthClientOptions extends HttpOptions {
-  /** `{api}`, e.g. https://accounts.keepassxc.org/api/v1 */
+  /** `{api}`, e.g. https://accounts.openvireo.com/api/v1 */
   api: string;
   /** bearer tokens for authenticated routes (a TokenManager, or a fixed token for service accounts) */
   tokens?: AccessTokenSource;
 }
 
-/** Fetches `/.well-known/kpx-configuration` from the issuer (SPEC §10). */
+/** Fetches `/.well-known/openvireo-configuration` from the issuer (SPEC §10). */
 export async function discover(issuer: string, http: HttpOptions = {}): Promise<KpxConfiguration> {
   const base = issuer.replace(/\/+$/, "");
-  const cfg = await sendJson<KpxConfiguration>(http, `${base}/.well-known/kpx-configuration`);
+  const cfg = await sendJson<KpxConfiguration>(http, `${base}/.well-known/openvireo-configuration`);
   for (const k of ["issuer", "api", "sync", "jwks_uri"] as const) {
-    if (typeof cfg?.[k] !== "string") throw new KpxError("invalid_request", `kpx-configuration is missing "${k}"`);
+    if (typeof cfg?.[k] !== "string") throw new KpxError("invalid_request", `openvireo-configuration is missing "${k}"`);
   }
-  if (!cfg.opaque?.ids) throw new KpxError("invalid_request", "kpx-configuration is missing opaque.ids");
+  if (!cfg.opaque?.ids) throw new KpxError("invalid_request", "openvireo-configuration is missing opaque.ids");
   return cfg;
 }
 

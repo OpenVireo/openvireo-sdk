@@ -1,5 +1,5 @@
 /**
- * High-level API for a KeePassXC account (hosted mode): register, log in, unlock/lock, list and open
+ * High-level API for a OpenVireo account (hosted mode): register, log in, unlock/lock, list and open
  * vaults, share, revoke (with key rotation), and create service accounts.
  */
 import { KpxError, isUnreachable } from "./errors.js";
@@ -28,7 +28,7 @@ const isManager = (role: OrgRole) => role === "owner" || role === "admin";
 export type TotpPrompt = (ctx: { attempt: number; error?: KpxError }) => Promise<string>;
 
 export interface AccountOptions extends HttpOptions {
-  /** the hosted issuer, e.g. https://accounts.keepassxc.org */
+  /** the hosted issuer, e.g. https://accounts.openvireo.com */
   issuer: string;
   device: DeviceInfo;
   /** sessions, trusted-device Secret Keys and sync state (default: memory) */
@@ -106,7 +106,7 @@ export class Account {
   ) {
     this.storage = opts.storage ?? new MemoryStorage();
     const base = new AuthClient({ ...opts, api: config.api });
-    this.tokens = new TokenManager({ storage: new NamespacedStorage(this.storage, "kpx:"), refresh: (rt) => base.refresh(rt) });
+    this.tokens = new TokenManager({ storage: new NamespacedStorage(this.storage, "ov:"), refresh: (rt) => base.refresh(rt) });
     this.auth = base.withTokens(this.tokens);
     this.sync = new SyncClient({ ...opts, baseUrl: config.sync, token: this.tokens });
     this.tokens.onSignedOut(() => {

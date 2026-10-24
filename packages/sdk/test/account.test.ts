@@ -34,7 +34,7 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
     await expect(alice2.login({ email: "alice@example.com", password: "wrong", secretKey })).rejects.toMatchObject({ code: "unauthorized" });
     await alice2.login({ email: "alice@example.com", password: "correct horse ü", secretKey });
     const v2 = await alice2.openVault(vault.id);
-    expect(v2.read("kpx://Team%20Infra/GitHub/password")).toBe("s3cret");
+    expect(v2.read("ov://Team%20Infra/GitHub/password")).toBe("s3cret");
 
     // resume on device 1 from storage: signed in, locked, unlock with the stored Secret Key
     const resumed = await Account.connect({ issuer: ISSUER, fetch, storage, device: { name: "web", platform: "web" } });
@@ -48,7 +48,7 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
     const shared = await alice.share(vault.id, { email: "bob@example.com" }, "read");
     expect(shared.fingerprint).toBe(bob.fingerprint);
     const bv = await bob.openVault(vault.id);
-    expect(bv.read("kpx://x/GitHub/username")).toBe("ci");
+    expect(bv.read("ov://x/GitHub/username")).toBe("ci");
     const oldBlob = sync.blobs.get(`vaults/${vault.id}`)!.at(-1)!.data;
 
     // revoke → rotation: bob loses access, the blob is re-keyed, alice's other device follows
@@ -63,23 +63,23 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
     await expect(bv.sync()).rejects.toBeTruthy();
     await alice2.listVaults();
     const again = await alice2.openVault(vault.id);
-    expect(again.read("kpx://x/GitHub/password")).toBe("s3cret");
+    expect(again.read("ov://x/GitHub/password")).toBe("s3cret");
     expect((await alice2.listVaults())[0]!.name).toBe("Team Infra");
 
     // service account in an org with write access
     const org = await alice.auth.createOrg("Acme");
     const { token } = await alice.createServiceAccount(org.id, { name: "ci", vaults: [{ id: vault.id, role: "write" }] });
-    expect(token).toMatch(/^kpx_sa_/);
+    expect(token).toMatch(/^ov_sa_/);
     const sa = await ServiceAccount.fromToken(token, { fetch });
-    expect(await sa.read(`kpx://${vault.id}/GitHub/password`)).toBe("s3cret");
-    expect((await sa.inject("TOKEN=kpx://Team%20Infra/GitHub/password\n")).text).toBe("TOKEN=s3cret\n");
-    await sa.write("kpx://Team%20Infra/GitHub/password", "rotated-by-ci");
+    expect(await sa.read(`ov://${vault.id}/GitHub/password`)).toBe("s3cret");
+    expect((await sa.inject("TOKEN=ov://Team%20Infra/GitHub/password\n")).text).toBe("TOKEN=s3cret\n");
+    await sa.write("ov://Team%20Infra/GitHub/password", "rotated-by-ci");
     await again.sync();
-    expect(again.read("kpx://x/GitHub/password")).toBe("rotated-by-ci");
+    expect(again.read("ov://x/GitHub/password")).toBe("rotated-by-ci");
     // a second secret, issued by an admin without the first one
     const second = await alice.issueServiceAccountSecret(sa.saId);
     const sa2 = await ServiceAccount.fromToken(second.token, { fetch });
-    expect(await sa2.read("kpx://Team%20Infra/GitHub/password")).toBe("rotated-by-ci");
+    expect(await sa2.read("ov://Team%20Infra/GitHub/password")).toBe("rotated-by-ci");
     sa.close();
     sa2.close();
     expect(bobKit.secretKey).not.toBe(secretKey);
@@ -195,7 +195,7 @@ describe("Account settings (SPEC.md §16)", () => {
 
     const url = new URL(await alice.webSessionUrl("/billing/pricing"));
     expect(url.origin + url.pathname).toBe(ISSUER + "/session/claim");
-    expect(url.searchParams.get("code")).toMatch(/^kpx_ws_/);
+    expect(url.searchParams.get("code")).toMatch(/^ov_ws_/);
     expect(url.searchParams.get("next")).toBe("/billing/pricing");
   });
 
@@ -263,13 +263,13 @@ describe("Org members", () => {
     const confirmed = await alice.confirmMember(org.id, pending, [{ id: infra.id, role: "read" }]);
     expect(confirmed.status).toBe("confirmed");
     expect((await bob.listVaults()).map((v) => [v.name, v.role])).toEqual([["Infra", "read"]]);
-    expect((await bob.openVault(infra.id)).read("kpx://Infra/GitHub/password")).toBe("s3cret");
+    expect((await bob.openVault(infra.id)).read("ov://Infra/GitHub/password")).toBe("s3cret");
     await expect(bob.issueServiceAccountSecret(serviceAccount.id)).rejects.toMatchObject({ code: "forbidden" });
 
     // promotion: manage on every org vault, and the SA master key
     await alice.setMemberRole(org.id, confirmed, "admin");
     expect((await bob.listVaults()).map((v) => [v.name, v.role]).sort()).toEqual([["Infra", "manage"], ["Payroll", "manage"]]);
-    expect((await bob.issueServiceAccountSecret(serviceAccount.id)).token).toMatch(/^kpx_sa_/);
+    expect((await bob.issueServiceAccountSecret(serviceAccount.id)).token).toMatch(/^ov_sa_/);
 
     // removal: access goes at once, and both vault keys rotate
     const { rotated, failed } = await alice.removeMember(org.id, confirmed.user_id);

@@ -27,7 +27,7 @@ export interface Keyset extends PublicKeys {
   signSeed: Uint8Array;
 }
 
-const pubkeysMessage = (encPk: Uint8Array, signPk: Uint8Array) => concat(utf8("kpx-pubkeys-v1"), encPk, signPk);
+const pubkeysMessage = (encPk: Uint8Array, signPk: Uint8Array) => concat(utf8("ov-pubkeys-v1"), encPk, signPk);
 
 export function keysetFromSecrets(encSk: Uint8Array, signSeed: Uint8Array): Keyset {
   const encPk = x25519PublicKey(encSk);
@@ -67,13 +67,13 @@ export function publicKeysToJson(pub: PublicKeys): PublicKeysJson {
   return { enc_pk: b64u(pub.encPk), sign_pk: b64u(pub.signPk), sig: b64u(pub.sig) };
 }
 
-/** First 20 bytes of SHA-256("kpx-fp-v1" ‖ enc_pk ‖ sign_pk), lowercase hex in groups of 4. */
+/** First 20 bytes of SHA-256("ov-fp-v1" ‖ enc_pk ‖ sign_pk), lowercase hex in groups of 4. */
 export function fingerprint(pub: Pick<PublicKeys, "encPk" | "signPk">): string {
-  const h = toHex(sha256(concat(utf8("kpx-fp-v1"), pub.encPk, pub.signPk)).subarray(0, 20));
+  const h = toHex(sha256(concat(utf8("ov-fp-v1"), pub.encPk, pub.signPk)).subarray(0, 20));
   return h.match(/.{4}/g)!.join(" ");
 }
 
-/** Wraps enc_sk ‖ sign_seed with the AUK or SA master key ("kpx-keyset-v1"). */
+/** Wraps enc_sk ‖ sign_seed with the AUK or SA master key ("ov-keyset-v1"). */
 export function wrapKeyset(key: Uint8Array, ks: Keyset, nonce?: Uint8Array): WrappedKeysetJson {
   const plain = concat(ks.encSk, ks.signSeed);
   try {

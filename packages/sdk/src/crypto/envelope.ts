@@ -42,7 +42,7 @@ export function unwrap(key: Uint8Array, blob: Uint8Array, aad: string): Uint8Arr
 
 function sealKey(shared: Uint8Array, epk: Uint8Array, recipientPk: Uint8Array): Uint8Array {
   if (shared.every((b) => b === 0)) throw new KpxError("low_order_point", "X25519 result is all zero");
-  return hkdf(shared, concat(epk, recipientPk), "kpx-seal-v1", 32);
+  return hkdf(shared, concat(epk, recipientPk), "ov-seal-v1", 32);
 }
 
 function sharedSecret(sk: Uint8Array, pk: Uint8Array): Uint8Array {
@@ -61,7 +61,7 @@ export interface SealOptions {
   nonce?: Uint8Array;
 }
 
-/** sealed = 0x01 ‖ epk(32) ‖ nonce(24) ‖ XChaCha20-Poly1305(key, nonce, plaintext, aad), "kpx-seal-v1". */
+/** sealed = 0x01 ‖ epk(32) ‖ nonce(24) ‖ XChaCha20-Poly1305(key, nonce, plaintext, aad), "ov-seal-v1". */
 export function seal(recipientEncPk: Uint8Array, plaintext: Uint8Array, aad: string, opts: SealOptions = {}): Uint8Array {
   const esk = opts.ephemeralSecretKey?.slice() ?? x25519RandomSecret();
   const epk = x25519PublicKey(esk);
@@ -98,10 +98,10 @@ export function unseal(recipientEncSk: Uint8Array, sealed: Uint8Array, aad: stri
 
 // ---- AAD strings (SPEC §4, §6), used byte for byte
 export const AAD = {
-  keyset: "kpx-keyset-v1",
-  vaultKey: (vaultId: string) => `kpx-vault-key|${vaultId}`,
-  vaultName: (vaultId: string) => `kpx-vault-name|${vaultId}`,
-  saMaster: (saId: string) => `kpx-sa-master-v1|${saId}`,
+  keyset: "ov-keyset-v1",
+  vaultKey: (vaultId: string) => `ov-vault-key|${vaultId}`,
+  vaultName: (vaultId: string) => `ov-vault-name|${vaultId}`,
+  saMaster: (saId: string) => `ov-sa-master-v1|${saId}`,
 } as const;
 
 export const sealVaultKey = (recipientEncPk: Uint8Array, vaultId: string, vaultKey: Uint8Array, opts?: SealOptions) =>

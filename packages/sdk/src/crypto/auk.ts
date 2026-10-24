@@ -39,7 +39,7 @@ export interface DeriveAukOptions {
   kdfMin?: { m: number; t: number };
 }
 
-/** Argon2id(pw, salt) then HKDF(ikm=stretched, salt=SecretKey, info="kpx-auk-v1"). */
+/** Argon2id(pw, salt) then HKDF(ikm=stretched, salt=SecretKey, info="ov-auk-v1"). */
 export async function stretchPassword(password: string, kdf: KdfParams, opts: DeriveAukOptions = {}): Promise<Uint8Array> {
   if (!opts.allowWeak) checkKdfParams(kdf, opts.kdfMin);
   const pw = passwordBytes(password);
@@ -53,7 +53,7 @@ export async function stretchPassword(password: string, kdf: KdfParams, opts: De
 export async function deriveAuk(password: string, kdf: KdfParams, secretKey: Uint8Array, opts: DeriveAukOptions = {}): Promise<Uint8Array> {
   const stretched = await stretchPassword(password, kdf, opts);
   try {
-    return hkdf(stretched, secretKey, "kpx-auk-v1", 32);
+    return hkdf(stretched, secretKey, "ov-auk-v1", 32);
   } finally {
     wipe(stretched);
   }

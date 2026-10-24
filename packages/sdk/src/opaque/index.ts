@@ -7,12 +7,12 @@ import { KpxError } from "../errors.js";
 import { passwordBytes } from "../crypto/auk.js";
 import { wipe } from "../util/bytes.js";
 
-export const OPAQUE_CONTEXT = "kpx-opaque-v1";
+export const OPAQUE_CONTEXT = "ov-opaque-v1";
 
 export interface OpaqueIds {
   /** the account email, lowercased and trimmed */
   idU: string;
-  /** the issuer host, e.g. accounts.keepassxc.org */
+  /** the issuer host, e.g. accounts.openvireo.com */
   idS: string;
 }
 

@@ -1,6 +1,6 @@
 /**
- * Whole entries ("items") for the CLI's `kpx item` and `kpx connect`'s REST API. An item reference is
- * a secret reference without the field: kpx://<vault>/[<group>/…]<entry uuid or title>.
+ * Whole entries ("items") for the CLI's `openvireo item` and `openvireo connect`'s REST API. An item reference is
+ * a secret reference without the field: ov://<vault>/[<group>/…]<entry uuid or title>.
  */
 import { KpxError } from "../errors.js";
 import { kdbxweb, type Kdbx } from "./kdbx.js";
@@ -9,12 +9,12 @@ import { findEntry, resolveFieldName, type SecretReference } from "./reference.j
 
 export type ItemReference = Omit<SecretReference, "field">;
 
-const SCHEME = "kpx://";
+const SCHEME = "ov://";
 const STANDARD_FIELDS = ["Title", "UserName", "Password", "URL", "Notes"];
 
-/** Parses kpx://<vault>/[<group>/…]<entry>. */
+/** Parses ov://<vault>/[<group>/…]<entry>. */
 export function parseItemReference(ref: string): ItemReference {
-  if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a kpx:// reference: ${ref}`);
+  if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a ov:// reference: ${ref}`);
   const parts = ref.slice(SCHEME.length).split("/").map((p) => {
     try {
       return decodeURIComponent(p);
@@ -23,13 +23,13 @@ export function parseItemReference(ref: string): ItemReference {
     }
   });
   if (parts.length < 2 || parts.some((p) => p === "")) {
-    throw new KpxError("invalid_reference", `expected kpx://<vault>/<entry>: ${ref}`);
+    throw new KpxError("invalid_reference", `expected ov://<vault>/<entry>: ${ref}`);
   }
   return { vault: parts[0]!, groupPath: parts.slice(1, -1), entry: parts[parts.length - 1]! };
 }
 
 export interface Item {
-  /** entry UUID, 32 lowercase hex digits (as KeePassXC shows it) */
+  /** entry UUID, 32 lowercase hex digits (as OpenVireo shows it) */
   id: string;
   title: string;
   /** group names from the root group (excluded) down to the entry's group */

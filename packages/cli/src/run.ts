@@ -1,9 +1,9 @@
-/** `kpx run`: start a command with references resolved in its environment and its output masked. */
+/** `openvireo run`: start a command with references resolved in its environment and its output masked. */
 import { spawn } from "node:child_process";
 import { Masker } from "./mask.js";
 
 /** Variables the child never gets: it should use the secrets, not the credentials that unlock them. */
-export const STRIPPED_ENV = ["KPX_SERVICE_ACCOUNT_TOKEN", "KPX_SERVICE_ACCOUNT_TOKEN_FILE", "KPX_PASSWORD", "KPX_SECRET_KEY"];
+export const STRIPPED_ENV = ["OPENVIREO_SERVICE_ACCOUNT_TOKEN", "OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE", "OPENVIREO_PASSWORD", "OPENVIREO_SECRET_KEY"];
 
 export interface RunOptions {
   command: string;

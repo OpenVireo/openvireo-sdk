@@ -24,19 +24,19 @@ const config = {
   api: API,
   sync: "https://sync.example/api/v1",
   jwks_uri: "https://auth.example/.well-known/jwks.json",
-  opaque: { lib: "libopaque", version: "1.0.1-6e9ac92", context: "kpx-opaque-v1", ids: "auth.example" },
+  opaque: { lib: "libopaque", version: "1.0.1-6e9ac92", context: "ov-opaque-v1", ids: "auth.example" },
   kdf_min: { m: 19456, t: 2 },
 };
 
 describe("discovery", () => {
-  it("reads /.well-known/kpx-configuration", async () => {
-    const s = new MockServer().on("GET", "/.well-known/kpx-configuration", () => json(200, config));
+  it("reads /.well-known/openvireo-configuration", async () => {
+    const s = new MockServer().on("GET", "/.well-known/openvireo-configuration", () => json(200, config));
     expect(await discover("https://auth.example/", { fetch: s.fetch })).toEqual(config);
     const { client } = await AuthClient.fromIssuer("https://auth.example", { fetch: s.fetch });
     expect(client.api).toBe(API);
   });
   it("rejects an incomplete document", async () => {
-    const s = new MockServer().on("GET", "/.well-known/kpx-configuration", () => json(200, { ...config, sync: undefined }));
+    const s = new MockServer().on("GET", "/.well-known/openvireo-configuration", () => json(200, { ...config, sync: undefined }));
     await expect(discover("https://auth.example", { fetch: s.fetch })).rejects.toThrow(/sync/);
   });
 });
@@ -57,7 +57,7 @@ describe("AuthClient routes (openapi.yaml)", () => {
     ["loginStart", (c) => c.loginStart({ email: "a@b.c", ke1: "k" }), "POST", "/auth/login/start", { email: "a@b.c", ke1: "k" }, false],
     ["loginFinish", (c) => c.loginFinish({ session_id: "s", auth_u: "u", device: { id: "d1", name: "d", platform: "cli" } }), "POST", "/auth/login/finish", { session_id: "s", auth_u: "u", device: { id: "d1", name: "d", platform: "cli" } }, false],
     ["loginMfa", (c) => c.loginMfa({ mfa_token: "m", totp: "123456" }), "POST", "/auth/login/mfa", { mfa_token: "m", totp: "123456" }, false],
-    ["refresh", (c) => c.refresh("kpx_rt_x"), "POST", "/auth/refresh", { refresh_token: "kpx_rt_x" }, false],
+    ["refresh", (c) => c.refresh("ov_rt_x"), "POST", "/auth/refresh", { refresh_token: "ov_rt_x" }, false],
     ["logout", (c) => c.logout(), "POST", "/auth/logout", undefined, true],
     ["serviceAccountExchange", (c) => c.serviceAccountExchange({ sa_id: SA, secret: "s" }), "POST", "/auth/service-account", { sa_id: SA, secret: "s" }, false],
     ["me", (c) => c.me(), "GET", "/me", undefined, true],
@@ -164,7 +164,7 @@ describe("AuthClient errors and retries", () => {
 });
 
 describe("TokenManager", () => {
-  const session = { issuer: "https://auth.example", userId: "u", email: "a@b.c", deviceId: "d", refreshToken: "kpx_rt_1" };
+  const session = { issuer: "https://auth.example", userId: "u", email: "a@b.c", deviceId: "d", refreshToken: "ov_rt_1" };
   function setup(refresh: (rt: string) => Promise<any>) {
     let now = 1_000_000;
     const storage = new MemoryStorage();
@@ -180,15 +180,15 @@ describe("TokenManager", () => {
     advance(530_000); // 70 s left: still fine
     expect(await tm.getAccessToken()).toBe("at-0");
     advance(20_000); // 50 s left: inside the 60 s margin
-    expect(await tm.getAccessToken()).toBe("at-for-kpx_rt_1");
-    expect(JSON.parse((await storage.get("session"))!).refreshToken).toBe("kpx_rt_1x");
+    expect(await tm.getAccessToken()).toBe("at-for-ov_rt_1");
+    expect(JSON.parse((await storage.get("session"))!).refreshToken).toBe("ov_rt_1x");
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("does one refresh for concurrent callers", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    const refresh = vi.fn(async () => (await gate, { access_token: "new", refresh_token: "kpx_rt_2", expires_in: 600 }));
+    const refresh = vi.fn(async () => (await gate, { access_token: "new", refresh_token: "ov_rt_2", expires_in: 600 }));
     const { tm } = setup(refresh);
     await tm.start(session, "old", 0);
     const all = Promise.all([tm.getAccessToken(), tm.getAccessToken(), tm.getAccessToken({ force: true })]);
@@ -232,7 +232,7 @@ describe("TokenManager", () => {
 
 describe("storage adapters", () => {
   it("FileStorage persists with mode 0600", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "kpx-"));
+    const dir = await mkdtemp(join(tmpdir(), "openvireo-"));
     const path = join(dir, "sub", "state.json");
     const a = new FileStorage(path);
     await a.set("k", "v");
@@ -243,13 +243,13 @@ describe("storage adapters", () => {
     expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
   it("IndexedDbStorage + EncryptedStorage with a non-extractable key", async () => {
-    const idb = new IndexedDbStorage("kpx-test-" + Math.random());
+    const idb = new IndexedDbStorage("ov-test-" + Math.random());
     const enc = new EncryptedStorage(idb, nonExtractableIdbKey(idb));
     await enc.set("secret_key", "K1-…");
     expect(await enc.get("secret_key")).toBe("K1-…");
     const raw = await idb.get("secret_key");
     expect(raw).not.toContain("K1");
-    const key = await idb.getRaw<CryptoKey>("__kpx_wrapping_key");
+    const key = await idb.getRaw<CryptoKey>("__ov_wrapping_key");
     expect(key?.extractable).toBe(false);
     // Values are bound to their key name
     await idb.set("other", raw!);

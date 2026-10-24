@@ -7,10 +7,10 @@ if (sdk.formatSecretKey(sdk.fromHex(V.secret_key[0].raw_hex)) !== V.secret_key[0
 const auk = await sdk.deriveAuk(V.auk[0].password, V.auk[0].kdf, sdk.fromHex(V.auk[0].secret_key_hex), { allowWeak: true });
 if (sdk.toHex(auk) !== V.auk[0].auk_hex) fail("auk");
 const db = await sdk.openKdbx(readFileSync(new URL("../test/fixtures/vault-fixture.kdbx", import.meta.url)), sdk.vaultCredentials(sdk.fromHex(V.vault_kdbx.vault_key_hex)));
-if (sdk.readField(db, sdk.parseReference("kpx://v/GitHub%20deploy%20key/password")) !== "hunter2-but-longer") fail("fixture");
+if (sdk.readField(db, sdk.parseReference("ov://v/GitHub%20deploy%20key/password")) !== "hunter2-but-longer") fail("fixture");
 const mine = (e) => fail(e?.stack ?? e);
 process.on("uncaughtException", mine);
-const ids = sdk.opaqueIds("a@b.c", "kpx.example");
+const ids = sdk.opaqueIds("a@b.c", "openvireo.example");
 const r = await sdk.startRegistration("pässwörd");
 const s = await sdk.opaqueServerForTests.registrationResponse(r.request);
 const rec = await sdk.opaqueServerForTests.storeRecord(s.sec, (await sdk.finishRegistration(r.state, s.response, ids)).record);

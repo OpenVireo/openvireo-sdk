@@ -1,0 +1,6 @@
+apiVersion: v2
+name: openvireo-connect
+description: openvireo connect (OpenVireo service-account REST server) and External Secrets Operator webhook stores
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

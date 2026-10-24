@@ -1,7 +1,7 @@
 /**
  * WASM client (this SDK) against the libopaque C core through its Python binding, as used by Flask.
  * Runs only when the binding is available:
- *   KPX_OPAQUE_PYTHON=<python with pysodium>  KPX_OPAQUE_PYBINDING=<libopaque/python>  LIBOPAQUE=<libopaque.dylib>
+ *   OPENVIREO_OPAQUE_PYTHON=<python with pysodium>  OPENVIREO_OPAQUE_PYBINDING=<libopaque/python>  LIBOPAQUE=<libopaque.dylib>
  * (see keepassxc/docs/plans/accounts/opaque-spike/README.md for the build).
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
@@ -21,14 +21,14 @@ import {
 } from "../src/opaque/index.js";
 import { fromHex, toHex, utf8 } from "../src/util/bytes.js";
 
-const py = process.env.KPX_OPAQUE_PYTHON;
-const binding = process.env.KPX_OPAQUE_PYBINDING;
+const py = process.env.OPENVIREO_OPAQUE_PYTHON;
+const binding = process.env.OPENVIREO_OPAQUE_PYBINDING;
 const enabled = !!(py && binding && process.env.LIBOPAQUE && existsSync(py) && existsSync(binding));
 
 describe.skipIf(!enabled)("OPAQUE interop: WASM client ↔ C core (Python binding)", () => {
   let proc: ChildProcessByStdio<Writable, Readable, null>;
   let lines: AsyncIterableIterator<string>;
-  const ids = opaqueIds("alice@example.com", "kpx.example");
+  const ids = opaqueIds("alice@example.com", "openvireo.example");
   const call = async (m: Record<string, unknown>) => {
     proc.stdin.write(JSON.stringify({ ...m, ...ids }) + "\n");
     const r = JSON.parse((await lines.next()).value as string);

@@ -207,8 +207,8 @@ describe("§9 service accounts", () => {
     expect(saSecretPrefix(p.secret)).toBe(sa.secret_prefix);
   });
   it("rejects malformed tokens", () => {
-    expect(() => parseSaToken("kpx_rt_abc")).toThrow(KpxError);
-    expect(() => parseSaToken("kpx_sa_" + b64u(utf8(JSON.stringify({ ...payload, v: 2 }))))).toThrow(/version/);
+    expect(() => parseSaToken("ov_rt_abc")).toThrow(KpxError);
+    expect(() => parseSaToken("ov_sa_" + b64u(utf8(JSON.stringify({ ...payload, v: 2 }))))).toThrow(/version/);
   });
   it("wraps the master key and the keyset byte for byte, and unwraps the chain", () => {
     expect(wrapSaMaster(fromHex(sa.kek_hex), sa.sa_id, fromHex(sa.master_key_hex), fromHex(sa.wrapped_master_nonce_hex))).toBe(sa.wrapped_master);
@@ -251,7 +251,7 @@ describe("§9 refresh token", () => {
 
 describe("§9 JWT", () => {
   const j = V.jwt;
-  const opts = { issuer: j.valid[0].claims.iss, audience: "kpx-sync", now: j.now }; // SPEC default skew (60 s)
+  const opts = { issuer: j.valid[0].claims.iss, audience: "ov-sync", now: j.now }; // SPEC default skew (60 s)
   for (const [i, v] of (j.valid as any[]).entries()) {
     it(`valid ${i}`, async () => {
       expect(decodeJwt(v.token).claims).toEqual(v.claims);

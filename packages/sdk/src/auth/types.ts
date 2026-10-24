@@ -1,4 +1,4 @@
-/** Types for openapi.yaml (kpx v1). Field names are the wire names. */
+/** Types for openapi.yaml (ov v1). Field names are the wire names. */
 import type { KdfParams } from "../crypto/auk.js";
 import type { PublicKeysJson, WrappedKeysetJson } from "../crypto/keyset.js";
 import type { VaultRole } from "../crypto/jwt.js";
@@ -10,7 +10,7 @@ export type OrgRole = "owner" | "admin" | "member";
 export type MemberStatus = "invited" | "accepted" | "confirmed";
 export type Platform = "qt-linux" | "qt-macos" | "qt-windows" | "web" | "cli" | "connect";
 
-/** GET /.well-known/kpx-configuration (SPEC §10) */
+/** GET /.well-known/openvireo-configuration (SPEC §10) */
 export interface KpxConfiguration {
   issuer: string;
   api: string;

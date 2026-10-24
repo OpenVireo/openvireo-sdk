@@ -1,6 +1,6 @@
-# KeePassXC load secrets (GitHub Action)
+# OpenVireo load secrets (GitHub Action)
 
-Loads secrets from KeePassXC vaults into a job with a **kpx service account**, and masks every value
+Loads secrets from OpenVireo vaults into a job with a **openvireo service account**, and masks every value
 in the logs. It is a JavaScript action (`runs: node24`, one bundled file, `dist/index.mjs`); nothing is
 installed at run time.
 
@@ -12,42 +12,42 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Load secrets
-        uses: <owner>/kpnx-sdk/packages/github-action@<ref>
+        uses: openvireo/openvireo-sdk/packages/github-action@<ref>
         with:
-          service-account-token: ${{ secrets.KPX_SERVICE_ACCOUNT_TOKEN }}
+          service-account-token: ${{ secrets.OPENVIREO_SERVICE_ACCOUNT_TOKEN }}
           secrets: |
-            DEPLOY_KEY=kpx://Team%20Infra/GitHub%20deploy%20key/password
+            DEPLOY_KEY=ov://Team%20Infra/GitHub%20deploy%20key/password
         env:
-          # any env value with a kpx:// reference is loaded too, under the same name
-          DB_PASSWORD: kpx://Team%20Infra/Deploy/Database/password
-          DATABASE_URL: postgres://app:{{ kpx://Team%20Infra/Deploy/Database/password }}@db/app
+          # any env value with a ov:// reference is loaded too, under the same name
+          DB_PASSWORD: ov://Team%20Infra/Deploy/Database/password
+          DATABASE_URL: postgres://app:{{ ov://Team%20Infra/Deploy/Database/password }}@db/app
 
       - run: ./deploy.sh   # $DEPLOY_KEY, $DB_PASSWORD and $DATABASE_URL are set; echoing them prints ***
 ```
 
 | Input | Default | |
 |---|---|---|
-| `service-account-token` | `$KPX_SERVICE_ACCOUNT_TOKEN` | the `kpx_sa_…` token (store it as a repository or environment secret) |
-| `secrets` | | extra `NAME=kpx://…` lines (`#` comments allowed) |
+| `service-account-token` | `$OPENVIREO_SERVICE_ACCOUNT_TOKEN` | the `ov_sa_…` token (store it as a repository or environment secret) |
+| `secrets` | | extra `NAME=ov://…` lines (`#` comments allowed) |
 | `export-env` | `true` | `true`: export to `$GITHUB_ENV` for the following steps; `false`: only set step outputs (`steps.<id>.outputs.NAME`) |
 
 Output `loaded` lists the names that were set.
 
-References are `kpx://<vault id or name>/[<group>/…]<entry uuid or title>/<field>`, percent-encoded; use
-`{{ kpx://… }}` when other text follows the reference in the same value. Every resolved value, every
+References are `ov://<vault id or name>/[<group>/…]<entry uuid or title>/<field>`, percent-encoded; use
+`{{ ov://… }}` when other text follows the reference in the same value. Every resolved value, every
 line (4+ characters) of a multi-line value, the complete templated value and the SA token itself are
 registered with `::add-mask::` before anything is exported, so later steps' logs show `***`. If any
 reference fails (unknown vault or entry, revoked token), the step fails with `::error::` and nothing is
-exported. `KPX_SERVICE_ACCOUNT_TOKEN`, `PATH`, `NODE_OPTIONS` and the `GITHUB_*` file variables are never
+exported. `OPENVIREO_SERVICE_ACCOUNT_TOKEN`, `PATH`, `NODE_OPTIONS` and the `GITHUB_*` file variables are never
 overwritten.
 
 Give the service account a `read` grant on just the vaults the workflow needs. To change secrets from a
-workflow (`kpx rotate`), use the CLI with a `write` grant instead:
+workflow (`openvireo rotate`), use the CLI with a `write` grant instead:
 
 ```yaml
-      - run: kpx rotate kpx://Team%20Infra/CI/token --generate
+      - run: openvireo rotate ov://Team%20Infra/CI/token --generate
         env:
-          KPX_SERVICE_ACCOUNT_TOKEN: ${{ secrets.KPX_SERVICE_ACCOUNT_TOKEN }}
+          OPENVIREO_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OPENVIREO_SERVICE_ACCOUNT_TOKEN }}
 ```
 
 ## Development

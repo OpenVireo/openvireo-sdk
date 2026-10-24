@@ -10,7 +10,7 @@ export const CONFIG = {
   api: ISSUER + "/api/v1",
   sync: "https://sync.example/api/v1",
   jwks_uri: ISSUER + "/.well-known/jwks.json",
-  opaque: { lib: "libopaque", version: "1.0.1-6e9ac92", context: "kpx-opaque-v1", ids: "auth.example" },
+  opaque: { lib: "libopaque", version: "1.0.1-6e9ac92", context: "ov-opaque-v1", ids: "auth.example" },
   kdf_min: { m: 19456, t: 2 },
 };
 
@@ -41,7 +41,7 @@ export class FakeAuthServer extends MockServer {
     return t;
   }
   private session(user: any, status = 200) {
-    const rt = `kpx_rt_${randomUuid()}`;
+    const rt = `ov_rt_${randomUuid()}`;
     this.refresh.set(rt, { principal: `user:${user.id}`, used: false });
     return json(status, { access_token: this.issue(`user:${user.id}`), refresh_token: rt, expires_in: 600, device_id: "dev-" + user.id.slice(0, 4), user: { id: user.id, email: user.email }, kdf: user.kdf, keyset: user.keyset });
   }
@@ -80,7 +80,7 @@ export class FakeAuthServer extends MockServer {
       return principal ? h(req, p, principal) : json(401, { error: "unauthorized", code: "unauthorized" }, { "WWW-Authenticate": "Bearer" });
     };
     const P = "/api/v1/";
-    this.on("GET", "/.well-known/kpx-configuration", () => json(200, CONFIG));
+    this.on("GET", "/.well-known/openvireo-configuration", () => json(200, CONFIG));
     this.on("POST", P + "auth/register/start", async (req) => {
       if (this.users.has(req.json.email)) return json(409, { error: "taken", code: "conflict" });
       const { sec, response } = await OS.registrationResponse(fromB64u(req.json.request));
@@ -130,7 +130,7 @@ export class FakeAuthServer extends MockServer {
       if (!r) return json(401, { error: "unknown", code: "unauthorized" });
       if (r.used) return json(401, { error: "reused", code: "token_reused" });
       r.used = true;
-      const rt = `kpx_rt_${randomUuid()}`;
+      const rt = `ov_rt_${randomUuid()}`;
       this.refresh.set(rt, { principal: r.principal, used: false });
       return json(200, { access_token: this.issue(r.principal), refresh_token: rt, expires_in: 600 });
     });
@@ -187,7 +187,7 @@ export class FakeAuthServer extends MockServer {
       this.users.set(u.email, u);
       return new Response(null, { status: 204 });
     }));
-    this.on("POST", P + "me/web-session", A(() => json(200, { code: `kpx_ws_${randomUuid()}`, expires_in: 60 })));
+    this.on("POST", P + "me/web-session", A(() => json(200, { code: `ov_ws_${randomUuid()}`, expires_in: 60 })));
     this.on("GET", P + "users/lookup", A((req) => {
       const u = this.users.get(req.query.get("email"));
       return u ? json(200, this.pub(`user:${u.id}`)) : json(404, { error: "no such user", code: "not_found" });
