@@ -35,7 +35,7 @@ const idbRequest = <T>(req: IDBRequest<T>): Promise<T> =>
 export class IndexedDbStorage implements KeyValueStorage {
   private db: Promise<IDBDatabase> | null = null;
   constructor(
-    readonly dbName = "kpnx-sdk",
+    readonly dbName = "openvireo-sdk",
     readonly storeName = "kv",
     private readonly idb: IDBFactory | undefined = globalThis.indexedDB,
   ) {}
@@ -125,7 +125,7 @@ export class EncryptedStorage implements KeyValueStorage {
 }
 
 /** A non-extractable AES-GCM key created once and kept in IndexedDB under `keyName`. */
-export function nonExtractableIdbKey(store: IndexedDbStorage, keyName = "__kpx_wrapping_key"): () => Promise<CryptoKey> {
+export function nonExtractableIdbKey(store: IndexedDbStorage, keyName = "__ov_wrapping_key"): () => Promise<CryptoKey> {
   let key: Promise<CryptoKey> | null = null;
   return () =>
     (key ??= (async () => {
@@ -138,7 +138,7 @@ export function nonExtractableIdbKey(store: IndexedDbStorage, keyName = "__kpx_w
 }
 
 /** The browser default: values encrypted with a non-extractable key, both in IndexedDB. */
-export function browserStorage(dbName = "kpnx-sdk"): KeyValueStorage {
+export function browserStorage(dbName = "openvireo-sdk"): KeyValueStorage {
   const idb = new IndexedDbStorage(dbName);
   return new EncryptedStorage(idb, nonExtractableIdbKey(idb));
 }

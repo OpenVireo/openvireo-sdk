@@ -1,17 +1,17 @@
-name: KeePassXC load secrets
-description: Load secrets from KeePassXC vaults (kpx service account) into the environment, masked in the logs
-author: KeePassXC
+name: OpenVireo load secrets
+description: Load secrets from OpenVireo vaults into the environment with a service account, masked in the logs
+author: OpenVireo
 branding:
   icon: lock
   color: green
 inputs:
   service-account-token:
-    description: The kpx_sa_… service account token. Defaults to the KPX_SERVICE_ACCOUNT_TOKEN environment variable.
+    description: The ov_sa_… service account token. Defaults to the OPENVIREO_SERVICE_ACCOUNT_TOKEN environment variable.
     required: false
   secrets:
     description: |
-      Extra secrets to load, one NAME=kpx://… per line (in addition to environment variables of this
-      step whose values are kpx:// references).
+      Extra secrets to load, one NAME=ov://… per line (in addition to environment variables of this
+      step whose values are ov:// references).
     required: false
   export-env:
     description: Export the values as environment variables for the following steps ("true"), or only set them as outputs of this step ("false").

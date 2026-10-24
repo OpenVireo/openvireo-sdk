@@ -1,6 +1,6 @@
 /**
- * Secret references: kpx://<vault>/<entry>/<field>, optionally with a group path:
- * kpx://<vault>/<group>/<subgroup>/<entry>/<field>. Segments are percent-decoded. <vault> is a vault id
+ * Secret references: ov://<vault>/<entry>/<field>, optionally with a group path:
+ * ov://<vault>/<group>/<subgroup>/<entry>/<field>. Segments are percent-decoded. <vault> is a vault id
  * or name; <entry> is an entry UUID (hex, dashed or base64) or a unique title; <field> is a field name
  * (case-insensitive; "username", "password", "url", "notes", "title" map to the standard fields).
  */
@@ -15,10 +15,10 @@ export interface SecretReference {
   field: string;
 }
 
-const SCHEME = "kpx://";
+const SCHEME = "ov://";
 
 export function parseReference(ref: string): SecretReference {
-  if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a kpx:// reference: ${ref}`);
+  if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a ov:// reference: ${ref}`);
   const parts = ref.slice(SCHEME.length).split("/").map((p) => {
     try {
       return decodeURIComponent(p);
@@ -27,7 +27,7 @@ export function parseReference(ref: string): SecretReference {
     }
   });
   if (parts.length < 3 || parts.some((p) => p === "")) {
-    throw new KpxError("invalid_reference", `expected kpx://<vault>/<entry>/<field>: ${ref}`);
+    throw new KpxError("invalid_reference", `expected ov://<vault>/<entry>/<field>: ${ref}`);
   }
   return { vault: parts[0]!, groupPath: parts.slice(1, -2), entry: parts[parts.length - 2]!, field: parts[parts.length - 1]! };
 }
@@ -35,8 +35,8 @@ export function parseReference(ref: string): SecretReference {
 export const formatReference = (r: SecretReference): string =>
   SCHEME + [r.vault, ...r.groupPath, r.entry, r.field].map((s) => encodeURIComponent(s)).join("/");
 
-/** Finds all references in a template (for `kpx run`/`inject`): kpx://… up to whitespace, quotes or `}`. */
-export const REFERENCE_PATTERN = /kpx:\/\/[^\s"'`}]+/g;
+/** Finds all references in a template (for `openvireo run`/`inject`): ov://… up to whitespace, quotes or `}`. */
+export const REFERENCE_PATTERN = /ov:\/\/[^\s"'`}]+/g;
 
 const STANDARD: Record<string, string> = { title: "Title", username: "UserName", user: "UserName", password: "Password", url: "URL", notes: "Notes" };
 

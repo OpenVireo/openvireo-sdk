@@ -66,17 +66,17 @@ describe("Masker", () => {
 });
 
 describe("references and env files", () => {
-  it("parses kpx:// references", () => {
-    expect(parseReference("kpx://Team%20Infra/Deploy/Database/password")).toEqual({ vault: "Team Infra", groupPath: ["Deploy"], entry: "Database", field: "password" });
-    for (const bad of ["kpx://v/e", "kpx:/v/e/f", "kpx://v//f", "kpx://v/e/%E0%A4%A"]) expect(() => parseReference(bad)).toThrow();
+  it("parses ov:// references", () => {
+    expect(parseReference("ov://Team%20Infra/Deploy/Database/password")).toEqual({ vault: "Team Infra", groupPath: ["Deploy"], entry: "Database", field: "password" });
+    for (const bad of ["ov://v/e", "ov:/v/e/f", "ov://v//f", "ov://v/e/%E0%A4%A"]) expect(() => parseReference(bad)).toThrow();
   });
 
   it("finds bare and braced references", () => {
-    expect(findReferences('A=kpx://v/e/f\nB="kpx://v/e/g"\nDSN=postgres://u:{{ kpx://v/db/password }}@h/{{kpx://v/db/name}}')).toEqual([
-      "kpx://v/db/password",
-      "kpx://v/db/name",
-      "kpx://v/e/f",
-      "kpx://v/e/g",
+    expect(findReferences('A=ov://v/e/f\nB="ov://v/e/g"\nDSN=postgres://u:{{ ov://v/db/password }}@h/{{ov://v/db/name}}')).toEqual([
+      "ov://v/db/password",
+      "ov://v/db/name",
+      "ov://v/e/f",
+      "ov://v/e/g",
     ]);
   });
 
@@ -85,7 +85,7 @@ describe("references and env files", () => {
       [
         "# comment",
         "",
-        "PLAIN=kpx://v/e/f",
+        "PLAIN=ov://v/e/f",
         "export SPACED = value with spaces # trailing comment",
         'DQ="line1\\nline2 \\"q\\" # not a comment"',
         "SQ='$literal \\n'",
@@ -95,7 +95,7 @@ describe("references and env files", () => {
       ].join("\r\n"),
     );
     expect(env).toEqual([
-      ["PLAIN", "kpx://v/e/f"],
+      ["PLAIN", "ov://v/e/f"],
       ["SPACED", "value with spaces"],
       ["DQ", 'line1\nline2 "q" # not a comment'],
       ["SQ", "$literal \\n"],

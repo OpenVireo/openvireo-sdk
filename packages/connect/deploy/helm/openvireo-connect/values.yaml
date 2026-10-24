@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/keepassxc/kpx-connect   # build with packages/connect/Dockerfile and push
+  repository: ghcr.io/openvireo/openvireo-connect   # build with packages/connect/Dockerfile and push
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 imagePullSecrets: []
@@ -9,8 +9,8 @@ cacheTtlSeconds: 5
 
 # Either name an existing Secret with keys `sa-token` and `tokens.json`, or let the chart create one
 existingSecret: ""
-serviceAccountToken: ""          # kpx_sa_… (prefer existingSecret or --set-file in CI)
-connectTokens: []                # entries printed by `kpx connect token`: {name, sha256, vaults, access}
+serviceAccountToken: ""          # ov_sa_… (prefer existingSecret or --set-file in CI)
+connectTokens: []                # entries printed by `openvireo connect token`: {name, sha256, vaults, access}
 
 service:
   port: 8080
@@ -21,13 +21,13 @@ resources:
 
 networkPolicy:
   enabled: true
-  # namespace of the ESO controller (and anything else allowed to call kpx connect)
+  # namespace of the ESO controller (and anything else allowed to call openvireo connect)
   allowedNamespaces: [external-secrets]
 
 externalSecrets:
   # Creates ClusterSecretStores "<storeName>" (one field) and "<storeName>-items" (whole items)
   enabled: true
-  storeName: kpx
+  storeName: openvireo
   # Secret holding the plain connect token ESO presents (key `token`); created when `token` is set
-  tokenSecret: kpx-connect-eso
+  tokenSecret: openvireo-connect-eso
   token: ""

@@ -1,4 +1,4 @@
-/** Runs the connect handler on node:http (also used by Bun and the single `kpx` binary). */
+/** Runs the connect handler on node:http (also used by Bun and the single `openvireo` binary). */
 import { readFileSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -47,32 +47,32 @@ const readMaybe = (env: Record<string, string | undefined>, name: string): strin
 
 /**
  * Reads the configuration from the environment:
- * - KPX_SERVICE_ACCOUNT_TOKEN (or KPX_SERVICE_ACCOUNT_TOKEN_FILE)
- * - KPX_CONNECT_TOKENS (JSON) or KPX_CONNECT_TOKENS_FILE; and/or KPX_CONNECT_TOKEN (one plain token,
- *   read access to every vault, or write with KPX_CONNECT_TOKEN_ACCESS=write)
- * - KPX_CONNECT_HOST (127.0.0.1), KPX_CONNECT_PORT (8080), KPX_CONNECT_CACHE_TTL (seconds, 5)
- * - KPX_CONNECT_TLS_CERT and KPX_CONNECT_TLS_KEY (PEM files) to serve HTTPS
+ * - OPENVIREO_SERVICE_ACCOUNT_TOKEN (or OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE)
+ * - OPENVIREO_CONNECT_TOKENS (JSON) or OPENVIREO_CONNECT_TOKENS_FILE; and/or OPENVIREO_CONNECT_TOKEN (one plain token,
+ *   read access to every vault, or write with OPENVIREO_CONNECT_TOKEN_ACCESS=write)
+ * - OPENVIREO_CONNECT_HOST (127.0.0.1), OPENVIREO_CONNECT_PORT (8080), OPENVIREO_CONNECT_CACHE_TTL (seconds, 5)
+ * - OPENVIREO_CONNECT_TLS_CERT and OPENVIREO_CONNECT_TLS_KEY (PEM files) to serve HTTPS
  */
 export function configFromEnv(env: Record<string, string | undefined>): ConnectConfig {
-  const saToken = readMaybe(env, "KPX_SERVICE_ACCOUNT_TOKEN");
-  if (!saToken) throw new KpxError("invalid_request", "set KPX_SERVICE_ACCOUNT_TOKEN (or KPX_SERVICE_ACCOUNT_TOKEN_FILE)");
+  const saToken = readMaybe(env, "OPENVIREO_SERVICE_ACCOUNT_TOKEN");
+  if (!saToken) throw new KpxError("invalid_request", "set OPENVIREO_SERVICE_ACCOUNT_TOKEN (or OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE)");
   const tokens: ConnectToken[] = [];
-  const list = readMaybe(env, "KPX_CONNECT_TOKENS");
+  const list = readMaybe(env, "OPENVIREO_CONNECT_TOKENS");
   if (list) tokens.push(...parseConnectTokens(list));
-  const single = readMaybe(env, "KPX_CONNECT_TOKEN");
+  const single = readMaybe(env, "OPENVIREO_CONNECT_TOKEN");
   if (single) {
-    const access = env.KPX_CONNECT_TOKEN_ACCESS === "write" ? "write" : "read";
+    const access = env.OPENVIREO_CONNECT_TOKEN_ACCESS === "write" ? "write" : "read";
     tokens.push({ name: "default", sha256: hashConnectToken(single), vaults: ["*"], access });
   }
-  if (!tokens.length) throw new KpxError("invalid_request", "no connect tokens: set KPX_CONNECT_TOKENS_FILE or KPX_CONNECT_TOKEN (create one with `kpx connect token`)");
-  const port = Number(env.KPX_CONNECT_PORT ?? 8080);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new KpxError("invalid_request", `bad KPX_CONNECT_PORT: ${env.KPX_CONNECT_PORT}`);
-  const ttl = Number(env.KPX_CONNECT_CACHE_TTL ?? 5);
-  if (!Number.isFinite(ttl) || ttl < 0) throw new KpxError("invalid_request", `bad KPX_CONNECT_CACHE_TTL: ${env.KPX_CONNECT_CACHE_TTL}`);
-  const cert = env.KPX_CONNECT_TLS_CERT;
-  const key = env.KPX_CONNECT_TLS_KEY;
-  if (!!cert !== !!key) throw new KpxError("invalid_request", "set both KPX_CONNECT_TLS_CERT and KPX_CONNECT_TLS_KEY");
-  return { saToken, tokens, host: env.KPX_CONNECT_HOST ?? "127.0.0.1", port, cacheTtlMs: ttl * 1000, ...(cert && key ? { tls: { cert, key } } : {}) };
+  if (!tokens.length) throw new KpxError("invalid_request", "no connect tokens: set OPENVIREO_CONNECT_TOKENS_FILE or OPENVIREO_CONNECT_TOKEN (create one with `openvireo connect token`)");
+  const port = Number(env.OPENVIREO_CONNECT_PORT ?? 8080);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new KpxError("invalid_request", `bad OPENVIREO_CONNECT_PORT: ${env.OPENVIREO_CONNECT_PORT}`);
+  const ttl = Number(env.OPENVIREO_CONNECT_CACHE_TTL ?? 5);
+  if (!Number.isFinite(ttl) || ttl < 0) throw new KpxError("invalid_request", `bad OPENVIREO_CONNECT_CACHE_TTL: ${env.OPENVIREO_CONNECT_CACHE_TTL}`);
+  const cert = env.OPENVIREO_CONNECT_TLS_CERT;
+  const key = env.OPENVIREO_CONNECT_TLS_KEY;
+  if (!!cert !== !!key) throw new KpxError("invalid_request", "set both OPENVIREO_CONNECT_TLS_CERT and OPENVIREO_CONNECT_TLS_KEY");
+  return { saToken, tokens, host: env.OPENVIREO_CONNECT_HOST ?? "127.0.0.1", port, cacheTtlMs: ttl * 1000, ...(cert && key ? { tls: { cert, key } } : {}) };
 }
 
 export interface RunningConnect {
@@ -83,7 +83,7 @@ export interface RunningConnect {
 
 /** Exchanges the SA token and starts listening. */
 export async function startConnect(config: ConnectConfig, opts: { fetch?: FetchLike; log?: (line: string) => void } = {}): Promise<RunningConnect> {
-  const sa = await ServiceAccount.fromToken(config.saToken, { fetch: opts.fetch, headers: { "User-Agent": "kpx-connect/0.1.0" } });
+  const sa = await ServiceAccount.fromToken(config.saToken, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-connect/0.1.0" } });
   const handler = createConnectHandler({ source: sa, tokens: config.tokens, cacheTtlMs: config.cacheTtlMs, log: opts.log });
   const listener = toNodeListener(handler);
   const server = config.tls ? createHttpsServer({ cert: readFileSync(config.tls.cert), key: readFileSync(config.tls.key) }, listener) : createServer(listener);

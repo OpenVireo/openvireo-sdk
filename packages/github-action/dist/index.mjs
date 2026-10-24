@@ -1,4 +1,4 @@
-import { createRequire as __kpxCreateRequire } from "node:module"; const require = __kpxCreateRequire(import.meta.url);
+import { createRequire as __ovCreateRequire } from "node:module"; const require = __ovCreateRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -18702,7 +18702,7 @@ function unwrap(key, blob, aad) {
 }
 function sealKey(shared, epk, recipientPk) {
   if (shared.every((b) => b === 0)) throw new KpxError("low_order_point", "X25519 result is all zero");
-  return hkdf2(shared, concat(epk, recipientPk), "kpx-seal-v1", 32);
+  return hkdf2(shared, concat(epk, recipientPk), "ov-seal-v1", 32);
 }
 function sharedSecret(sk, pk) {
   try {
@@ -18730,15 +18730,15 @@ function unseal(recipientEncSk, sealed, aad) {
   }
 }
 var AAD = {
-  keyset: "kpx-keyset-v1",
-  vaultKey: (vaultId) => `kpx-vault-key|${vaultId}`,
-  vaultName: (vaultId) => `kpx-vault-name|${vaultId}`,
-  saMaster: (saId) => `kpx-sa-master-v1|${saId}`
+  keyset: "ov-keyset-v1",
+  vaultKey: (vaultId) => `ov-vault-key|${vaultId}`,
+  vaultName: (vaultId) => `ov-vault-name|${vaultId}`,
+  saMaster: (saId) => `ov-sa-master-v1|${saId}`
 };
 var unsealVaultKey = (encSk, vaultId, sealed) => unseal(encSk, sealed, AAD.vaultKey(vaultId));
 
 // ../sdk/src/crypto/keyset.ts
-var pubkeysMessage = (encPk, signPk) => concat(utf8("kpx-pubkeys-v1"), encPk, signPk);
+var pubkeysMessage = (encPk, signPk) => concat(utf8("ov-pubkeys-v1"), encPk, signPk);
 function keysetFromSecrets(encSk, signSeed) {
   const encPk = x25519PublicKey(encSk);
   const signPk = ed25519PublicKey(signSeed);
@@ -18773,7 +18773,7 @@ function wipeKeyset(ks) {
 }
 
 // ../sdk/src/crypto/vault-name.ts
-var vaultNameKey = (vaultKey) => hkdf2(vaultKey, new Uint8Array(0), "kpx-vault-name-v1", 32);
+var vaultNameKey = (vaultKey) => hkdf2(vaultKey, new Uint8Array(0), "ov-vault-name-v1", 32);
 function decryptVaultName(vaultKey, vaultId, encryptedName) {
   const k = vaultNameKey(vaultKey);
   try {
@@ -18784,10 +18784,10 @@ function decryptVaultName(vaultKey, vaultId, encryptedName) {
 }
 
 // ../sdk/src/crypto/tokens.ts
-var SA_TOKEN_PREFIX = "kpx_sa_";
+var SA_TOKEN_PREFIX = "ov_sa_";
 function parseSaToken(token) {
   const t = token.trim();
-  if (!t.startsWith(SA_TOKEN_PREFIX)) throw new KpxError("invalid_token", "not a service account token (kpx_sa_\u2026)");
+  if (!t.startsWith(SA_TOKEN_PREFIX)) throw new KpxError("invalid_token", "not a service account token (ov_sa_\u2026)");
   let p;
   try {
     p = JSON.parse(fromUtf8(fromB64u(t.slice(SA_TOKEN_PREFIX.length))));
@@ -18879,11 +18879,11 @@ async function sendJson(http, url, opts = {}) {
 // ../sdk/src/auth/client.ts
 async function discover(issuer, http = {}) {
   const base = issuer.replace(/\/+$/, "");
-  const cfg = await sendJson(http, `${base}/.well-known/kpx-configuration`);
+  const cfg = await sendJson(http, `${base}/.well-known/openvireo-configuration`);
   for (const k of ["issuer", "api", "sync", "jwks_uri"]) {
-    if (typeof cfg?.[k] !== "string") throw new KpxError("invalid_request", `kpx-configuration is missing "${k}"`);
+    if (typeof cfg?.[k] !== "string") throw new KpxError("invalid_request", `openvireo-configuration is missing "${k}"`);
   }
-  if (!cfg.opaque?.ids) throw new KpxError("invalid_request", "kpx-configuration is missing opaque.ids");
+  if (!cfg.opaque?.ids) throw new KpxError("invalid_request", "openvireo-configuration is missing opaque.ids");
   return cfg;
 }
 var AuthClient = class _AuthClient {
@@ -20023,9 +20023,9 @@ function fieldText(val) {
 }
 
 // ../sdk/src/vault/reference.ts
-var SCHEME = "kpx://";
+var SCHEME = "ov://";
 function parseReference(ref) {
-  if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a kpx:// reference: ${ref}`);
+  if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a ov:// reference: ${ref}`);
   const parts = ref.slice(SCHEME.length).split("/").map((p) => {
     try {
       return decodeURIComponent(p);
@@ -20034,11 +20034,11 @@ function parseReference(ref) {
     }
   });
   if (parts.length < 3 || parts.some((p) => p === "")) {
-    throw new KpxError("invalid_reference", `expected kpx://<vault>/<entry>/<field>: ${ref}`);
+    throw new KpxError("invalid_reference", `expected ov://<vault>/<entry>/<field>: ${ref}`);
   }
   return { vault: parts[0], groupPath: parts.slice(1, -2), entry: parts[parts.length - 2], field: parts[parts.length - 1] };
 }
-var REFERENCE_PATTERN = /kpx:\/\/[^\s"'`}]+/g;
+var REFERENCE_PATTERN = /ov:\/\/[^\s"'`}]+/g;
 var STANDARD = { title: "Title", username: "UserName", user: "UserName", password: "Password", url: "URL", notes: "Notes" };
 function uuidMatches(entry, id) {
   const hex = id.replace(/-/g, "").toLowerCase();
@@ -20214,7 +20214,7 @@ var ServiceAccount = class _ServiceAccount {
   }
   /**
    * Brings the cached copy up to date: a HEAD with the last ETag, and a download only when the server
-   * has a newer version (for long-running processes such as `kpx connect`). Opens the vault if needed.
+   * has a newer version (for long-running processes such as `openvireo connect`). Opens the vault if needed.
    */
   async pull(idOrName) {
     const v = await this.vault(idOrName);
@@ -20247,12 +20247,12 @@ var ServiceAccount = class _ServiceAccount {
       }
     });
   }
-  /** Reads `kpx://<vault>/<entry>/<field>`. */
+  /** Reads `ov://<vault>/<entry>/<field>`. */
   async read(ref) {
     const r = parseReference(ref);
     return readField(await this.openVault(r.vault), r);
   }
-  /** Replaces every kpx:// reference in a template (`kpx inject` / `run --env-file`). */
+  /** Replaces every ov:// reference in a template (`openvireo inject` / `run --env-file`). */
   async inject(template) {
     const refs = [...new Set(template.match(REFERENCE_PATTERN) ?? [])];
     const values = /* @__PURE__ */ new Map();
@@ -20328,7 +20328,7 @@ function serviceAccountSource(sa) {
 var VERSION2 = "0.1.0";
 
 // ../cli/src/template.ts
-var BRACED_REFERENCE = /\{\{\s*(kpx:\/\/[^\s}]+)\s*\}\}/g;
+var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
 async function readReference(src, ref) {
   const r = parseReference(ref);
   return readField(await src.open(r.vault), r);
@@ -20346,25 +20346,25 @@ async function resolveTemplate(src, text) {
 }
 
 // ../cli/src/main.ts
-var USAGE = `kpx ${VERSION2}: KeePassXC vault secrets for scripts, CI and servers
+var USAGE = `openvireo ${VERSION2}: OpenVireo vault secrets for scripts, CI and servers
 
-Usage:
-  kpx read <kpx://vault/[group/\u2026]entry/field> [-n] [-o file]
-  kpx inject [-i template] [-o file]          replace kpx:// references ({{ kpx://\u2026 }} or bare)
-  kpx run [--env-file .env.tpl]\u2026 [--no-masking] -- <command> [args\u2026]
-  kpx item get <kpx://vault/[group/\u2026]entry> [--reveal] [--json]
-  kpx item list <vault> [--json]
-  kpx item create <kpx://vault/[group/\u2026]title> [field=value\u2026] [--generate [--length N] [--charset S]] [--stdin-field F]
-  kpx item edit <kpx://vault/[group/\u2026]entry> [field=value\u2026] [--generate [--length N] [--charset S]] [--stdin-field F]
-  kpx rotate <kpx://vault/[group/\u2026]entry/field> (--generate [--length N] [--charset S] | --stdin) [--print]
-  kpx vault list [--json]
-  kpx login [--issuer URL] [--email E] [--secret-key K1-\u2026]
-  kpx logout | kpx whoami
-  kpx connect [serve | token \u2026]               the REST server (see kpx connect --help)
-  kpx version
+Usage: (also installed as \`ov\`)
+  openvireo read <ov://vault/[group/\u2026]entry/field> [-n] [-o file]
+  openvireo inject [-i template] [-o file]          replace ov:// references ({{ ov://\u2026 }} or bare)
+  openvireo run [--env-file .env.tpl]\u2026 [--no-masking] -- <command> [args\u2026]
+  openvireo item get <ov://vault/[group/\u2026]entry> [--reveal] [--json]
+  openvireo item list <vault> [--json]
+  openvireo item create <ov://vault/[group/\u2026]title> [field=value\u2026] [--generate [--length N] [--charset S]] [--stdin-field F]
+  openvireo item edit <ov://vault/[group/\u2026]entry> [field=value\u2026] [--generate [--length N] [--charset S]] [--stdin-field F]
+  openvireo rotate <ov://vault/[group/\u2026]entry/field> (--generate [--length N] [--charset S] | --stdin) [--print]
+  openvireo vault list [--json]
+  openvireo login [--issuer URL] [--email E] [--secret-key K1-\u2026]
+  openvireo logout | openvireo whoami
+  openvireo connect [serve | token \u2026]               the REST server (see openvireo connect --help)
+  openvireo version
 
-Credentials: KPX_SERVICE_ACCOUNT_TOKEN (or KPX_SERVICE_ACCOUNT_TOKEN_FILE), else the session from
-\`kpx login\` unlocked with KPX_PASSWORD or a prompt. Charsets: letters, lower, upper, digits, symbols.
+Credentials: OPENVIREO_SERVICE_ACCOUNT_TOKEN (or OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE), else the session from
+\`openvireo login\` unlocked with OPENVIREO_PASSWORD or a prompt. Charsets: letters, lower, upper, digits, symbols.
 `;
 
 // src/core.ts
@@ -20407,7 +20407,7 @@ var setOutput = (io, name2, value) => appendTo(io, "GITHUB_OUTPUT", name2, value
 
 // src/action.ts
 var NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-var RESERVED = /* @__PURE__ */ new Set(["KPX_SERVICE_ACCOUNT_TOKEN", "GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_PATH", "PATH", "NODE_OPTIONS"]);
+var RESERVED = /* @__PURE__ */ new Set(["OPENVIREO_SERVICE_ACCOUNT_TOKEN", "GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_PATH", "PATH", "NODE_OPTIONS"]);
 function collect(io) {
   const out = /* @__PURE__ */ new Map();
   for (const [k, v] of Object.entries(io.env)) {
@@ -20419,7 +20419,7 @@ function collect(io) {
     if (!t || t.startsWith("#")) continue;
     const i = t.indexOf("=");
     const name2 = i > 0 ? t.slice(0, i).trim() : "";
-    if (!NAME.test(name2)) throw new Error(`secrets: expected NAME=kpx://\u2026, got "${t}"`);
+    if (!NAME.test(name2)) throw new Error(`secrets: expected NAME=ov://\u2026, got "${t}"`);
     if (RESERVED.has(name2)) throw new Error(`secrets: ${name2} can't be set by this action`);
     out.set(name2, t.slice(i + 1).trim());
   }
@@ -20427,17 +20427,17 @@ function collect(io) {
 }
 async function run(io, opts = {}) {
   try {
-    const token = getInput(io, "service-account-token") || io.env.KPX_SERVICE_ACCOUNT_TOKEN?.trim();
-    if (!token) throw new Error("no service account token: set the service-account-token input or KPX_SERVICE_ACCOUNT_TOKEN");
+    const token = getInput(io, "service-account-token") || io.env.OPENVIREO_SERVICE_ACCOUNT_TOKEN?.trim();
+    if (!token) throw new Error("no service account token: set the service-account-token input or OPENVIREO_SERVICE_ACCOUNT_TOKEN");
     addMask(io, token);
     const exportEnv = getBooleanInput(io, "export-env", true);
     const wanted = collect(io);
     if (!wanted.length) {
-      info(io, "No kpx:// references found in the step's env or the secrets input.");
+      info(io, "No ov:// references found in the step's env or the secrets input.");
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "kpx-github-action/0.1.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.1.0" } });
     const src = serviceAccountSource(sa);
     const resolved = [];
     try {
@@ -20458,7 +20458,7 @@ async function run(io, opts = {}) {
     info(io, `Loaded ${names.length} secret${names.length === 1 ? "" : "s"} ${exportEnv ? "into the environment" : "as outputs"}: ${names.join(", ")}`);
     return 0;
   } catch (e) {
-    error(io, `kpx: ${e instanceof Error ? e.message : String(e)}`);
+    error(io, `openvireo: ${e instanceof Error ? e.message : String(e)}`);
     return 1;
   }
 }

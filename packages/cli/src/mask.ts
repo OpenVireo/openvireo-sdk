@@ -1,9 +1,9 @@
 /**
- * Streaming secret masking for `kpx run`: replaces every occurrence of a secret value in a byte stream,
+ * Streaming secret masking for `openvireo run`: replaces every occurrence of a secret value in a byte stream,
  * also when a value is split across chunks. Bytes that could be the start of a secret are held back
  * until the next chunk (or `flush`) shows whether they are.
  */
-export const MASK = "<concealed by kpx>";
+export const MASK = "<concealed by openvireo>";
 
 const enc = new TextEncoder();
 

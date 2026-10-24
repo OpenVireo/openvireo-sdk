@@ -4,8 +4,8 @@ import { b64u, fromB64u, fromUtf8, randomBytes, toHex, utf8 } from "../util/byte
 import { AAD, unwrap, wrap } from "./envelope.js";
 import { sha256 } from "./primitives.js";
 
-export const SA_TOKEN_PREFIX = "kpx_sa_";
-export const REFRESH_TOKEN_PREFIX = "kpx_rt_";
+export const SA_TOKEN_PREFIX = "ov_sa_";
+export const REFRESH_TOKEN_PREFIX = "ov_rt_";
 
 export interface SaTokenPayload {
   v: 1;
@@ -18,7 +18,7 @@ export interface SaTokenPayload {
   kek: string;
 }
 
-/** Builds `kpx_sa_` + base64url(UTF-8 JSON). Key order matches the SPEC so tokens are reproducible. */
+/** Builds `ov_sa_` + base64url(UTF-8 JSON). Key order matches the SPEC so tokens are reproducible. */
 export function buildSaToken(p: { url: string; saId: string; secret: Uint8Array; kek: Uint8Array }): string {
   const json = JSON.stringify({ v: 1, url: p.url, sa_id: p.saId, secret: b64u(p.secret), kek: b64u(p.kek) });
   return SA_TOKEN_PREFIX + b64u(utf8(json));
@@ -33,7 +33,7 @@ export interface ParsedSaToken {
 
 export function parseSaToken(token: string): ParsedSaToken {
   const t = token.trim();
-  if (!t.startsWith(SA_TOKEN_PREFIX)) throw new KpxError("invalid_token", "not a service account token (kpx_sa_…)");
+  if (!t.startsWith(SA_TOKEN_PREFIX)) throw new KpxError("invalid_token", "not a service account token (ov_sa_…)");
   let p: Partial<SaTokenPayload>;
   try {
     p = JSON.parse(fromUtf8(fromB64u(t.slice(SA_TOKEN_PREFIX.length))));

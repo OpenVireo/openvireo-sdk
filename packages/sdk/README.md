@@ -1,6 +1,6 @@
 # @openvireo/sdk
 
-TypeScript SDK for KeePassXC accounts, vault sync and sharing (**kpx v1**, see
+TypeScript SDK for OpenVireo accounts, vault sync and sharing (**ov v1**, see
 `keepassxc/docs/plans/accounts/SPEC.md`). It runs in browsers, Node ≥ 20 and Bun (also when compiled
 into a single binary). The server only ever receives OPAQUE messages, encrypted `.kdbx` blobs, wrapped
 keysets and sealed keys.
@@ -13,7 +13,7 @@ keysets and sealed keys.
 | `@openvireo/sdk/auth` | `AuthClient` (all of `openapi.yaml`), discovery, `TokenManager`, storage adapters |
 | `@openvireo/sdk/storage/node` | `FileStorage` (0600 JSON file) for the CLI and connect |
 | `@openvireo/sdk/sync` | `SyncClient` (vault + legacy routes), `syncKdbx` merge/retry loop, SSE `subscribeEvents` |
-| `@openvireo/sdk/vault` | kdbxweb open/save, vault-key credentials, rotation helpers, entry helpers, `kpx://` references |
+| `@openvireo/sdk/vault` | kdbxweb open/save, vault-key credentials, rotation helpers, entry helpers, `ov://` references |
 | `@openvireo/sdk/merge` | port of KeePassXC's three-way merge (`SyncEngine::mergeDatabases` + `Merger`) |
 | `@openvireo/sdk/testing` | in-memory auth and sync servers (`FakeAuthServer`, `FakeSyncServer`) for app tests; not for production |
 
@@ -23,7 +23,7 @@ keysets and sealed keys.
 import { Account, browserStorage } from "@openvireo/sdk";
 
 const account = await Account.connect({
-  issuer: "https://accounts.keepassxc.org",       // discovery: /.well-known/kpx-configuration
+  issuer: "https://accounts.openvireo.com",       // discovery: /.well-known/openvireo-configuration
   device: { name: "Firefox on Linux", platform: "web" },
   storage: browserStorage(),                        // IndexedDB + non-extractable AES-GCM key
 });
@@ -39,8 +39,8 @@ if (account.signedIn && !account.unlocked) await account.unlock(password);
 
 const vaults = await account.listVaults();          // names decrypted locally
 const vault = await account.openVault(vaults[0].id); // downloads + decrypts (newest key first)
-vault.read("kpx://Team/GitHub/password");
-await vault.write("kpx://Team/GitHub/password", "new value"); // conditional PUT, merge + retry on 412
+vault.read("ov://Team/GitHub/password");
+await vault.write("ov://Team/GitHub/password", "new value"); // conditional PUT, merge + retry on 412
 
 const team = await account.createVault("Team Infra", { orgId });
 const { fingerprint } = await account.share(team.id, { email: "bob@example.com" }, "write");
@@ -86,24 +86,24 @@ import { Account, ServiceAccount } from "@openvireo/sdk";
 // An org owner/admin creates it; the token is shown once
 const { token } = await account.createServiceAccount(orgId, { name: "ci", vaults: [{ id: vaultId, role: "read" }] });
 
-// In CI: KPX_SERVICE_ACCOUNT_TOKEN=kpx_sa_…
-const sa = await ServiceAccount.fromToken(process.env.KPX_SERVICE_ACCOUNT_TOKEN!);
-await sa.read("kpx://Team Infra/GitHub deploy key/password");
-const { text, secrets } = await sa.inject("TOKEN=kpx://Team%20Infra/CI/token\n"); // mask `secrets` in logs
-await sa.write("kpx://Team Infra/CI/token", rotated);                            // needs the write role
+// In CI: OPENVIREO_SERVICE_ACCOUNT_TOKEN=ov_sa_…
+const sa = await ServiceAccount.fromToken(process.env.OPENVIREO_SERVICE_ACCOUNT_TOKEN!);
+await sa.read("ov://Team Infra/GitHub deploy key/password");
+const { text, secrets } = await sa.inject("TOKEN=ov://Team%20Infra/CI/token\n"); // mask `secrets` in logs
+await sa.write("ov://Team Infra/CI/token", rotated);                            // needs the write role
 sa.close();
 ```
 
-References are `kpx://<vault id or name>/[<group>/…]<entry uuid or title>/<field>`, percent-encoded.
+References are `ov://<vault id or name>/[<group>/…]<entry uuid or title>/<field>`, percent-encoded.
 
-For long-running processes and whole entries (used by `kpx connect` and `kpx item`):
+For long-running processes and whole entries (used by `openvireo connect` and `openvireo item`):
 
 ```ts
 import { ServiceAccount, findEntry, itemOf, listItems, parseItemReference, setItemFields } from "@openvireo/sdk";
 
 const db = await sa.pull("Team Infra");             // HEAD with the last ETag; downloads only if changed
 listItems(db);                                      // [{id, title, group, fields: {}, protected, …}] without values
-itemOf(findEntry(db, parseItemReference("kpx://Team%20Infra/Deploy/Database")), { reveal: true });
+itemOf(findEntry(db, parseItemReference("ov://Team%20Infra/Deploy/Database")), { reveal: true });
 
 // any change, then the conditional PUT with merge/retry; one edit per vault at a time, and a failed
 // upload drops the cached copy. A `read` grant throws KpxError("forbidden") before anything is sent.
@@ -157,7 +157,7 @@ npm run typecheck -w @openvireo/sdk      # tsc --noEmit
 npm test -w @openvireo/sdk               # vitest
 npm run build -w @openvireo/sdk && npm run smoke -w @openvireo/sdk   # dist/ in Node and Bun
 # OPAQUE against the C core (Python binding), see opaque-spike/README.md:
-KPX_OPAQUE_PYTHON=…/venv/bin/python3 KPX_OPAQUE_PYBINDING=…/libopaque/python LIBOPAQUE=…/libopaque.dylib npm test -w @openvireo/sdk
+OPENVIREO_OPAQUE_PYTHON=…/venv/bin/python3 OPENVIREO_OPAQUE_PYBINDING=…/libopaque/python LIBOPAQUE=…/libopaque.dylib npm test -w @openvireo/sdk
 ```
 
 License: GPL-3.0-or-later (it bundles the GPL-3.0 libopaque JS build).

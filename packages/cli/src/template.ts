@@ -1,9 +1,9 @@
-/** Secret references in templates (`kpx inject`) and env files (`kpx run`). */
+/** Secret references in templates (`openvireo inject`) and env files (`openvireo run`). */
 import { KpxError, REFERENCE_PATTERN, parseReference, readField } from "@openvireo/sdk";
 import type { VaultSource } from "./source.js";
 
-/** `{{ kpx://… }}` (any spacing); needed when a reference is followed by text, e.g. `{{ kpx://v/db/password }}@host`. */
-export const BRACED_REFERENCE = /\{\{\s*(kpx:\/\/[^\s}]+)\s*\}\}/g;
+/** `{{ ov://… }}` (any spacing); needed when a reference is followed by text, e.g. `{{ ov://v/db/password }}@host`. */
+export const BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
 
 export async function readReference(src: VaultSource, ref: string): Promise<string> {
   const r = parseReference(ref);

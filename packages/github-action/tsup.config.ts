@@ -17,5 +17,5 @@ export default defineConfig({
   sourcemap: false,
   clean: true,
   dts: false,
-  banner: { js: 'import { createRequire as __kpxCreateRequire } from "node:module"; const require = __kpxCreateRequire(import.meta.url);' },
+  banner: { js: 'import { createRequire as __ovCreateRequire } from "node:module"; const require = __ovCreateRequire(import.meta.url);' },
 });

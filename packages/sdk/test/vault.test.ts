@@ -94,17 +94,17 @@ describe("entry helpers (moved from keepassxc-web)", () => {
   });
 });
 
-describe("kpx:// references", () => {
+describe("ov:// references", () => {
   it("parses, formats and rejects", () => {
-    expect(parseReference("kpx://Team%20Infra/GitHub%20deploy%20key/password")).toEqual({ vault: "Team Infra", groupPath: [], entry: "GitHub deploy key", field: "password" });
-    expect(parseReference("kpx://v/CI/Deploy/Key/Password")).toEqual({ vault: "v", groupPath: ["CI", "Deploy"], entry: "Key", field: "Password" });
-    expect(formatReference({ vault: "a b", groupPath: [], entry: "c/d", field: "e" })).toBe("kpx://a%20b/c%2Fd/e");
-    for (const bad of ["op://a/b/c", "kpx://a/b", "kpx://a//c"]) expect(() => parseReference(bad)).toThrow();
+    expect(parseReference("ov://Team%20Infra/GitHub%20deploy%20key/password")).toEqual({ vault: "Team Infra", groupPath: [], entry: "GitHub deploy key", field: "password" });
+    expect(parseReference("ov://v/CI/Deploy/Key/Password")).toEqual({ vault: "v", groupPath: ["CI", "Deploy"], entry: "Key", field: "Password" });
+    expect(formatReference({ vault: "a b", groupPath: [], entry: "c/d", field: "e" })).toBe("ov://a%20b/c%2Fd/e");
+    for (const bad of ["op://a/b/c", "ov://a/b", "ov://a//c"]) expect(() => parseReference(bad)).toThrow();
   });
   it("reads by title or uuid and writes with history", async () => {
     const db = await openKdbx(fixtureKdbx(), vaultCredentials(vaultKey));
-    expect(readField(db, parseReference("kpx://x/GitHub%20deploy%20key/password"))).toBe("hunter2-but-longer");
-    expect(readField(db, parseReference("kpx://x/GitHub%20deploy%20key/username"))).toBe("ci-bot");
+    expect(readField(db, parseReference("ov://x/GitHub%20deploy%20key/password"))).toBe("hunter2-but-longer");
+    expect(readField(db, parseReference("ov://x/GitHub%20deploy%20key/username"))).toBe("ci-bot");
     const e = findEntry(db, { groupPath: [], entry: "GitHub deploy key" });
     const hex = Array.from(new Uint8Array(e.uuid.toBytes()), (b) => b.toString(16).padStart(2, "0")).join("");
     expect(readField(db, { groupPath: [], entry: hex, field: "URL" })).toBe("https://github.com");
@@ -112,8 +112,8 @@ describe("kpx:// references", () => {
     expect(e.history).toHaveLength(1);
     expect(e.fields.get("Password")).toBeInstanceOf(kdbxweb.ProtectedValue);
     writeField(db, { groupPath: ["CI"], entry: "New", field: "API_TOKEN" }, "t0k", { create: true });
-    expect(readField(db, parseReference("kpx://x/CI/New/api_token"))).toBe("t0k");
-    expect(() => readField(db, parseReference("kpx://x/Nope/password"))).toThrow(/not found/);
+    expect(readField(db, parseReference("ov://x/CI/New/api_token"))).toBe("t0k");
+    expect(() => readField(db, parseReference("ov://x/Nope/password"))).toThrow(/not found/);
   });
 });
 

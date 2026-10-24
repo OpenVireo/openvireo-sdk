@@ -1,5 +1,5 @@
 /**
- * Loads kpx:// references into the job: every variable of the step's `env:` whose value contains a
+ * Loads ov:// references into the job: every variable of the step's `env:` whose value contains a
  * reference, plus the `secrets` input lines. Each value (and each line of a multi-line value) is masked
  * before it is exported, so it can't show up unmasked in any later log line.
  */
@@ -8,7 +8,7 @@ import { findReferences, maskPatterns, resolveTemplate, serviceAccountSource } f
 import { type ActionIo, addMask, error, exportVariable, getBooleanInput, getInput, info, setOutput } from "./core.js";
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const RESERVED = new Set(["KPX_SERVICE_ACCOUNT_TOKEN", "GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_PATH", "PATH", "NODE_OPTIONS"]);
+const RESERVED = new Set(["OPENVIREO_SERVICE_ACCOUNT_TOKEN", "GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_PATH", "PATH", "NODE_OPTIONS"]);
 
 /** The variables to load: [name, template] from the step's env and the `secrets` input. */
 export function collect(io: ActionIo): [string, string][] {
@@ -22,7 +22,7 @@ export function collect(io: ActionIo): [string, string][] {
     if (!t || t.startsWith("#")) continue;
     const i = t.indexOf("=");
     const name = i > 0 ? t.slice(0, i).trim() : "";
-    if (!NAME.test(name)) throw new Error(`secrets: expected NAME=kpx://…, got "${t}"`);
+    if (!NAME.test(name)) throw new Error(`secrets: expected NAME=ov://…, got "${t}"`);
     if (RESERVED.has(name)) throw new Error(`secrets: ${name} can't be set by this action`);
     out.set(name, t.slice(i + 1).trim());
   }
@@ -31,17 +31,17 @@ export function collect(io: ActionIo): [string, string][] {
 
 export async function run(io: ActionIo, opts: { fetch?: FetchLike } = {}): Promise<number> {
   try {
-    const token = getInput(io, "service-account-token") || io.env.KPX_SERVICE_ACCOUNT_TOKEN?.trim();
-    if (!token) throw new Error("no service account token: set the service-account-token input or KPX_SERVICE_ACCOUNT_TOKEN");
+    const token = getInput(io, "service-account-token") || io.env.OPENVIREO_SERVICE_ACCOUNT_TOKEN?.trim();
+    if (!token) throw new Error("no service account token: set the service-account-token input or OPENVIREO_SERVICE_ACCOUNT_TOKEN");
     addMask(io, token);
     const exportEnv = getBooleanInput(io, "export-env", true);
     const wanted = collect(io);
     if (!wanted.length) {
-      info(io, "No kpx:// references found in the step's env or the secrets input.");
+      info(io, "No ov:// references found in the step's env or the secrets input.");
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "kpx-github-action/0.1.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.1.0" } });
     const src = serviceAccountSource(sa);
     const resolved: [string, string][] = [];
     try {
@@ -62,7 +62,7 @@ export async function run(io: ActionIo, opts: { fetch?: FetchLike } = {}): Promi
     info(io, `Loaded ${names.length} secret${names.length === 1 ? "" : "s"} ${exportEnv ? "into the environment" : "as outputs"}: ${names.join(", ")}`);
     return 0;
   } catch (e) {
-    error(io, `kpx: ${e instanceof Error ? e.message : String(e)}`);
+    error(io, `openvireo: ${e instanceof Error ? e.message : String(e)}`);
     return 1;
   }
 }

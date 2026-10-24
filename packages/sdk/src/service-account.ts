@@ -1,7 +1,7 @@
 /**
- * Service accounts (SPEC §9): `ServiceAccount.fromToken(kpx_sa_…)` exchanges the secret for a JWT,
- * unwraps master key → keyset, and reads/writes secrets by `kpx://<vault>/<entry>/<field>`.
- * Used by the CLI, `kpx connect` and the GitHub Action.
+ * Service accounts (SPEC §9): `ServiceAccount.fromToken(ov_sa_…)` exchanges the secret for a JWT,
+ * unwraps master key → keyset, and reads/writes secrets by `ov://<vault>/<entry>/<field>`.
+ * Used by the CLI, `openvireo connect` and the GitHub Action.
  */
 import { KpxError } from "./errors.js";
 import { AuthClient, discover, type AccessTokenSource } from "./auth/client.js";
@@ -152,7 +152,7 @@ export class ServiceAccount {
 
   /**
    * Brings the cached copy up to date: a HEAD with the last ETag, and a download only when the server
-   * has a newer version (for long-running processes such as `kpx connect`). Opens the vault if needed.
+   * has a newer version (for long-running processes such as `openvireo connect`). Opens the vault if needed.
    */
   async pull(idOrName: string): Promise<Kdbx> {
     const v = await this.vault(idOrName);
@@ -188,13 +188,13 @@ export class ServiceAccount {
     });
   }
 
-  /** Reads `kpx://<vault>/<entry>/<field>`. */
+  /** Reads `ov://<vault>/<entry>/<field>`. */
   async read(ref: string): Promise<string> {
     const r = parseReference(ref);
     return readField(await this.openVault(r.vault), r);
   }
 
-  /** Replaces every kpx:// reference in a template (`kpx inject` / `run --env-file`). */
+  /** Replaces every ov:// reference in a template (`openvireo inject` / `run --env-file`). */
   async inject(template: string): Promise<{ text: string; secrets: string[] }> {
     const refs = [...new Set(template.match(REFERENCE_PATTERN) ?? [])];
     const values = new Map<string, string>();

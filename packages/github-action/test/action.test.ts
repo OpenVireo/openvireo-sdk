@@ -10,7 +10,7 @@ let w: World;
 let dir: string;
 beforeAll(async () => {
   w = await makeWorld();
-  dir = await mkdtemp(join(tmpdir(), "kpx-action-"));
+  dir = await mkdtemp(join(tmpdir(), "openvireo-action-"));
 });
 afterAll(() => rm(dir, { recursive: true, force: true }));
 
@@ -37,9 +37,9 @@ describe("GitHub Action", () => {
   it("loads env references and secrets lines, masking every value before exporting it", async () => {
     const r = await action({
       "INPUT_SERVICE-ACCOUNT-TOKEN": w.readToken,
-      INPUT_SECRETS: "# comment\nDB_PASSWORD = kpx://Team%20Infra/Deploy/Database/password\nNOTES=kpx://Team%20Infra/Deploy/Database/notes\n",
-      GH_TOKEN: "kpx://Team%20Infra/GitHub/password",
-      DSN: "postgres://app:{{ kpx://Team%20Infra/Deploy/Database/password }}@db/app",
+      INPUT_SECRETS: "# comment\nDB_PASSWORD = ov://Team%20Infra/Deploy/Database/password\nNOTES=ov://Team%20Infra/Deploy/Database/notes\n",
+      GH_TOKEN: "ov://Team%20Infra/GitHub/password",
+      DSN: "postgres://app:{{ ov://Team%20Infra/Deploy/Database/password }}@db/app",
       UNRELATED: "plain",
     });
     expect(r.code).toBe(0);
@@ -52,25 +52,25 @@ describe("GitHub Action", () => {
     expect(r.stdout).toMatch(/Loaded 4 secrets into the environment: GH_TOKEN, DSN, DB_PASSWORD, NOTES\n$/);
   });
 
-  it("sets outputs instead with export-env: false, and reads KPX_SERVICE_ACCOUNT_TOKEN", async () => {
-    const r = await action({ KPX_SERVICE_ACCOUNT_TOKEN: w.readToken, "INPUT_EXPORT-ENV": "false", USER_NAME: "kpx://Team%20Infra/GitHub/username" });
+  it("sets outputs instead with export-env: false, and reads OPENVIREO_SERVICE_ACCOUNT_TOKEN", async () => {
+    const r = await action({ OPENVIREO_SERVICE_ACCOUNT_TOKEN: w.readToken, "INPUT_EXPORT-ENV": "false", USER_NAME: "ov://Team%20Infra/GitHub/username" });
     expect([r.code, r.env, r.outputs]).toEqual([0, [], [["USER_NAME", "ci"], ["loaded", "USER_NAME"]]]);
   });
 
   it("fails with a workflow error and no partial export", async () => {
-    const missing = await action({ "INPUT_SERVICE-ACCOUNT-TOKEN": w.readToken, A: "kpx://Team%20Infra/GitHub/password", B: "kpx://Team%20Infra/Nope/password" });
+    const missing = await action({ "INPUT_SERVICE-ACCOUNT-TOKEN": w.readToken, A: "ov://Team%20Infra/GitHub/password", B: "ov://Team%20Infra/Nope/password" });
     expect([missing.code, missing.env]).toEqual([1, []]);
-    expect(missing.stdout).toContain('::error::kpx: entry "Nope" not found');
-    expect((await action({ A: "kpx://x/y/z" })).stdout).toContain("::error::kpx: no service account token");
-    expect((await action({ "INPUT_SERVICE-ACCOUNT-TOKEN": "kpx_sa_garbage", A: "kpx://x/y/z" })).stdout).toMatch(/::error::kpx: .*token/i);
-    expect((await action({ "INPUT_SERVICE-ACCOUNT-TOKEN": w.readToken, INPUT_SECRETS: "not a line" })).stdout).toContain("expected NAME=kpx://");
+    expect(missing.stdout).toContain('::error::openvireo: entry "Nope" not found');
+    expect((await action({ A: "ov://x/y/z" })).stdout).toContain("::error::openvireo: no service account token");
+    expect((await action({ "INPUT_SERVICE-ACCOUNT-TOKEN": "ov_sa_garbage", A: "ov://x/y/z" })).stdout).toMatch(/::error::openvireo: .*token/i);
+    expect((await action({ "INPUT_SERVICE-ACCOUNT-TOKEN": w.readToken, INPUT_SECRETS: "not a line" })).stdout).toContain("expected NAME=ov://");
     expect((await action({ "INPUT_SERVICE-ACCOUNT-TOKEN": w.readToken, "INPUT_EXPORT-ENV": "maybe" })).stdout).toContain('must be true or false');
   });
 
   it("ignores its own inputs and reserved variables when collecting", () => {
-    const env = { INPUT_SECRETS: "X=kpx://a/b/c", KPX_SERVICE_ACCOUNT_TOKEN: "kpx://a/b/c", PATH: "kpx://a/b/c", Y: "kpx://a/b/d" };
-    expect(collect({ env, stdout: () => {} })).toEqual([["Y", "kpx://a/b/d"], ["X", "kpx://a/b/c"]]);
-    expect(() => collect({ env: { INPUT_SECRETS: "PATH=kpx://a/b/c" }, stdout: () => {} })).toThrow(/can't be set/);
+    const env = { INPUT_SECRETS: "X=ov://a/b/c", OPENVIREO_SERVICE_ACCOUNT_TOKEN: "ov://a/b/c", PATH: "ov://a/b/c", Y: "ov://a/b/d" };
+    expect(collect({ env, stdout: () => {} })).toEqual([["Y", "ov://a/b/d"], ["X", "ov://a/b/c"]]);
+    expect(() => collect({ env: { INPUT_SECRETS: "PATH=ov://a/b/c" }, stdout: () => {} })).toThrow(/can't be set/);
   });
 
   it("writes multi-line safe file commands", () => {
@@ -84,6 +84,6 @@ describe("dist/index.mjs (the committed bundle GitHub runs)", () => {
     const { spawnSync } = await import("node:child_process");
     const bundle = new URL("../dist/index.mjs", import.meta.url).pathname;
     const r = spawnSync(process.execPath, [bundle], { env: { PATH: process.env.PATH }, encoding: "utf8" });
-    expect([r.status, r.stdout]).toEqual([1, "::error::kpx: no service account token: set the service-account-token input or KPX_SERVICE_ACCOUNT_TOKEN\n"]);
+    expect([r.status, r.stdout]).toEqual([1, "::error::openvireo: no service account token: set the service-account-token input or OPENVIREO_SERVICE_ACCOUNT_TOKEN\n"]);
   });
 });

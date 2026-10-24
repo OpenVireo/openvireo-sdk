@@ -23,7 +23,7 @@ function deviceOn(route: (url: string, init?: RequestInit) => Promise<Response>)
   return { net, fetch, storage, connect };
 }
 
-/** A local password database as the web app or Qt would have it, with KeePassXC remote settings. */
+/** A local password database as the web app or Qt would have it, with OpenVireo remote settings. */
 async function localDatabase(version: 3 | 4 = 4) {
   const db = kdbxweb.Kdbx.create(new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString("local pw")), "Home");
   if (version === 3) db.setVersion(3);
@@ -145,7 +145,7 @@ describe("Offline account vaults", () => {
     expect((await acct.listVaults()).map((v) => v.name)).toEqual(["Infra"]);
     const vault = await acct.openVault(vaultId);
     expect(vault.offline).toBe(true);
-    expect(vault.read("kpx://Infra/GitHub/password")).toBe("s3cret");
+    expect(vault.read("ov://Infra/GitHub/password")).toBe("s3cret");
 
     // An offline edit fails to upload but is kept on this device, encrypted with the vault key
     edit(vault.db!, "GitHub", { Password: "changed offline" }, 3000);
@@ -162,7 +162,7 @@ describe("Offline account vaults", () => {
     const later = await alice.connect();
     await later.unlock("pw");
     const reopened = await later.openVault(vaultId);
-    expect(reopened.read("kpx://Infra/GitHub/password")).toBe("changed offline");
+    expect(reopened.read("ov://Infra/GitHub/password")).toBe("changed offline");
 
     // Back online: reconnect, then the next sync merges and uploads the edit
     alice.net.up = true;
@@ -175,7 +175,7 @@ describe("Offline account vaults", () => {
 
     const other = await Account.connect({ issuer: ISSUER, fetch: route, device: { name: "cli", platform: "cli" } });
     await other.login({ email: "alice@example.com", password: "pw", secretKey });
-    expect((await other.openVault(vaultId)).read("kpx://Infra/GitHub/password")).toBe("changed offline");
+    expect((await other.openVault(vaultId)).read("ov://Infra/GitHub/password")).toBe("changed offline");
   });
 
   it("drops a vault whose access was revoked while offline once back online", async () => {

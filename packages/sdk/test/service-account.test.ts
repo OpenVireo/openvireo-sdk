@@ -8,10 +8,10 @@ beforeAll(async () => {
 });
 
 describe("item references and helpers", () => {
-  it("parses kpx://<vault>/[<group>/…]<entry>", () => {
-    expect(parseItemReference("kpx://Team%20Infra/GitHub")).toEqual({ vault: "Team Infra", groupPath: [], entry: "GitHub" });
-    expect(parseItemReference("kpx://v/a/b%2Fc/Entry")).toEqual({ vault: "v", groupPath: ["a", "b/c"], entry: "Entry" });
-    for (const bad of ["kpx://v", "kpx://v//e", "https://v/e", "kpx://v/%zz"]) expect(() => parseItemReference(bad)).toThrow(/reference|encoding|expected/);
+  it("parses ov://<vault>/[<group>/…]<entry>", () => {
+    expect(parseItemReference("ov://Team%20Infra/GitHub")).toEqual({ vault: "Team Infra", groupPath: [], entry: "GitHub" });
+    expect(parseItemReference("ov://v/a/b%2Fc/Entry")).toEqual({ vault: "v", groupPath: ["a", "b/c"], entry: "Entry" });
+    for (const bad of ["ov://v", "ov://v//e", "https://v/e", "ov://v/%zz"]) expect(() => parseItemReference(bad)).toThrow(/reference|encoding|expected/);
   });
 
   it("lists, reads and sets whole items", async () => {
@@ -40,7 +40,7 @@ describe("ServiceAccount.edit / pull", () => {
   it("refuses writes with a read grant before uploading anything", async () => {
     const sa = await ServiceAccount.fromToken(w.readToken, { fetch: w.fetch });
     const before = w.sync.blobs.get(`vaults/${w.vaultId}`)!.length;
-    const err = await sa.write("kpx://Team%20Infra/GitHub/password", "x").catch((e) => e);
+    const err = await sa.write("ov://Team%20Infra/GitHub/password", "x").catch((e) => e);
     expect(isKpxError(err, "forbidden")).toBe(true);
     expect(err.message).toMatch(/can only read vault "Team Infra"/);
     expect(w.sync.blobs.get(`vaults/${w.vaultId}`)!.length).toBe(before);
@@ -54,9 +54,9 @@ describe("ServiceAccount.edit / pull", () => {
     const access = w.auth.vaults.get(w.vaultId)!.access.get(sa.principal)!;
     access.role = "read";
     try {
-      const err = await sa.write("kpx://Team%20Infra/GitHub/password", "never-stored").catch((e) => e);
+      const err = await sa.write("ov://Team%20Infra/GitHub/password", "never-stored").catch((e) => e);
       expect(err.status).toBe(403);
-      expect(await sa.read("kpx://Team%20Infra/GitHub/password")).toBe("s3cret");
+      expect(await sa.read("ov://Team%20Infra/GitHub/password")).toBe("s3cret");
     } finally {
       access.role = "write";
       sa.close();
@@ -74,8 +74,8 @@ describe("ServiceAccount.edit / pull", () => {
     expect(race.fired).toBe(true);
     expect(puts() - before).toBe(2); // 412, then the merged upload
     const fresh = await ServiceAccount.fromToken(w.readToken, { fetch: w.fetch });
-    expect(await fresh.read("kpx://Team%20Infra/GitHub/password")).toBe("from-sa");
-    expect(await fresh.read("kpx://Team%20Infra/GitHub/username")).toBe("changed-elsewhere");
+    expect(await fresh.read("ov://Team%20Infra/GitHub/password")).toBe("from-sa");
+    expect(await fresh.read("ov://Team%20Infra/GitHub/username")).toBe("changed-elsewhere");
     fresh.close();
     sa.close();
   });
@@ -88,7 +88,7 @@ describe("ServiceAccount.edit / pull", () => {
     await sa.pull(w.vaultId);
     expect(gets()).toBe(n); // HEAD → 304
     const writer = await ServiceAccount.fromToken(w.writeToken, { fetch: w.fetch });
-    await writer.write("kpx://Team%20Infra/GitHub/password", "pulled");
+    await writer.write("ov://Team%20Infra/GitHub/password", "pulled");
     const m = gets();
     const db = await sa.pull(w.vaultId);
     expect(gets()).toBe(m + 1);
@@ -101,7 +101,7 @@ describe("ServiceAccount.edit / pull", () => {
     const sa = await ServiceAccount.fromToken(w.writeToken, { fetch: w.fetch });
     await Promise.all(Array.from({ length: 4 }, (_, i) => sa.edit(w.vaultId, (db) => void setItemFields(db, { groupPath: ["Batch"], entry: `e${i}` }, { password: `p${i}` }, { create: true }))));
     const fresh = await ServiceAccount.fromToken(w.readToken, { fetch: w.fetch });
-    for (let i = 0; i < 4; i++) expect(await fresh.read(`kpx://Team%20Infra/Batch/e${i}/password`)).toBe(`p${i}`);
+    for (let i = 0; i < 4; i++) expect(await fresh.read(`ov://Team%20Infra/Batch/e${i}/password`)).toBe(`p${i}`);
     fresh.close();
     sa.close();
   });

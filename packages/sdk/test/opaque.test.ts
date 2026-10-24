@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { OpaqueClientState, finishLogin, finishRegistration, opaqueIds, opaqueServerForTests as S, startLogin, startRegistration } from "../src/opaque/index.js";
 import { toHex } from "../src/util/bytes.js";
 
-const ids = opaqueIds("  Alice@Example.com ", "https://kpx.example");
+const ids = opaqueIds("  Alice@Example.com ", "https://openvireo.example");
 
 async function register(password: string) {
   const { request, state } = await startRegistration(password);
@@ -24,8 +24,8 @@ async function login(rec: Uint8Array, password: string) {
 
 describe("OPAQUE (WASM-only roundtrip with the library's own server functions)", () => {
   it("normalizes ids", () => {
-    expect(ids).toEqual({ idU: "alice@example.com", idS: "kpx.example" });
-    expect(opaqueIds("a@b.c", "accounts.keepassxc.org").idS).toBe("accounts.keepassxc.org");
+    expect(ids).toEqual({ idU: "alice@example.com", idS: "openvireo.example" });
+    expect(opaqueIds("a@b.c", "accounts.openvireo.com").idS).toBe("accounts.openvireo.com");
   });
   it("registers and logs in", async () => {
     const rec = await register("correct horse battery staple");

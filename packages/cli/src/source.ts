@@ -1,6 +1,6 @@
 /**
- * Where secrets come from: a service account (KPX_SERVICE_ACCOUNT_TOKEN) or a signed-in user. Both
- * read the same kpx:// references and write through the SDK's conditional PUT with merge/retry.
+ * Where secrets come from: a service account (OPENVIREO_SERVICE_ACCOUNT_TOKEN) or a signed-in user. Both
+ * read the same ov:// references and write through the SDK's conditional PUT with merge/retry.
  */
 import { type Account, type AccountVault, KpxError, type Kdbx, type ServiceAccount, type VaultRole } from "@openvireo/sdk";
 

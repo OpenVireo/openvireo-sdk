@@ -1,7 +1,7 @@
 {
   "name": "@openvireo/connect",
   "version": "0.1.0",
-  "description": "kpx connect: a self-hosted REST server that holds one KeePassXC service account token",
+  "description": "openvireo connect: a self-hosted REST server that holds one OpenVireo service account token",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "engines": {
@@ -16,7 +16,7 @@
     }
   },
   "bin": {
-    "kpx-connect": "./dist/bin.js"
+    "openvireo-connect": "./dist/bin.js"
   },
   "files": [
     "dist",

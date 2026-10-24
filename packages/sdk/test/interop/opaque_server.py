@@ -17,7 +17,7 @@ for line in sys.stdin:
     op = m["op"]
     try:
         ids = opaque.Ids(m["idU"], m["idS"]) if "idU" in m else None
-        ctx = m.get("context", "kpx-opaque-v1").encode()
+        ctx = m.get("context", "ov-opaque-v1").encode()
         if op == "reg":  # server: CreateRegistrationResponse with a per-user keypair (skS = None)
             sec, pub = opaque.CreateRegistrationResponse(h(m["M"]))
             state["regsec"] = sec
