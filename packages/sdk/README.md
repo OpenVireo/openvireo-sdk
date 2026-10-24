@@ -106,7 +106,7 @@ listItems(db);                                      // [{id, title, group, field
 itemOf(findEntry(db, parseItemReference("ov://Team%20Infra/Deploy/Database")), { reveal: true });
 
 // any change, then the conditional PUT with merge/retry; one edit per vault at a time, and a failed
-// upload drops the cached copy. A `read` grant throws KpxError("forbidden") before anything is sent.
+// upload drops the cached copy. A `read` grant throws OpenVireoError("forbidden") before anything is sent.
 await sa.edit("Team Infra", (db) => setItemFields(db, { groupPath: ["Apps"], entry: "Api" }, { username: "svc", token }, { create: true }));
 ```
 

@@ -13,7 +13,7 @@
  * {vault} is a vault id or name, {entry} an entry UUID or title; segments are percent-encoded.
  * Errors are {"error","code"} as in openapi.yaml.
  */
-import { KpxError, type Item, type Kdbx, type SaVault, type ServiceAccount, findEntry, itemOf, listItems, resolveFieldName, setItemFields } from "@openvireo/sdk";
+import { OpenVireoError, type Item, type Kdbx, type SaVault, type ServiceAccount, findEntry, itemOf, listItems, resolveFieldName, setItemFields } from "@openvireo/sdk";
 import { type ConnectToken, allowsVault, authenticate } from "./tokens.js";
 
 /** The part of ServiceAccount the server uses (a fake in tests). */
@@ -48,7 +48,7 @@ const STATUS: Record<string, number> = {
 };
 
 function errorResponse(e: unknown): Response {
-  if (e instanceof KpxError) {
+  if (e instanceof OpenVireoError) {
     const status = STATUS[e.code];
     if (status) return fail(status, e.code === "entry_not_found" ? "not_found" : e.code, e.message);
     // The SA token was revoked or expired, or the auth/sync server failed: not the caller's fault
@@ -80,10 +80,10 @@ export function createConnectHandler(opts: ConnectOptions): Handler {
     try {
       v = await opts.source.vault(idOrName);
     } catch (e) {
-      if (e instanceof KpxError && e.code === "not_found") throw new KpxError("not_found", `vault "${idOrName}" not found`, 404);
+      if (e instanceof OpenVireoError && e.code === "not_found") throw new OpenVireoError("not_found", `vault "${idOrName}" not found`, 404);
       throw e;
     }
-    if (!allowsVault(token, v)) throw new KpxError("not_found", `vault "${idOrName}" not found`, 404);
+    if (!allowsVault(token, v)) throw new OpenVireoError("not_found", `vault "${idOrName}" not found`, 404);
     return v;
   };
 
@@ -186,12 +186,12 @@ export function createConnectHandler(opts: ConnectOptions): Handler {
 
 async function readJson(req: Request, max: number): Promise<unknown> {
   const len = Number(req.headers.get("content-length") ?? 0);
-  if (len > max) throw new KpxError("invalid_request", "request body too large");
+  if (len > max) throw new OpenVireoError("invalid_request", "request body too large");
   const text = await req.text();
-  if (text.length > max) throw new KpxError("invalid_request", "request body too large");
+  if (text.length > max) throw new OpenVireoError("invalid_request", "request body too large");
   try {
     return JSON.parse(text);
   } catch {
-    throw new KpxError("invalid_request", "request body is not JSON");
+    throw new OpenVireoError("invalid_request", "request body is not JSON");
   }
 }

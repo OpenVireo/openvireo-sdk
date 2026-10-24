@@ -3,7 +3,7 @@
  * The module (~500 KB with the WASM inlined) is loaded lazily on first use, through the package's own
  * "./vendor/libopaque.cjs" export so the path works from src/, dist/, bundlers and Bun.
  */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { passwordBytes } from "../crypto/auk.js";
 import { wipe } from "../util/bytes.js";
 
@@ -94,7 +94,7 @@ export function loadOpaque(): Promise<LibOpaque> {
     return lib;
   })().catch((e) => {
     loading = null;
-    throw new KpxError("opaque_failed", "could not load the OPAQUE module", undefined, { cause: e });
+    throw new OpenVireoError("opaque_failed", "could not load the OPAQUE module", undefined, { cause: e });
   });
   return loading;
 }
@@ -135,7 +135,7 @@ async function checkBuild(): Promise<void> {
   if (policy === "allow") return;
   const info = await opaqueBuildInfo();
   if (!info.deterministic) return;
-  if (policy === "refuse") throw new KpxError("opaque_failed", "the libopaque build uses fixed randomness (-DNORANDOM) and must not be used in production");
+  if (policy === "refuse") throw new OpenVireoError("opaque_failed", "the libopaque build uses fixed randomness (-DNORANDOM) and must not be used in production");
   if (!warned) {
     warned = true;
     globalThis.console?.warn?.("[@openvireo/sdk] WARNING: the loaded libopaque build uses fixed randomness (-DNORANDOM); OPAQUE logins are not secure with it. See vendor/libopaque/SOURCE.md.");
@@ -150,14 +150,14 @@ function requestWithBytes(
   secBaseLen: number,
   outLen: number,
 ): { sec: Uint8Array; out: Uint8Array } {
-  if (pw.length === 0 || pw.length > 0xffff) throw new KpxError("opaque_failed", "password must be 1..65535 UTF-8 bytes");
+  if (pw.length === 0 || pw.length > 0xffff) throw new OpenVireoError("opaque_failed", "password must be 1..65535 UTF-8 bytes");
   const secLen = secBaseLen + pw.length;
   const pPw = lib._malloc(pw.length);
   const pSec = lib._malloc(secLen);
   const pOut = lib._malloc(outLen);
   try {
     lib.HEAPU8.set(pw, pPw);
-    if (fn(pPw, pw.length, pSec, pOut) !== 0) throw new KpxError("opaque_failed", "OPAQUE request failed");
+    if (fn(pPw, pw.length, pSec, pOut) !== 0) throw new OpenVireoError("opaque_failed", "OPAQUE request failed");
     return { sec: lib.HEAPU8.slice(pSec, pSec + secLen), out: lib.HEAPU8.slice(pOut, pOut + outLen) };
   } finally {
     lib.HEAPU8.fill(0, pPw, pPw + pw.length);
@@ -172,8 +172,8 @@ const wrapErr = <T>(what: string, f: () => T): T => {
   try {
     return f();
   } catch (e) {
-    if (e instanceof KpxError) throw e;
-    throw new KpxError("opaque_failed", `${what} failed`, undefined, { cause: e });
+    if (e instanceof OpenVireoError) throw e;
+    throw new OpenVireoError("opaque_failed", `${what} failed`, undefined, { cause: e });
   }
 };
 

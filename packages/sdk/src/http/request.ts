@@ -1,5 +1,5 @@
 /** Minimal fetch wrapper: JSON or bytes, the `{error, code}` error format, and no redirects. */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -10,7 +10,7 @@ export interface HttpOptions {
   headers?: Record<string, string>;
 }
 
-export class HttpError extends KpxError {
+export class HttpError extends OpenVireoError {
   constructor(
     code: string,
     message: string,
@@ -72,7 +72,7 @@ export interface RequestOptions {
 
 export async function send(http: HttpOptions, url: string, opts: RequestOptions = {}): Promise<Response> {
   const f = http.fetch ?? (globalThis.fetch as FetchLike | undefined);
-  if (!f) throw new KpxError("network_error", "no fetch implementation available");
+  if (!f) throw new OpenVireoError("network_error", "no fetch implementation available");
   const headers: Record<string, string> = { ...http.headers, ...opts.headers };
   let body: BodyInit | undefined;
   if (opts.json !== undefined) {
@@ -88,8 +88,8 @@ export async function send(http: HttpOptions, url: string, opts: RequestOptions 
     // Never follow redirects: they could forward the bearer token to another host
     res = await f(url, { method: opts.method ?? "GET", headers, body, signal: opts.signal, redirect: "manual", ...(opts.cache ? { cache: opts.cache } : {}) });
   } catch (e) {
-    if ((e as { name?: string })?.name === "AbortError") throw new KpxError("aborted", "request aborted", undefined, { cause: e });
-    throw new KpxError("network_error", `could not reach ${new URL(url).host}: ${String((e as Error)?.message ?? e)}`, 0, { cause: e });
+    if ((e as { name?: string })?.name === "AbortError") throw new OpenVireoError("aborted", "request aborted", undefined, { cause: e });
+    throw new OpenVireoError("network_error", `could not reach ${new URL(url).host}: ${String((e as Error)?.message ?? e)}`, 0, { cause: e });
   }
   if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400 && res.status !== 304)) {
     throw new HttpError("invalid_request", "the server answered with a redirect; check the server URL", res.status || 302);

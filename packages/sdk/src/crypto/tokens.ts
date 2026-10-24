@@ -1,5 +1,5 @@
 /** SPEC §9: service account tokens and refresh token hashes. */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { b64u, fromB64u, fromUtf8, randomBytes, toHex, utf8 } from "../util/bytes.js";
 import { AAD, unwrap, wrap } from "./envelope.js";
 import { sha256 } from "./primitives.js";
@@ -33,20 +33,20 @@ export interface ParsedSaToken {
 
 export function parseSaToken(token: string): ParsedSaToken {
   const t = token.trim();
-  if (!t.startsWith(SA_TOKEN_PREFIX)) throw new KpxError("invalid_token", "not a service account token (ov_sa_…)");
+  if (!t.startsWith(SA_TOKEN_PREFIX)) throw new OpenVireoError("invalid_token", "not a service account token (ov_sa_…)");
   let p: Partial<SaTokenPayload>;
   try {
     p = JSON.parse(fromUtf8(fromB64u(t.slice(SA_TOKEN_PREFIX.length))));
   } catch (e) {
-    throw new KpxError("invalid_token", "malformed service account token", undefined, { cause: e });
+    throw new OpenVireoError("invalid_token", "malformed service account token", undefined, { cause: e });
   }
-  if (p.v !== 1) throw new KpxError("invalid_token", `unsupported service account token version ${String(p.v)}`);
+  if (p.v !== 1) throw new OpenVireoError("invalid_token", `unsupported service account token version ${String(p.v)}`);
   if (typeof p.url !== "string" || typeof p.sa_id !== "string" || typeof p.secret !== "string" || typeof p.kek !== "string") {
-    throw new KpxError("invalid_token", "service account token is missing fields");
+    throw new OpenVireoError("invalid_token", "service account token is missing fields");
   }
   const secret = fromB64u(p.secret);
   const kek = fromB64u(p.kek);
-  if (secret.length !== 32 || kek.length !== 32) throw new KpxError("invalid_token", "service account token keys must be 32 bytes");
+  if (secret.length !== 32 || kek.length !== 32) throw new OpenVireoError("invalid_token", "service account token keys must be 32 bytes");
   return { url: p.url, saId: p.sa_id, secret, kek };
 }
 

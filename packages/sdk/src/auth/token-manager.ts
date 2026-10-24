@@ -3,7 +3,7 @@
  * at a time (single flight), rotate the stored refresh token, and treat a rejected refresh (reuse
  * detection, revoked device, expired) as "signed out".
  */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { decodeJwt } from "../crypto/jwt.js";
 import type { KeyValueStorage } from "./storage.js";
 import type { TokenPair } from "./types.js";
@@ -89,16 +89,16 @@ export class TokenManager {
   refreshNow(): Promise<string> {
     this.inflight ??= (async () => {
       const session = await this.load();
-      if (!session) throw new KpxError("signed_out", "not signed in");
+      if (!session) throw new OpenVireoError("signed_out", "not signed in");
       let pair: TokenPair;
       try {
         pair = await this.opts.refresh(session.refreshToken);
       } catch (e) {
-        const status = (e as KpxError).status;
+        const status = (e as OpenVireoError).status;
         if (status === 401 || status === 403 || status === 410) {
-          const code = (e as KpxError).code;
+          const code = (e as OpenVireoError).code;
           await this.clear(code === "token_reused" ? "token_reused" : code === "session_expired" ? "session_expired" : "unauthorized");
-          throw new KpxError("signed_out", `signed out: ${(e as Error).message}`, status, { cause: e });
+          throw new OpenVireoError("signed_out", `signed out: ${(e as Error).message}`, status, { cause: e });
         }
         throw e; // network trouble: keep the session and let the caller retry
       }

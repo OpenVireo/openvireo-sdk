@@ -2,7 +2,7 @@
  * Whole entries ("items") for the CLI's `openvireo item` and `openvireo connect`'s REST API. An item reference is
  * a secret reference without the field: ov://<vault>/[<group>/…]<entry uuid or title>.
  */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { kdbxweb, type Kdbx } from "./kdbx.js";
 import { fieldText } from "./entries.js";
 import { findEntry, resolveFieldName, type SecretReference } from "./reference.js";
@@ -14,16 +14,16 @@ const STANDARD_FIELDS = ["Title", "UserName", "Password", "URL", "Notes"];
 
 /** Parses ov://<vault>/[<group>/…]<entry>. */
 export function parseItemReference(ref: string): ItemReference {
-  if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a ov:// reference: ${ref}`);
+  if (!ref.startsWith(SCHEME)) throw new OpenVireoError("invalid_reference", `not a ov:// reference: ${ref}`);
   const parts = ref.slice(SCHEME.length).split("/").map((p) => {
     try {
       return decodeURIComponent(p);
     } catch {
-      throw new KpxError("invalid_reference", `bad percent-encoding in ${ref}`);
+      throw new OpenVireoError("invalid_reference", `bad percent-encoding in ${ref}`);
     }
   });
   if (parts.length < 2 || parts.some((p) => p === "")) {
-    throw new KpxError("invalid_reference", `expected ov://<vault>/<entry>: ${ref}`);
+    throw new OpenVireoError("invalid_reference", `expected ov://<vault>/<entry>: ${ref}`);
   }
   return { vault: parts[0]!, groupPath: parts.slice(1, -1), entry: parts[parts.length - 1]! };
 }
@@ -105,11 +105,11 @@ export function setItemFields(
     entry = findEntry(db, ref);
   } catch (e) {
     const ambiguous = /\d+ entries/.test((e as Error).message);
-    if (!opts.create || (e as KpxError).code !== "entry_not_found" || ambiguous) throw e;
+    if (!opts.create || (e as OpenVireoError).code !== "entry_not_found" || ambiguous) throw e;
   }
   const created = !entry;
   if (entry) {
-    if (opts.create === "only") throw new KpxError("conflict", `entry "${ref.entry}" already exists`, 409);
+    if (opts.create === "only") throw new OpenVireoError("conflict", `entry "${ref.entry}" already exists`, 409);
     entry.pushHistory();
   } else {
     let group = db.getDefaultGroup();

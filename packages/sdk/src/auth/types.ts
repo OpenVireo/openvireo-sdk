@@ -11,7 +11,7 @@ export type MemberStatus = "invited" | "accepted" | "confirmed";
 export type Platform = "qt-linux" | "qt-macos" | "qt-windows" | "web" | "cli" | "connect";
 
 /** GET /.well-known/openvireo-configuration (SPEC §10) */
-export interface KpxConfiguration {
+export interface OpenVireoConfiguration {
   issuer: string;
   api: string;
   sync: string;

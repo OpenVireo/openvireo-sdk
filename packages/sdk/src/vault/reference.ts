@@ -4,7 +4,7 @@
  * or name; <entry> is an entry UUID (hex, dashed or base64) or a unique title; <field> is a field name
  * (case-insensitive; "username", "password", "url", "notes", "title" map to the standard fields).
  */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { kdbxweb, type Kdbx } from "./kdbx.js";
 import { fieldText, getUuidString } from "./entries.js";
 
@@ -18,16 +18,16 @@ export interface SecretReference {
 const SCHEME = "ov://";
 
 export function parseReference(ref: string): SecretReference {
-  if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a ov:// reference: ${ref}`);
+  if (!ref.startsWith(SCHEME)) throw new OpenVireoError("invalid_reference", `not a ov:// reference: ${ref}`);
   const parts = ref.slice(SCHEME.length).split("/").map((p) => {
     try {
       return decodeURIComponent(p);
     } catch {
-      throw new KpxError("invalid_reference", `bad percent-encoding in ${ref}`);
+      throw new OpenVireoError("invalid_reference", `bad percent-encoding in ${ref}`);
     }
   });
   if (parts.length < 3 || parts.some((p) => p === "")) {
-    throw new KpxError("invalid_reference", `expected ov://<vault>/<entry>/<field>: ${ref}`);
+    throw new OpenVireoError("invalid_reference", `expected ov://<vault>/<entry>/<field>: ${ref}`);
   }
   return { vault: parts[0]!, groupPath: parts.slice(1, -2), entry: parts[parts.length - 2]!, field: parts[parts.length - 1]! };
 }
@@ -59,7 +59,7 @@ export function findEntry(db: Kdbx, ref: Pick<SecretReference, "groupPath" | "en
   let group = db.getDefaultGroup();
   for (const name of ref.groupPath) {
     const next = group.groups.find((g) => g.name === name);
-    if (!next) throw new KpxError("entry_not_found", `group "${ref.groupPath.join("/")}" not found`);
+    if (!next) throw new OpenVireoError("entry_not_found", `group "${ref.groupPath.join("/")}" not found`);
     group = next;
   }
   const rb = db.meta.recycleBinUuid?.toString();
@@ -68,8 +68,8 @@ export function findEntry(db: Kdbx, ref: Pick<SecretReference, "groupPath" | "en
   if (byId) return byId;
   const byTitle = all.filter((e) => fieldText(e.fields.get("Title")) === ref.entry);
   if (byTitle.length === 1) return byTitle[0]!;
-  if (byTitle.length > 1) throw new KpxError("entry_not_found", `${byTitle.length} entries are titled "${ref.entry}"; use the entry UUID`);
-  throw new KpxError("entry_not_found", `entry "${ref.entry}" not found`);
+  if (byTitle.length > 1) throw new OpenVireoError("entry_not_found", `${byTitle.length} entries are titled "${ref.entry}"; use the entry UUID`);
+  throw new OpenVireoError("entry_not_found", `entry "${ref.entry}" not found`);
 }
 
 export function resolveFieldName(entry: kdbxweb.KdbxEntry, field: string): string {
@@ -83,7 +83,7 @@ export function resolveFieldName(entry: kdbxweb.KdbxEntry, field: string): strin
 export function readField(db: Kdbx, ref: Pick<SecretReference, "groupPath" | "entry" | "field">): string {
   const entry = findEntry(db, ref);
   const name = resolveFieldName(entry, ref.field);
-  if (!entry.fields.has(name)) throw new KpxError("entry_not_found", `field "${ref.field}" not found`);
+  if (!entry.fields.has(name)) throw new OpenVireoError("entry_not_found", `field "${ref.field}" not found`);
   return fieldText(entry.fields.get(name));
 }
 
@@ -94,7 +94,7 @@ export function writeField(db: Kdbx, ref: Pick<SecretReference, "groupPath" | "e
     entry = findEntry(db, ref);
     entry.pushHistory();
   } catch (e) {
-    if (!opts.create || (e as KpxError).code !== "entry_not_found" || /\d+ entries/.test((e as Error).message)) throw e;
+    if (!opts.create || (e as OpenVireoError).code !== "entry_not_found" || /\d+ entries/.test((e as Error).message)) throw e;
     let group = db.getDefaultGroup();
     for (const name of ref.groupPath) group = group.groups.find((g) => g.name === name) ?? db.createGroup(group, name);
     entry = db.createEntry(group);
