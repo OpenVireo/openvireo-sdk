@@ -3,6 +3,18 @@
   "version": "0.1.0",
   "description": "openvireo: read, inject and rotate OpenVireo vault secrets with a service account or a user login",
   "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenVireo/openvireo-sdk.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/OpenVireo/openvireo-sdk/tree/develop/packages/cli#readme",
+  "bugs": {
+    "url": "https://github.com/OpenVireo/openvireo-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "engines": {
     "node": ">=20"

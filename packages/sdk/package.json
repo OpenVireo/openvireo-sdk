@@ -3,6 +3,18 @@
   "version": "0.1.0",
   "description": "OpenVireo accounts, vault sync and sharing SDK (ov v1) for browsers, Node and Bun",
   "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenVireo/openvireo-sdk.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/OpenVireo/openvireo-sdk/tree/develop/packages/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/OpenVireo/openvireo-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "engines": {
