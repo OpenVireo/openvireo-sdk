@@ -2,7 +2,7 @@
   "name": "@openvireo/sdk",
   "version": "0.1.0",
   "description": "OpenVireo accounts, vault sync and sharing SDK (ov v1) for browsers, Node and Bun",
-  "license": "GPL-3.0-or-later",
+  "license": "MIT OR Apache-2.0",
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -57,7 +57,9 @@
   "files": [
     "dist",
     "vendor",
-    "README.md"
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
   ],
   "scripts": {
     "build": "tsup",

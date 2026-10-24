@@ -18,3 +18,10 @@ npm run smoke -w @openvireo/cli                   # runs that binary against in-
 
 The CLI, connect and the action type-check and test against the SDK's sources (tsconfig `paths` and
 vitest aliases), and share the in-memory servers in `packages/sdk/test/helpers/world.ts`.
+
+## License
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+Unless you state otherwise, any contribution you submit for inclusion is dual licensed the same way,
+without additional terms. Third-party notices for the OPAQUE WASM module are in
+`packages/sdk/vendor/opaque/THIRD-PARTY-LICENSES.txt`.
