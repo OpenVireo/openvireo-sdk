@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OpaqueClientState, finishLogin, finishRegistration, opaqueIds, opaqueServerForTests as S, startLogin, startRegistration } from "../src/opaque/index.js";
+import { finishLogin, finishRegistration, opaqueIds, opaqueServerForTests as S, startLogin, startRegistration } from "../src/opaque/index.js";
 import { toHex } from "../src/util/bytes.js";
 
 const ids = opaqueIds("  Alice@Example.com ", "https://openvireo.example");
@@ -16,13 +16,14 @@ async function login(rec: Uint8Array, password: string) {
   const srv = await S.credentialResponse(ke1, rec, ids);
   try {
     const r = await finishLogin(state, srv.ke2, ids);
-    return { ok: await S.userAuth(srv.sec, r.authU), keysMatch: toHex(r.sessionKey) === toHex(srv.sessionKey) };
+    const sk = await S.userAuth(srv.sec, r.authU);
+    return { ok: !!sk, keysMatch: !!sk && toHex(r.sessionKey) === toHex(sk) };
   } catch (e) {
     return { ok: false, error: e };
   }
 }
 
-describe("OPAQUE (WASM-only roundtrip with the library's own server functions)", () => {
+describe("OPAQUE (WASM-only roundtrip with the module's own test server)", () => {
   it("normalizes ids", () => {
     expect(ids).toEqual({ idU: "alice@example.com", idS: "openvireo.example" });
     expect(opaqueIds("a@b.c", "accounts.openvireo.com").idS).toBe("accounts.openvireo.com");
@@ -42,27 +43,39 @@ describe("OPAQUE (WASM-only roundtrip with the library's own server functions)",
     expect((await login(rec, "Ünïcödé pässwörd fi")).ok).toBe(true); // ﬁ → fi under NFKC
     expect((await login(rec, "Ünïcödé pässwörd ﬁ!")).ok).toBe(false);
   });
-  it("documents the stock wrapper bug: it ignores the tail of a non-ASCII password", async () => {
-    // Register "éé" + "xx" through the stock wrapper: len("ééxx") = 4 code units but 6 UTF-8 bytes, so only
-    // the first 4 bytes ("éé") are used, and "ééyy" logs in too.
-    const { sec: uSec, M } = await S.stockRegistrationRequest("ééxx");
-    const { sec, response } = await S.registrationResponse(M);
-    const { record } = await finishRegistration(new OpaqueClientState(uSec), response, ids);
-    const rec = await S.storeRecord(sec, record);
-    const req = await S.stockCredentialRequest("ééyy");
-    const srv = await S.credentialResponse(req.pub, rec, ids);
-    const r = await finishLogin(new OpaqueClientState(req.sec), srv.ke2, ids);
-    expect(await S.userAuth(srv.sec, r.authU)).toBe(true);
-    // the SDK's byte-correct path does not accept that
-    expect((await login(rec, "ééyy")).ok).toBe(false);
+  it("rejects a forged authU", async () => {
+    const rec = await register("pw");
+    const { ke1, state } = await startLogin("pw");
+    const srv = await S.credentialResponse(ke1, rec, ids);
+    const r = await finishLogin(state, srv.ke2, ids);
+    r.authU[0] = r.authU[0]! ^ 1;
+    expect(await S.userAuth(srv.sec, r.authU)).toBeNull();
   });
-
+  it("fails when the client and server disagree on the ids or the context", async () => {
+    const rec = await register("pw");
+    const { ke1, state } = await startLogin("pw");
+    const srv = await S.credentialResponse(ke1, rec, ids);
+    await expect(finishLogin(state, srv.ke2, { ...ids, idS: "evil.example" })).rejects.toMatchObject({ code: "opaque_failed" });
+    const l2 = await startLogin("pw");
+    const srv2 = await S.credentialResponse(l2.ke1, rec, ids);
+    await expect(finishLogin(l2.state, srv2.ke2, ids, "other-context")).rejects.toMatchObject({ code: "opaque_failed" });
+  });
+  it("rejects malformed messages with opaque_failed", async () => {
+    const { state } = await startLogin("pw");
+    await expect(finishLogin(state, new Uint8Array(10), ids)).rejects.toMatchObject({ code: "opaque_failed" });
+    await expect(startLogin("")).rejects.toMatchObject({ code: "opaque_failed" });
+  });
+  it("wipes the client state after finishing", async () => {
+    const rec = await register("pw");
+    const { ke1, state } = await startLogin("pw");
+    const srv = await S.credentialResponse(ke1, rec, ids);
+    await finishLogin(state, srv.ke2, ids);
+    expect(state.sec.every((b) => b === 0)).toBe(true);
+  });
 });
 
-describe("the vendored libopaque build", () => {
-  it("is a release build: its login nonce and key share are random", async () => {
-    const { opaqueBuildInfo } = await import("../src/opaque/index.js");
-    expect((await opaqueBuildInfo()).deterministic).toBe(false);
+describe("the OPAQUE module", () => {
+  it("uses a fresh login nonce and key share every time", async () => {
     const a = await startLogin("pw");
     const b = await startLogin("pw");
     // KE1 = blinded element (32) ‖ client nonce (32) ‖ client key share (32)

@@ -8,8 +8,6 @@ const auk = await sdk.deriveAuk(V.auk[0].password, V.auk[0].kdf, sdk.fromHex(V.a
 if (sdk.toHex(auk) !== V.auk[0].auk_hex) fail("auk");
 const db = await sdk.openKdbx(readFileSync(new URL("../test/fixtures/vault-fixture.kdbx", import.meta.url)), sdk.vaultCredentials(sdk.fromHex(V.vault_kdbx.vault_key_hex)));
 if (sdk.readField(db, sdk.parseReference("ov://v/GitHub%20deploy%20key/password")) !== "hunter2-but-longer") fail("fixture");
-const mine = (e) => fail(e?.stack ?? e);
-process.on("uncaughtException", mine);
 const ids = sdk.opaqueIds("a@b.c", "openvireo.example");
 const r = await sdk.startRegistration("pässwörd");
 const s = await sdk.opaqueServerForTests.registrationResponse(r.request);
@@ -17,6 +15,6 @@ const rec = await sdk.opaqueServerForTests.storeRecord(s.sec, (await sdk.finishR
 const l = await sdk.startLogin("pässwörd");
 const c = await sdk.opaqueServerForTests.credentialResponse(l.ke1, rec, ids);
 const f = await sdk.finishLogin(l.state, c.ke2, ids);
-if (!(await sdk.opaqueServerForTests.userAuth(c.sec, f.authU))) fail("opaque");
-if (!process.listeners("uncaughtException").includes(mine)) fail("libopaque removed the host's uncaughtException listener");
+const sk = await sdk.opaqueServerForTests.userAuth(c.sec, f.authU);
+if (!sk || sdk.toHex(sk) !== sdk.toHex(f.sessionKey)) fail("opaque");
 console.log(`ok (${typeof Bun !== "undefined" ? "bun " + Bun.version : "node " + process.version})`);

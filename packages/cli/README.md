@@ -85,8 +85,8 @@ npm run smoke -w @openvireo/cli            # runs dist/openvireo against the in-
 # cross-compile: add --target=bun-linux-x64 | bun-linux-arm64 | bun-darwin-arm64 | bun-windows-x64
 ```
 
-The binary is ~60 MB (the Bun runtime) and includes the vendored libopaque release build, so login
-works without Node. `npm run build` also produces `dist/bin.js` for Node ≥ 20 (`node dist/bin.js`).
+The binary is ~60 MB (the Bun runtime) and includes the SDK's OPAQUE WASM module, so login works
+without Node. `npm run build` also produces `dist/bin.js` for Node ≥ 20 (`node dist/bin.js`).
 
 ## Development
 

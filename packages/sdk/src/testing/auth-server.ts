@@ -10,7 +10,7 @@ export const CONFIG = {
   api: ISSUER + "/api/v1",
   sync: "https://sync.example/api/v1",
   jwks_uri: ISSUER + "/.well-known/jwks.json",
-  opaque: { lib: "libopaque", version: "1.0.1-6e9ac92", context: "ov-opaque-v1", ids: "auth.example" },
+  opaque: { lib: "opaque-ke", version: "4.0.1", context: "ov-opaque-v1", ids: "auth.example" },
   kdf_min: { m: 19456, t: 2 },
 };
 
