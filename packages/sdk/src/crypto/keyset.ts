@@ -1,5 +1,5 @@
 /** SPEC §5: keysets, signed public keys and fingerprints. */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { b64u, concat, ctEqual, fromB64u, randomBytes, toHex, utf8, wipe } from "../util/bytes.js";
 import { AAD, unwrap, wrap } from "./envelope.js";
 import { ed25519PublicKey, ed25519Sign, ed25519Verify, sha256, x25519PublicKey, x25519RandomSecret } from "./primitives.js";
@@ -59,7 +59,7 @@ export function publicKeysFromJson(j: PublicKeysJson): PublicKeys {
 /** Parses and verifies public keys from the server; throws `invalid_public_keys` if `sig` is wrong. */
 export function trustedPublicKeys(j: PublicKeysJson): PublicKeys {
   const pub = publicKeysFromJson(j);
-  if (!verifyPublicKeys(pub)) throw new KpxError("invalid_public_keys", "public key signature is invalid");
+  if (!verifyPublicKeys(pub)) throw new OpenVireoError("invalid_public_keys", "public key signature is invalid");
   return pub;
 }
 
@@ -91,14 +91,14 @@ export function unwrapKeyset(key: Uint8Array, w: WrappedKeysetJson): Keyset {
   const plain = unwrap(key, fromB64u(w.wrapped), AAD.keyset);
   if (plain.length !== 64) {
     wipe(plain);
-    throw new KpxError("invalid_public_keys", "wrapped keyset has the wrong length");
+    throw new OpenVireoError("invalid_public_keys", "wrapped keyset has the wrong length");
   }
   const ks = keysetFromSecrets(plain.subarray(0, 32), plain.subarray(32, 64));
   wipe(plain);
   const stored = publicKeysFromJson(w);
   if (!ctEqual(ks.encPk, stored.encPk) || !ctEqual(ks.signPk, stored.signPk) || !verifyPublicKeys(stored)) {
     wipeKeyset(ks);
-    throw new KpxError("invalid_public_keys", "keyset public keys don't match its private keys");
+    throw new OpenVireoError("invalid_public_keys", "keyset public keys don't match its private keys");
   }
   ks.sig = stored.sig;
   return ks;

@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import { KpxError, ServiceAccount, type FetchLike } from "@openvireo/sdk";
+import { OpenVireoError, ServiceAccount, type FetchLike } from "@openvireo/sdk";
 import { type Handler, createConnectHandler } from "./handler.js";
 import { type ConnectToken, hashConnectToken, parseConnectTokens } from "./tokens.js";
 
@@ -55,7 +55,7 @@ const readMaybe = (env: Record<string, string | undefined>, name: string): strin
  */
 export function configFromEnv(env: Record<string, string | undefined>): ConnectConfig {
   const saToken = readMaybe(env, "OPENVIREO_SERVICE_ACCOUNT_TOKEN");
-  if (!saToken) throw new KpxError("invalid_request", "set OPENVIREO_SERVICE_ACCOUNT_TOKEN (or OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE)");
+  if (!saToken) throw new OpenVireoError("invalid_request", "set OPENVIREO_SERVICE_ACCOUNT_TOKEN (or OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE)");
   const tokens: ConnectToken[] = [];
   const list = readMaybe(env, "OPENVIREO_CONNECT_TOKENS");
   if (list) tokens.push(...parseConnectTokens(list));
@@ -64,14 +64,14 @@ export function configFromEnv(env: Record<string, string | undefined>): ConnectC
     const access = env.OPENVIREO_CONNECT_TOKEN_ACCESS === "write" ? "write" : "read";
     tokens.push({ name: "default", sha256: hashConnectToken(single), vaults: ["*"], access });
   }
-  if (!tokens.length) throw new KpxError("invalid_request", "no connect tokens: set OPENVIREO_CONNECT_TOKENS_FILE or OPENVIREO_CONNECT_TOKEN (create one with `openvireo connect token`)");
+  if (!tokens.length) throw new OpenVireoError("invalid_request", "no connect tokens: set OPENVIREO_CONNECT_TOKENS_FILE or OPENVIREO_CONNECT_TOKEN (create one with `openvireo connect token`)");
   const port = Number(env.OPENVIREO_CONNECT_PORT ?? 8080);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new KpxError("invalid_request", `bad OPENVIREO_CONNECT_PORT: ${env.OPENVIREO_CONNECT_PORT}`);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new OpenVireoError("invalid_request", `bad OPENVIREO_CONNECT_PORT: ${env.OPENVIREO_CONNECT_PORT}`);
   const ttl = Number(env.OPENVIREO_CONNECT_CACHE_TTL ?? 5);
-  if (!Number.isFinite(ttl) || ttl < 0) throw new KpxError("invalid_request", `bad OPENVIREO_CONNECT_CACHE_TTL: ${env.OPENVIREO_CONNECT_CACHE_TTL}`);
+  if (!Number.isFinite(ttl) || ttl < 0) throw new OpenVireoError("invalid_request", `bad OPENVIREO_CONNECT_CACHE_TTL: ${env.OPENVIREO_CONNECT_CACHE_TTL}`);
   const cert = env.OPENVIREO_CONNECT_TLS_CERT;
   const key = env.OPENVIREO_CONNECT_TLS_KEY;
-  if (!!cert !== !!key) throw new KpxError("invalid_request", "set both OPENVIREO_CONNECT_TLS_CERT and OPENVIREO_CONNECT_TLS_KEY");
+  if (!!cert !== !!key) throw new OpenVireoError("invalid_request", "set both OPENVIREO_CONNECT_TLS_CERT and OPENVIREO_CONNECT_TLS_KEY");
   return { saToken, tokens, host: env.OPENVIREO_CONNECT_HOST ?? "127.0.0.1", port, cacheTtlMs: ttl * 1000, ...(cert && key ? { tls: { cert, key } } : {}) };
 }
 

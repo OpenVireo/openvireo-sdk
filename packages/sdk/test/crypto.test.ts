@@ -13,7 +13,7 @@ import {
   b64u,
   generateKeyset,
   generateSecretKey,
-  isKpxError,
+  isOpenVireoError,
   checkKdfParams,
   keysetFromSecrets,
   nobleArgon2,
@@ -45,7 +45,7 @@ import {
   wrapSaMaster,
   newSaSecret,
 } from "../src/crypto/index.js";
-import { KpxError } from "../src/errors.js";
+import { OpenVireoError } from "../src/errors.js";
 import { V } from "./vectors.js";
 
 describe("§1 base64url", () => {
@@ -69,8 +69,8 @@ describe("§2 Secret Key", () => {
     expect(toHex(parseSecretKey(sloppy))).toBe(v.raw_hex);
   });
   it("rejects bad prefix, length and padding bits", () => {
-    expect(() => parseSecretKey("K2-000000-00000-00000-00000-00000")).toThrow(KpxError);
-    expect(() => parseSecretKey("K1-000000-00000-00000-00000-0000")).toThrow(KpxError);
+    expect(() => parseSecretKey("K2-000000-00000-00000-00000-00000")).toThrow(OpenVireoError);
+    expect(() => parseSecretKey("K1-000000-00000-00000-00000-0000")).toThrow(OpenVireoError);
     expect(() => parseSecretKey("K1-ZZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ")).toThrow(/padding/);
     expect(() => parseSecretKey("K1-UUUUUU-00000-00000-00000-00000")).toThrow(/invalid character/);
   });
@@ -102,7 +102,7 @@ describe("§3 AUK", () => {
   it("refuses weak KDF parameters", async () => {
     const v = V.auk[0];
     await expect(deriveAuk(v.password, v.kdf, fromHex(v.secret_key_hex))).rejects.toThrow(/minimum/);
-    expect(() => checkKdfParams({ ...v.kdf, m: 19456, t: 1 })).toThrow(KpxError);
+    expect(() => checkKdfParams({ ...v.kdf, m: 19456, t: 1 })).toThrow(OpenVireoError);
     expect(() => checkKdfParams({ ...v.kdf, m: 19456, t: 2 })).not.toThrow();
   });
 });
@@ -207,7 +207,7 @@ describe("§9 service accounts", () => {
     expect(saSecretPrefix(p.secret)).toBe(sa.secret_prefix);
   });
   it("rejects malformed tokens", () => {
-    expect(() => parseSaToken("ov_rt_abc")).toThrow(KpxError);
+    expect(() => parseSaToken("ov_rt_abc")).toThrow(OpenVireoError);
     expect(() => parseSaToken("ov_sa_" + b64u(utf8(JSON.stringify({ ...payload, v: 2 }))))).toThrow(/version/);
   });
   it("wraps the master key and the keyset byte for byte, and unwraps the chain", () => {
@@ -262,7 +262,7 @@ describe("§9 JWT", () => {
     it(`invalid: ${v.case}`, async () => {
       let refetched = 0;
       const p = verifyJwt(v.token, j.jwks, { ...opts, refetchJwks: async () => (refetched++, j.jwks) });
-      await expect(p).rejects.toSatisfy((e: unknown) => isKpxError(e, "unauthorized") && (e as KpxError).status === v.expect);
+      await expect(p).rejects.toSatisfy((e: unknown) => isOpenVireoError(e, "unauthorized") && (e as OpenVireoError).status === v.expect);
       if (v.case.startsWith("unknown kid")) expect(refetched).toBe(1);
     });
   }

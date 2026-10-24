@@ -1,5 +1,5 @@
 /** Password generation for `openvireo rotate --generate` and `openvireo item create|edit --generate`. */
-import { KpxError, randomBytes } from "@openvireo/sdk";
+import { OpenVireoError, randomBytes } from "@openvireo/sdk";
 
 export const CHARSETS = {
   lower: "abcdefghijklmnopqrstuvwxyz",
@@ -19,8 +19,8 @@ export interface GenerateOptions {
 
 export function parseCharsets(spec: string): CharsetName[] {
   const names = spec.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-  for (const n of names) if (n !== "letters" && !(n in CHARSETS)) throw new KpxError("invalid_request", `unknown charset "${n}" (use letters, lower, upper, digits, symbols)`);
-  if (!names.length) throw new KpxError("invalid_request", "empty charset");
+  for (const n of names) if (n !== "letters" && !(n in CHARSETS)) throw new OpenVireoError("invalid_request", `unknown charset "${n}" (use letters, lower, upper, digits, symbols)`);
+  if (!names.length) throw new OpenVireoError("invalid_request", "empty charset");
   return names as CharsetName[];
 }
 
@@ -40,7 +40,7 @@ export function generatePassword(opts: GenerateOptions = {}): string {
   const names = opts.charsets ?? ["letters", "digits", "symbols"];
   const sets = [...new Set(names.flatMap((n) => (n === "letters" ? ["lower", "upper"] : [n])))].map((n) => CHARSETS[n as keyof typeof CHARSETS]);
   if (!Number.isInteger(length) || length < Math.max(sets.length, 4) || length > 1024) {
-    throw new KpxError("invalid_request", `length must be between ${Math.max(sets.length, 4)} and 1024`);
+    throw new OpenVireoError("invalid_request", `length must be between ${Math.max(sets.length, 4)} and 1024`);
   }
   const alphabet = sets.join("");
   for (;;) {

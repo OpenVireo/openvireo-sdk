@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { ServiceAccount, isKpxError, itemOf, listItems, parseItemReference, setItemFields, findEntry } from "../src/index.js";
+import { ServiceAccount, isOpenVireoError, itemOf, listItems, parseItemReference, setItemFields, findEntry } from "../src/index.js";
 import { type World, editBetweenGetAndPut, makeWorld } from "./helpers/world.js";
 
 let w: World;
@@ -41,7 +41,7 @@ describe("ServiceAccount.edit / pull", () => {
     const sa = await ServiceAccount.fromToken(w.readToken, { fetch: w.fetch });
     const before = w.sync.blobs.get(`vaults/${w.vaultId}`)!.length;
     const err = await sa.write("ov://Team%20Infra/GitHub/password", "x").catch((e) => e);
-    expect(isKpxError(err, "forbidden")).toBe(true);
+    expect(isOpenVireoError(err, "forbidden")).toBe(true);
     expect(err.message).toMatch(/can only read vault "Team Infra"/);
     expect(w.sync.blobs.get(`vaults/${w.vaultId}`)!.length).toBe(before);
     sa.close();

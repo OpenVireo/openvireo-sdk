@@ -3,9 +3,9 @@
  * unwraps master key → keyset, and reads/writes secrets by `ov://<vault>/<entry>/<field>`.
  * Used by the CLI, `openvireo connect` and the GitHub Action.
  */
-import { KpxError } from "./errors.js";
+import { OpenVireoError } from "./errors.js";
 import { AuthClient, discover, type AccessTokenSource } from "./auth/client.js";
-import type { KpxConfiguration, VaultRole } from "./auth/types.js";
+import type { OpenVireoConfiguration, VaultRole } from "./auth/types.js";
 import type { HttpOptions } from "./http/request.js";
 import { unsealVaultKey } from "./crypto/envelope.js";
 import { type Keyset, unwrapKeyset, wipeKeyset } from "./crypto/keyset.js";
@@ -37,7 +37,7 @@ export class ServiceAccount {
 
   private constructor(
     readonly saId: string,
-    readonly config: KpxConfiguration,
+    readonly config: OpenVireoConfiguration,
     private readonly secret: Uint8Array,
     keyset: Keyset,
     access: { token: string; expiresAt: number },
@@ -51,7 +51,7 @@ export class ServiceAccount {
   }
 
   /** Exchanges the token's secret and unwraps the keyset (token → kek → master → keyset). */
-  static async fromToken(token: string, http: HttpOptions & { config?: KpxConfiguration } = {}): Promise<ServiceAccount> {
+  static async fromToken(token: string, http: HttpOptions & { config?: OpenVireoConfiguration } = {}): Promise<ServiceAccount> {
     const t = parseSaToken(token);
     const config = http.config ?? (await discover(t.url, http));
     const auth = new AuthClient({ ...http, api: config.api });
@@ -72,7 +72,7 @@ export class ServiceAccount {
 
   /** SAs have no refresh token: they exchange the secret again when the JWT is about to expire. */
   private accessToken(force = false): Promise<string> {
-    if (!this.keyset) return Promise.reject(new KpxError("signed_out", "service account closed"));
+    if (!this.keyset) return Promise.reject(new OpenVireoError("signed_out", "service account closed"));
     if (!force && this.access && this.access.expiresAt - 60_000 > Date.now()) return Promise.resolve(this.access.token);
     this.inflight ??= (async () => {
       const ex = await new AuthClient({ ...this.http, api: this.config.api }).serviceAccountExchange({ sa_id: this.saId, secret: b64u(this.secret) });
@@ -86,7 +86,7 @@ export class ServiceAccount {
   async listVaults(refresh = false): Promise<SaVault[]> {
     if (this.vaults && !refresh) return this.vaults;
     const ks = this.keyset;
-    if (!ks) throw new KpxError("signed_out", "service account closed");
+    if (!ks) throw new OpenVireoError("signed_out", "service account closed");
     const { vaults } = await this.auth.listVaults();
     this.vaults = vaults.map((v) => {
       const keys: KeyVersion[] = [];
@@ -119,7 +119,7 @@ export class ServiceAccount {
     if (byId) return byId;
     const byName = all.filter((v) => v.name === idOrName);
     if (byName.length === 1) return byName[0]!;
-    throw new KpxError("not_found", byName.length ? `${byName.length} vaults are named "${idOrName}"` : `vault "${idOrName}" not found or not shared with this service account`, 404);
+    throw new OpenVireoError("not_found", byName.length ? `${byName.length} vaults are named "${idOrName}"` : `vault "${idOrName}" not found or not shared with this service account`, 404);
   }
 
   /** Downloads and opens a vault (cached; `refresh` downloads again). */
@@ -132,7 +132,7 @@ export class ServiceAccount {
 
   private async download(v: SaVault): Promise<Kdbx> {
     const got = await this.sync.vault(v.id).get();
-    if (got.status !== 200) throw new KpxError("not_found", `vault ${v.id} has no data on the sync server`, 404);
+    if (got.status !== 200) throw new OpenVireoError("not_found", `vault ${v.id} has no data on the sync server`, 404);
     const { db } = await openWithKeyVersions(got.data, v.keys);
     // The downloaded copy is the base for the next merge, as after a sync
     const state: SyncState = { etag: got.etag, revision: got.revision, generation: syncGeneration(db), snapshot: snapshotOf(db), base: got.data, lastSync: new Date().toISOString() };
@@ -172,7 +172,7 @@ export class ServiceAccount {
    */
   async edit<T>(idOrName: string, fn: (db: Kdbx) => T | Promise<T>): Promise<T> {
     const v = await this.vault(idOrName);
-    if (v.role === "read") throw new KpxError("forbidden", `this service account can only read vault "${v.name || v.id}"`, 403);
+    if (v.role === "read") throw new OpenVireoError("forbidden", `this service account can only read vault "${v.name || v.id}"`, 403);
     return this.serialize(v.id, async () => {
       const db = this.opened.get(v.id)?.db ?? (await this.download(v));
       const cached = this.opened.get(v.id)!;

@@ -4,7 +4,7 @@
  * immediately after a clean end (the server closes JWT streams at the token's exp), with exponential
  * backoff after errors, and with a forced token refresh after a 401.
  */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { send, errorFromResponse } from "../http/request.js";
 import type { SyncClient } from "./client.js";
 
@@ -165,7 +165,7 @@ export class EventStream {
         if (res.status === 401) {
           await res.body?.cancel();
           this.forceRefresh = true;
-          throw new KpxError("unauthorized", "event stream rejected the token", 401);
+          throw new OpenVireoError("unauthorized", "event stream rejected the token", 401);
         }
         if (!res.ok || !res.body) {
           const err = await errorFromResponse(res);
@@ -192,7 +192,7 @@ export class EventStream {
         if (run === this.runId) this.schedule(parser.retry ?? 0);
       } catch (e) {
         if (run !== this.runId || this.closed) return;
-        if ((e as { name?: string })?.name === "AbortError" || (e as KpxError)?.code === "aborted") return;
+        if ((e as { name?: string })?.name === "AbortError" || (e as OpenVireoError)?.code === "aborted") return;
         if (parser.retry !== undefined) this.retryMs = Math.max(this.retryMs, parser.retry);
         this.backoff(e);
       }

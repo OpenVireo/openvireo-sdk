@@ -16046,13 +16046,13 @@ var require_kdbxweb = __commonJS({
 });
 
 // ../sdk/src/errors.ts
-var KpxError = class extends Error {
+var OpenVireoError = class extends Error {
   constructor(code, message, status, options) {
     super(message, options);
     this.code = code;
     this.status = status;
   }
-  name = "KpxError";
+  name = "OpenVireoError";
 };
 
 // ../sdk/src/util/bytes.ts
@@ -18685,30 +18685,30 @@ function decrypt(key, nonce, ct, aad) {
   try {
     return aeadDecrypt(key, nonce, ct, aad);
   } catch (e) {
-    throw new KpxError("decryption_failed", "decryption failed (wrong key, wrong AAD or corrupted data)", void 0, {
+    throw new OpenVireoError("decryption_failed", "decryption failed (wrong key, wrong AAD or corrupted data)", void 0, {
       cause: e
     });
   }
 }
 function checkVersion(blob, minLength) {
   if (blob.length === 0 || blob[0] !== VERSION) {
-    throw new KpxError("unsupported_version", `unsupported envelope version ${blob[0] ?? "(empty)"}`);
+    throw new OpenVireoError("unsupported_version", `unsupported envelope version ${blob[0] ?? "(empty)"}`);
   }
-  if (blob.length < minLength) throw new KpxError("decryption_failed", "envelope too short");
+  if (blob.length < minLength) throw new OpenVireoError("decryption_failed", "envelope too short");
 }
 function unwrap(key, blob, aad) {
   checkVersion(blob, 1 + NONCE_BYTES + 16);
   return decrypt(key, blob.subarray(1, 1 + NONCE_BYTES), blob.subarray(1 + NONCE_BYTES), aad);
 }
 function sealKey(shared, epk, recipientPk) {
-  if (shared.every((b) => b === 0)) throw new KpxError("low_order_point", "X25519 result is all zero");
+  if (shared.every((b) => b === 0)) throw new OpenVireoError("low_order_point", "X25519 result is all zero");
   return hkdf2(shared, concat(epk, recipientPk), "ov-seal-v1", 32);
 }
 function sharedSecret(sk, pk) {
   try {
     return x25519Shared(sk, pk);
   } catch (e) {
-    throw new KpxError("low_order_point", "invalid X25519 public key", void 0, { cause: e });
+    throw new OpenVireoError("low_order_point", "invalid X25519 public key", void 0, { cause: e });
   }
 }
 function sealDerivedKey(recipientEncSk, sealed) {
@@ -18756,14 +18756,14 @@ function unwrapKeyset(key, w) {
   const plain = unwrap(key, fromB64u(w.wrapped), AAD.keyset);
   if (plain.length !== 64) {
     wipe(plain);
-    throw new KpxError("invalid_public_keys", "wrapped keyset has the wrong length");
+    throw new OpenVireoError("invalid_public_keys", "wrapped keyset has the wrong length");
   }
   const ks = keysetFromSecrets(plain.subarray(0, 32), plain.subarray(32, 64));
   wipe(plain);
   const stored = publicKeysFromJson(w);
   if (!ctEqual(ks.encPk, stored.encPk) || !ctEqual(ks.signPk, stored.signPk) || !verifyPublicKeys(stored)) {
     wipeKeyset(ks);
-    throw new KpxError("invalid_public_keys", "keyset public keys don't match its private keys");
+    throw new OpenVireoError("invalid_public_keys", "keyset public keys don't match its private keys");
   }
   ks.sig = stored.sig;
   return ks;
@@ -18787,26 +18787,26 @@ function decryptVaultName(vaultKey, vaultId, encryptedName) {
 var SA_TOKEN_PREFIX = "ov_sa_";
 function parseSaToken(token) {
   const t = token.trim();
-  if (!t.startsWith(SA_TOKEN_PREFIX)) throw new KpxError("invalid_token", "not a service account token (ov_sa_\u2026)");
+  if (!t.startsWith(SA_TOKEN_PREFIX)) throw new OpenVireoError("invalid_token", "not a service account token (ov_sa_\u2026)");
   let p;
   try {
     p = JSON.parse(fromUtf8(fromB64u(t.slice(SA_TOKEN_PREFIX.length))));
   } catch (e) {
-    throw new KpxError("invalid_token", "malformed service account token", void 0, { cause: e });
+    throw new OpenVireoError("invalid_token", "malformed service account token", void 0, { cause: e });
   }
-  if (p.v !== 1) throw new KpxError("invalid_token", `unsupported service account token version ${String(p.v)}`);
+  if (p.v !== 1) throw new OpenVireoError("invalid_token", `unsupported service account token version ${String(p.v)}`);
   if (typeof p.url !== "string" || typeof p.sa_id !== "string" || typeof p.secret !== "string" || typeof p.kek !== "string") {
-    throw new KpxError("invalid_token", "service account token is missing fields");
+    throw new OpenVireoError("invalid_token", "service account token is missing fields");
   }
   const secret = fromB64u(p.secret);
   const kek = fromB64u(p.kek);
-  if (secret.length !== 32 || kek.length !== 32) throw new KpxError("invalid_token", "service account token keys must be 32 bytes");
+  if (secret.length !== 32 || kek.length !== 32) throw new OpenVireoError("invalid_token", "service account token keys must be 32 bytes");
   return { url: p.url, saId: p.sa_id, secret, kek };
 }
 var unwrapSaMaster = (kek, saId, wrapped) => unwrap(kek, fromB64u(wrapped), AAD.saMaster(saId));
 
 // ../sdk/src/http/request.ts
-var HttpError = class extends KpxError {
+var HttpError = class extends OpenVireoError {
   constructor(code, message, status, body, retryAfter) {
     super(code, message, status);
     this.body = body;
@@ -18845,7 +18845,7 @@ function joinUrl(base, path) {
 var seg = (s) => encodeURIComponent(s).replace(/%3A/gi, ":");
 async function send(http, url, opts = {}) {
   const f = http.fetch ?? globalThis.fetch;
-  if (!f) throw new KpxError("network_error", "no fetch implementation available");
+  if (!f) throw new OpenVireoError("network_error", "no fetch implementation available");
   const headers = { ...http.headers, ...opts.headers };
   let body;
   if (opts.json !== void 0) {
@@ -18860,8 +18860,8 @@ async function send(http, url, opts = {}) {
   try {
     res = await f(url, { method: opts.method ?? "GET", headers, body, signal: opts.signal, redirect: "manual", ...opts.cache ? { cache: opts.cache } : {} });
   } catch (e) {
-    if (e?.name === "AbortError") throw new KpxError("aborted", "request aborted", void 0, { cause: e });
-    throw new KpxError("network_error", `could not reach ${new URL(url).host}: ${String(e?.message ?? e)}`, 0, { cause: e });
+    if (e?.name === "AbortError") throw new OpenVireoError("aborted", "request aborted", void 0, { cause: e });
+    throw new OpenVireoError("network_error", `could not reach ${new URL(url).host}: ${String(e?.message ?? e)}`, 0, { cause: e });
   }
   if (res.type === "opaqueredirect" || res.status >= 300 && res.status < 400 && res.status !== 304) {
     throw new HttpError("invalid_request", "the server answered with a redirect; check the server URL", res.status || 302);
@@ -18881,9 +18881,9 @@ async function discover(issuer, http = {}) {
   const base = issuer.replace(/\/+$/, "");
   const cfg = await sendJson(http, `${base}/.well-known/openvireo-configuration`);
   for (const k of ["issuer", "api", "sync", "jwks_uri"]) {
-    if (typeof cfg?.[k] !== "string") throw new KpxError("invalid_request", `openvireo-configuration is missing "${k}"`);
+    if (typeof cfg?.[k] !== "string") throw new OpenVireoError("invalid_request", `openvireo-configuration is missing "${k}"`);
   }
-  if (!cfg.opaque?.ids) throw new KpxError("invalid_request", "openvireo-configuration is missing opaque.ids");
+  if (!cfg.opaque?.ids) throw new OpenVireoError("invalid_request", "openvireo-configuration is missing opaque.ids");
   return cfg;
 }
 var AuthClient = class _AuthClient {
@@ -18913,7 +18913,7 @@ var AuthClient = class _AuthClient {
   /** Authenticated call: retries once with a forced refresh on 401. */
   async authed(method, path, json, query) {
     const tokens = this.opts.tokens;
-    if (!tokens) throw new KpxError("signed_out", "this call needs an access token");
+    if (!tokens) throw new OpenVireoError("signed_out", "this call needs an access token");
     const url = this.url(path, query);
     try {
       return await sendJson(this.opts, url, { method, json, token: await tokens.getAccessToken() });
@@ -19126,7 +19126,7 @@ var BlobHandle = class {
     const res = await this.client.request(this.path, { method: "PUT", headers, body: data2, signal });
     if (res.status !== 200 && res.status !== 201) {
       const err = await errorFromResponse(res);
-      if (res.status === 412) throw new KpxError("precondition_failed", err.message, 412, { cause: err });
+      if (res.status === 412) throw new OpenVireoError("precondition_failed", err.message, 412, { cause: err });
       throw err;
     }
     let meta;
@@ -19248,7 +19248,7 @@ function initKdbx() {
   });
 }
 function vaultCredentials(vaultKey) {
-  if (vaultKey.length !== 32) throw new KpxError("no_vault_key", "a vault key is 32 bytes");
+  if (vaultKey.length !== 32) throw new OpenVireoError("no_vault_key", "a vault key is 32 bytes");
   const key = new Uint8Array(vaultKey);
   return () => new kdbxweb.Credentials(null, new Uint8Array(key));
 }
@@ -19257,9 +19257,9 @@ var toArrayBuffer = (data2) => data2 instanceof ArrayBuffer ? data2.slice(0) : e
 function mapError(e) {
   const code = e?.code;
   if (code === kdbxweb.Consts.ErrorCodes.InvalidKey) {
-    throw new KpxError("vault_key_mismatch", "wrong key for this database", void 0, { cause: e });
+    throw new OpenVireoError("vault_key_mismatch", "wrong key for this database", void 0, { cause: e });
   }
-  throw new KpxError("kdbx_error", `could not read the database: ${e?.message ?? e}`, void 0, { cause: e });
+  throw new OpenVireoError("kdbx_error", `could not read the database: ${e?.message ?? e}`, void 0, { cause: e });
 }
 async function openKdbx(data2, credentials) {
   initKdbx();
@@ -19275,7 +19275,7 @@ async function saveKdbx(db) {
   return new Uint8Array(await db.save());
 }
 async function openWithKeyVersions(data2, keys) {
-  if (keys.length === 0) throw new KpxError("no_vault_key", "no vault key available");
+  if (keys.length === 0) throw new OpenVireoError("no_vault_key", "no vault key available");
   const sorted = [...keys].sort((a, b) => b.version - a.version);
   let last;
   for (const k of sorted) {
@@ -19901,7 +19901,7 @@ async function openWith(data2, creds) {
       last = e;
     }
   }
-  throw last ?? new KpxError("vault_key_mismatch", "no credentials to open the server copy");
+  throw last ?? new OpenVireoError("vault_key_mismatch", "no credentials to open the server copy");
 }
 async function syncKdbx(opts) {
   const creds = Array.isArray(opts.credentials) ? opts.credentials : [opts.credentials];
@@ -19923,7 +19923,7 @@ async function syncKdbx(opts) {
   };
   const checkRevision = (revision) => {
     if (!opts.acceptServerState && prev && revision >= 0 && revision < prev.revision) {
-      throw new KpxError("server_rolled_back", `the sync server returned revision ${revision}, older than revision ${prev.revision} this device already synced`);
+      throw new OpenVireoError("server_rolled_back", `the sync server returned revision ${revision}, older than revision ${prev.revision} this device already synced`);
     }
   };
   if (prev && opts.localChanged === false && !opts.beforeUpload) {
@@ -19940,7 +19940,7 @@ async function syncKdbx(opts) {
     const got = await opts.blob.get({ signal: opts.signal });
     if (got.status === 404) {
       if (!opts.acceptServerState && prev && prev.revision > 0) {
-        throw new KpxError("server_lost_database", "the sync server no longer has this database, although this device synced it before");
+        throw new OpenVireoError("server_lost_database", "the sync server no longer has this database, although this device synced it before");
       }
       await opts.beforeUpload?.(local);
       const data3 = await saveKdbx(local);
@@ -19953,13 +19953,13 @@ async function syncKdbx(opts) {
         throw e;
       }
     }
-    if (got.status !== 200) throw new KpxError("server_error", `unexpected status ${got.status}`);
+    if (got.status !== 200) throw new OpenVireoError("server_error", `unexpected status ${got.status}`);
     checkRevision(got.revision);
     opts.onProgress?.("merging");
     const { db: remote, index } = await openWith(got.data, creds);
     const remoteGeneration = syncGeneration(remote);
     if (!opts.acceptServerState && prev && remoteGeneration < prev.generation) {
-      throw new KpxError("server_rolled_back", `the server copy has sync generation ${remoteGeneration}, older than ${prev.generation} already synced here`);
+      throw new OpenVireoError("server_rolled_back", `the server copy has sync generation ${remoteGeneration}, older than ${prev.generation} already synced here`);
     }
     const snapshot = prev?.snapshot ?? {};
     conflicts = findConflicts(local, remote, snapshot);
@@ -19998,7 +19998,7 @@ async function syncKdbx(opts) {
     } catch (e) {
       if (e.code === "precondition_failed") {
         if (attempt < maxAttempts) continue;
-        throw new KpxError("too_many_conflicts", "the database on the sync server kept changing during the sync; local changes are kept, sync again", 412, { cause: e });
+        throw new OpenVireoError("too_many_conflicts", "the database on the sync server kept changing during the sync; local changes are kept, sync again", 412, { cause: e });
       }
       throw e;
     }
@@ -20025,16 +20025,16 @@ function fieldText(val) {
 // ../sdk/src/vault/reference.ts
 var SCHEME = "ov://";
 function parseReference(ref) {
-  if (!ref.startsWith(SCHEME)) throw new KpxError("invalid_reference", `not a ov:// reference: ${ref}`);
+  if (!ref.startsWith(SCHEME)) throw new OpenVireoError("invalid_reference", `not a ov:// reference: ${ref}`);
   const parts = ref.slice(SCHEME.length).split("/").map((p) => {
     try {
       return decodeURIComponent(p);
     } catch {
-      throw new KpxError("invalid_reference", `bad percent-encoding in ${ref}`);
+      throw new OpenVireoError("invalid_reference", `bad percent-encoding in ${ref}`);
     }
   });
   if (parts.length < 3 || parts.some((p) => p === "")) {
-    throw new KpxError("invalid_reference", `expected ov://<vault>/<entry>/<field>: ${ref}`);
+    throw new OpenVireoError("invalid_reference", `expected ov://<vault>/<entry>/<field>: ${ref}`);
   }
   return { vault: parts[0], groupPath: parts.slice(1, -2), entry: parts[parts.length - 2], field: parts[parts.length - 1] };
 }
@@ -20057,7 +20057,7 @@ function findEntry(db, ref) {
   let group = db.getDefaultGroup();
   for (const name2 of ref.groupPath) {
     const next = group.groups.find((g) => g.name === name2);
-    if (!next) throw new KpxError("entry_not_found", `group "${ref.groupPath.join("/")}" not found`);
+    if (!next) throw new OpenVireoError("entry_not_found", `group "${ref.groupPath.join("/")}" not found`);
     group = next;
   }
   const rb = db.meta.recycleBinUuid?.toString();
@@ -20066,8 +20066,8 @@ function findEntry(db, ref) {
   if (byId) return byId;
   const byTitle = all.filter((e) => fieldText(e.fields.get("Title")) === ref.entry);
   if (byTitle.length === 1) return byTitle[0];
-  if (byTitle.length > 1) throw new KpxError("entry_not_found", `${byTitle.length} entries are titled "${ref.entry}"; use the entry UUID`);
-  throw new KpxError("entry_not_found", `entry "${ref.entry}" not found`);
+  if (byTitle.length > 1) throw new OpenVireoError("entry_not_found", `${byTitle.length} entries are titled "${ref.entry}"; use the entry UUID`);
+  throw new OpenVireoError("entry_not_found", `entry "${ref.entry}" not found`);
 }
 function resolveFieldName(entry, field) {
   if (entry.fields.has(field)) return field;
@@ -20079,7 +20079,7 @@ function resolveFieldName(entry, field) {
 function readField(db, ref) {
   const entry = findEntry(db, ref);
   const name2 = resolveFieldName(entry, ref.field);
-  if (!entry.fields.has(name2)) throw new KpxError("entry_not_found", `field "${ref.field}" not found`);
+  if (!entry.fields.has(name2)) throw new OpenVireoError("entry_not_found", `field "${ref.field}" not found`);
   return fieldText(entry.fields.get(name2));
 }
 function writeField(db, ref, value, opts = {}) {
@@ -20143,7 +20143,7 @@ var ServiceAccount = class _ServiceAccount {
   }
   /** SAs have no refresh token: they exchange the secret again when the JWT is about to expire. */
   accessToken(force = false) {
-    if (!this.keyset) return Promise.reject(new KpxError("signed_out", "service account closed"));
+    if (!this.keyset) return Promise.reject(new OpenVireoError("signed_out", "service account closed"));
     if (!force && this.access && this.access.expiresAt - 6e4 > Date.now()) return Promise.resolve(this.access.token);
     this.inflight ??= (async () => {
       const ex = await new AuthClient({ ...this.http, api: this.config.api }).serviceAccountExchange({ sa_id: this.saId, secret: b64u(this.secret) });
@@ -20156,7 +20156,7 @@ var ServiceAccount = class _ServiceAccount {
   async listVaults(refresh = false) {
     if (this.vaults && !refresh) return this.vaults;
     const ks = this.keyset;
-    if (!ks) throw new KpxError("signed_out", "service account closed");
+    if (!ks) throw new OpenVireoError("signed_out", "service account closed");
     const { vaults } = await this.auth.listVaults();
     this.vaults = vaults.map((v) => {
       const keys = [];
@@ -20186,7 +20186,7 @@ var ServiceAccount = class _ServiceAccount {
     if (byId) return byId;
     const byName = all.filter((v) => v.name === idOrName);
     if (byName.length === 1) return byName[0];
-    throw new KpxError("not_found", byName.length ? `${byName.length} vaults are named "${idOrName}"` : `vault "${idOrName}" not found or not shared with this service account`, 404);
+    throw new OpenVireoError("not_found", byName.length ? `${byName.length} vaults are named "${idOrName}"` : `vault "${idOrName}" not found or not shared with this service account`, 404);
   }
   /** Downloads and opens a vault (cached; `refresh` downloads again). */
   async openVault(idOrName, refresh = false) {
@@ -20197,7 +20197,7 @@ var ServiceAccount = class _ServiceAccount {
   }
   async download(v) {
     const got = await this.sync.vault(v.id).get();
-    if (got.status !== 200) throw new KpxError("not_found", `vault ${v.id} has no data on the sync server`, 404);
+    if (got.status !== 200) throw new OpenVireoError("not_found", `vault ${v.id} has no data on the sync server`, 404);
     const { db } = await openWithKeyVersions(got.data, v.keys);
     const state = { etag: got.etag, revision: got.revision, generation: syncGeneration(db), snapshot: snapshotOf(db), base: got.data, lastSync: (/* @__PURE__ */ new Date()).toISOString() };
     this.opened.set(v.id, { db, state });
@@ -20232,7 +20232,7 @@ var ServiceAccount = class _ServiceAccount {
    */
   async edit(idOrName, fn) {
     const v = await this.vault(idOrName);
-    if (v.role === "read") throw new KpxError("forbidden", `this service account can only read vault "${v.name || v.id}"`, 403);
+    if (v.role === "read") throw new OpenVireoError("forbidden", `this service account can only read vault "${v.name || v.id}"`, 403);
     return this.serialize(v.id, async () => {
       const db = this.opened.get(v.id)?.db ?? await this.download(v);
       const cached = this.opened.get(v.id);

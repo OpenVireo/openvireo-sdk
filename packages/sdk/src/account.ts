@@ -2,11 +2,11 @@
  * High-level API for a OpenVireo account (hosted mode): register, log in, unlock/lock, list and open
  * vaults, share, revoke (with key rotation), and create service accounts.
  */
-import { KpxError, isUnreachable } from "./errors.js";
+import { OpenVireoError, isUnreachable } from "./errors.js";
 import { AuthClient, discover } from "./auth/client.js";
 import { MemoryStorage, NamespacedStorage, type KeyValueStorage } from "./auth/storage.js";
 import { TokenManager, type SignedOutReason } from "./auth/token-manager.js";
-import { type DeviceInfo, type Grant, type KpxConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
+import { type DeviceInfo, type Grant, type OpenVireoConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
 import type { HttpOptions } from "./http/request.js";
 import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
 import { sealSaMaster, sealVaultKey, unsealSaMaster, unsealVaultKey } from "./crypto/envelope.js";
@@ -25,7 +25,7 @@ import { parseReference, readField, writeField, type SecretReference } from "./v
 const isManager = (role: OrgRole) => role === "owner" || role === "admin";
 
 /** Asks for a TOTP code; asked again with the previous `invalid_mfa` error after a wrong code. */
-export type TotpPrompt = (ctx: { attempt: number; error?: KpxError }) => Promise<string>;
+export type TotpPrompt = (ctx: { attempt: number; error?: OpenVireoError }) => Promise<string>;
 
 export interface AccountOptions extends HttpOptions {
   /** the hosted issuer, e.g. https://accounts.openvireo.com */
@@ -34,7 +34,7 @@ export interface AccountOptions extends HttpOptions {
   /** sessions, trusted-device Secret Keys and sync state (default: memory) */
   storage?: KeyValueStorage;
   /** skip discovery (tests) */
-  config?: KpxConfiguration;
+  config?: OpenVireoConfiguration;
   /**
    * Keep what this device needs to unlock and open vaults without the network, all of it in
    * `storage` and none of it in clear: the discovery document, the wrapped keyset and KDF params, the
@@ -62,12 +62,12 @@ const OFFLINE = {
 };
 
 /** Thrown by `importVault` when the vault was created but its first upload failed; `vault.sync()` retries it. */
-export class VaultUploadError extends KpxError {
+export class VaultUploadError extends OpenVireoError {
   constructor(
     readonly vault: AccountVault,
     cause: unknown,
   ) {
-    super("vault_upload_failed", `the vault was created, but its first upload failed: ${(cause as Error)?.message ?? cause}`, (cause as KpxError)?.status, { cause });
+    super("vault_upload_failed", `the vault was created, but its first upload failed: ${(cause as Error)?.message ?? cause}`, (cause as OpenVireoError)?.status, { cause });
   }
 }
 
@@ -101,7 +101,7 @@ export class Account {
   private cacheUser: string | undefined;
 
   private constructor(
-    readonly config: KpxConfiguration,
+    readonly config: OpenVireoConfiguration,
     private readonly opts: AccountOptions,
   ) {
     this.storage = opts.storage ?? new MemoryStorage();
@@ -131,7 +131,7 @@ export class Account {
       } catch (e) {
         const cached = opts.offline && isUnreachable(e) ? await opts.storage?.get(key) : null;
         if (!cached) throw e;
-        config = JSON.parse(cached) as KpxConfiguration;
+        config = JSON.parse(cached) as OpenVireoConfiguration;
         offline = true;
       }
     }
@@ -162,7 +162,7 @@ export class Account {
     return this.tokens.current?.email;
   }
   get principal(): Principal {
-    if (!this.tokens.current) throw new KpxError("signed_out", "not signed in");
+    if (!this.tokens.current) throw new OpenVireoError("signed_out", "not signed in");
     return `user:${this.tokens.current.userId}`;
   }
   /** this account's public key fingerprint (to compare out of band) */
@@ -220,7 +220,7 @@ export class Account {
   async login(p: { email: string; password: string; secretKey?: string; totp?: string | TotpPrompt; trustDevice?: boolean }): Promise<void> {
     const stored = await this.storage.get(this.skKey(p.email));
     const skText = p.secretKey ?? stored;
-    if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
+    if (!skText) throw new OpenVireoError("invalid_secret_key", "this device needs the account's Secret Key");
     const sk = parseSecretKey(skText);
     const deviceId = await this.storage.get(this.devKey(p.email));
     const ids = this.ids(p.email);
@@ -231,28 +231,28 @@ export class Account {
       ({ authU } = await finishLogin(login.state, fromB64u(started.ke2), ids, this.config.opaque.context));
     } catch (e) {
       // Same message as the server's 401 for a wrong password or unknown email
-      throw new KpxError("unauthorized", "wrong email or password", 401, { cause: e });
+      throw new OpenVireoError("unauthorized", "wrong email or password", 401, { cause: e });
     }
     const device = { ...this.opts.device, ...(deviceId ? { id: deviceId } : {}) };
     let res = await this.auth.loginFinish({ session_id: started.session_id, auth_u: b64u(authU), device });
     if (isMfaChallenge(res)) {
-      if (!p.totp) throw new KpxError("mfa_required", "a TOTP code is required");
+      if (!p.totp) throw new OpenVireoError("mfa_required", "a TOTP code is required");
       const mfaToken = res.mfa_token;
       // SPEC.md §8: a wrong code (invalid_mfa) keeps the token, so a prompt is asked again; once the
       // token is gone (the 5th wrong code, or it expired) the login fails with mfa_expired
-      for (let attempt = 1, error: KpxError | undefined; ; attempt++) {
+      for (let attempt = 1, error: OpenVireoError | undefined; ; attempt++) {
         const code = typeof p.totp === "string" ? p.totp : await p.totp({ attempt, error });
         try {
           res = await this.auth.loginMfa({ mfa_token: mfaToken, totp: code });
           break;
         } catch (e) {
-          if (e instanceof KpxError && e.code === "invalid_mfa" && typeof p.totp !== "string") {
+          if (e instanceof OpenVireoError && e.code === "invalid_mfa" && typeof p.totp !== "string") {
             error = e;
             continue;
           }
           // The server dropped the MFA token (5th wrong code, or it expired): sign-in starts over
-          if (e instanceof KpxError && e.code !== "invalid_mfa" && (e.status === 401 || e.status === 410)) {
-            throw new KpxError("mfa_expired", "the sign-in expired or the code was wrong too often; sign in again", e.status, { cause: e });
+          if (e instanceof OpenVireoError && e.code !== "invalid_mfa" && (e.status === 401 || e.status === 410)) {
+            throw new OpenVireoError("mfa_expired", "the sign-in expired or the code was wrong too often; sign in again", e.status, { cause: e });
           }
           throw e;
         }
@@ -282,7 +282,7 @@ export class Account {
       this.lock();
       this.keyset = unwrapKeyset(auk, wrapped);
     } catch (e) {
-      throw (e as KpxError).code === "decryption_failed" ? new KpxError("unauthorized", "wrong password or Secret Key", 401, { cause: e }) : e;
+      throw (e as OpenVireoError).code === "decryption_failed" ? new OpenVireoError("unauthorized", "wrong password or Secret Key", 401, { cause: e }) : e;
     } finally {
       wipe(auk);
     }
@@ -295,10 +295,10 @@ export class Account {
    */
   async unlock(password: string, secretKey?: string): Promise<void> {
     const session = await this.tokens.load();
-    if (!session) throw new KpxError("signed_out", "not signed in");
+    if (!session) throw new OpenVireoError("signed_out", "not signed in");
     this.cacheUser = session.userId;
     const skText = secretKey ?? (await this.storage.get(this.skKey(session.email)));
-    if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
+    if (!skText) throw new OpenVireoError("invalid_secret_key", "this device needs the account's Secret Key");
     const sk = parseSecretKey(skText);
     try {
       let profile: Profile;
@@ -358,7 +358,7 @@ export class Account {
     try {
       return unwrapKeyset(auk, me.keyset);
     } catch (e) {
-      throw (e as KpxError).code === "decryption_failed" ? new KpxError("unauthorized", "the master password is wrong", 401, { cause: e }) : e;
+      throw (e as OpenVireoError).code === "decryption_failed" ? new OpenVireoError("unauthorized", "the master password is wrong", 401, { cause: e }) : e;
     } finally {
       wipe(auk);
     }
@@ -366,9 +366,9 @@ export class Account {
 
   private async storedSecretKey(): Promise<{ session: NonNullable<TokenManager["current"]>; sk: Uint8Array }> {
     const session = await this.tokens.load();
-    if (!session) throw new KpxError("signed_out", "not signed in");
+    if (!session) throw new OpenVireoError("signed_out", "not signed in");
     const skText = await this.storage.get(this.skKey(session.email));
-    if (!skText) throw new KpxError("invalid_secret_key", "this device needs the account's Secret Key");
+    if (!skText) throw new OpenVireoError("invalid_secret_key", "this device needs the account's Secret Key");
     return { session, sk: parseSecretKey(skText) };
   }
 
@@ -445,7 +445,7 @@ export class Account {
    */
   async reconnect(): Promise<{ vaults: VaultInfo[]; dropped: string[] }> {
     const session = await this.tokens.load();
-    if (!session) throw new KpxError("signed_out", "not signed in");
+    if (!session) throw new OpenVireoError("signed_out", "not signed in");
     const me = await this.auth.me();
     await this.followEmail(me.email);
     await this.cacheProfile(session.userId, { kdf: me.kdf, keyset: me.keyset });
@@ -484,7 +484,7 @@ export class Account {
   }
 
   private requireKeyset(): Keyset {
-    if (!this.keyset) throw new KpxError("signed_out", "the account is locked");
+    if (!this.keyset) throw new OpenVireoError("signed_out", "the account is locked");
     return this.keyset;
   }
 
@@ -667,7 +667,7 @@ export class Account {
   async share(vaultId: string, who: { email?: string; principal?: Principal }, role: VaultRole): Promise<{ principal: Principal; fingerprint: string }> {
     const e = await this.entry(vaultId);
     const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
-    if (!current) throw new KpxError("no_vault_key", "this account doesn't hold the current vault key");
+    if (!current) throw new OpenVireoError("no_vault_key", "this account doesn't hold the current vault key");
     const pp = who.principal ? await this.auth.publicKey(who.principal) : await this.auth.lookupUser(who.email ?? "");
     const pub = trustedPublicKeys(pp);
     await this.auth.grantAccess(vaultId, [{ principal: pp.principal, role, key_version: current.version, sealed_key: b64u(sealVaultKey(pub.encPk, vaultId, current.key)) }]);
@@ -685,7 +685,7 @@ export class Account {
    */
   async rotate(vaultId: string, opts: { remove?: Principal[] } = {}): Promise<SyncResult> {
     const e = await this.entry(vaultId);
-    if (ROLE_ORDER[e.info.role] < ROLE_ORDER.manage) throw new KpxError("forbidden", "rotating a vault key needs the manage role", 403);
+    if (ROLE_ORDER[e.info.role] < ROLE_ORDER.manage) throw new OpenVireoError("forbidden", "rotating a vault key needs the manage role", 403);
     const remove = new Set(opts.remove ?? []);
     const { access } = await this.auth.listAccess(vaultId);
     const version = e.info.currentKeyVersion + 1;
@@ -739,7 +739,7 @@ export class Account {
       for (const g of p.vaults ?? []) {
         const e = await this.entry(g.id);
         const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
-        if (!current) throw new KpxError("no_vault_key", `no current key for vault ${g.id}`);
+        if (!current) throw new OpenVireoError("no_vault_key", `no current key for vault ${g.id}`);
         await this.auth.grantAccess(g.id, [{ principal: `sa:${saId}`, role: g.role, key_version: current.version, sealed_key: b64u(sealVaultKey(saKeys.encPk, g.id, current.key)) }]);
       }
       return { serviceAccount: sa, token };
@@ -752,7 +752,7 @@ export class Account {
   /** Issues another secret for an SA (owner/admin): unseals the master key and builds a token to show once. */
   async issueServiceAccountSecret(saId: string, p: { name?: string; expiresAt?: string | null } = {}) {
     const sa = await this.auth.getServiceAccount(saId);
-    if (!sa.master_key) throw new KpxError("forbidden", "only org owners and admins hold the SA master key", 403);
+    if (!sa.master_key) throw new OpenVireoError("forbidden", "only org owners and admins hold the SA master key", 403);
     const master = unsealSaMaster(this.requireKeyset().encSk, saId, fromB64u(sa.master_key));
     try {
       const { token, body } = newSaSecret({ url: this.config.issuer, saId, master, secretId: randomUuid(), name: p.name, expiresAt: p.expiresAt });
@@ -771,7 +771,7 @@ export class Account {
    * gets the vaults in `vaults` only.
    */
   async confirmMember(orgId: string, member: Member, vaults: { id: string; role: VaultRole }[] = []): Promise<Member> {
-    if (!member.public) throw new KpxError("invalid_request", "this member has no public keys yet", 400);
+    if (!member.public) throw new OpenVireoError("invalid_request", "this member has no public keys yet", 400);
     const pub = trustedPublicKeys(member.public);
     const principal: Principal = `user:${member.user_id}`;
     const manager = isManager(member.role);
@@ -779,9 +779,9 @@ export class Account {
     const grants: VaultGrant[] = [];
     for (const g of chosen) {
       const e = await this.entry(g.id);
-      if (e.info.orgId !== orgId) throw new KpxError("invalid_request", `vault ${g.id} is not a vault of this org`, 400);
+      if (e.info.orgId !== orgId) throw new OpenVireoError("invalid_request", `vault ${g.id} is not a vault of this org`, 400);
       const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
-      if (!current) throw new KpxError("no_vault_key", `no current key for vault ${g.id}`);
+      if (!current) throw new OpenVireoError("no_vault_key", `no current key for vault ${g.id}`);
       grants.push({ vault_id: g.id, principal, role: g.role, key_version: current.version, sealed_key: b64u(sealVaultKey(pub.encPk, g.id, current.key)) });
     }
     return this.auth.confirmMember(orgId, member.user_id, {
@@ -988,7 +988,7 @@ export class AccountVault {
         if (isUnreachable(e)) this.offline = true;
         throw e;
       });
-      if (got.status !== 200) throw new KpxError("not_found", `vault ${this.id} has no data on the sync server`, 404);
+      if (got.status !== 200) throw new OpenVireoError("not_found", `vault ${this.id} has no data on the sync server`, 404);
       db = (await openWithKeyVersions(got.data, keys)).db;
     }
     this.db = db;
@@ -1046,19 +1046,19 @@ export class AccountVault {
     if (this.db) return;
     const base = this.state?.base;
     if (!base) {
-      throw new KpxError("not_available_offline", `vault "${this.name || this.id}" was never synced on this device, so it can't be opened offline`, undefined, { cause });
+      throw new OpenVireoError("not_available_offline", `vault "${this.name || this.id}" was never synced on this device, so it can't be opened offline`, undefined, { cause });
     }
     this.db = (await openWithKeyVersions(base, [...this.keys()])).db;
   }
 
   read(ref: string | Pick<SecretReference, "groupPath" | "entry" | "field">): string {
-    if (!this.db) throw new KpxError("kdbx_error", "vault not opened");
+    if (!this.db) throw new OpenVireoError("kdbx_error", "vault not opened");
     return readField(this.db, typeof ref === "string" ? parseReference(ref) : ref);
   }
 
   /** Sets a field and syncs it up. */
   async write(ref: string | Pick<SecretReference, "groupPath" | "entry" | "field">, value: string, opts: { create?: boolean } = {}): Promise<SyncResult> {
-    if (!this.db) throw new KpxError("kdbx_error", "vault not opened");
+    if (!this.db) throw new OpenVireoError("kdbx_error", "vault not opened");
     writeField(this.db, typeof ref === "string" ? parseReference(ref) : ref, value, opts);
     return this.sync();
   }

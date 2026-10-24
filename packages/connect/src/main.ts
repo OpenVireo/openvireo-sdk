@@ -1,6 +1,6 @@
 /** `openvireo connect [serve]` and `openvireo connect token`: shared by the openvireo-connect bin and the openvireo CLI. */
 import { parseArgs } from "node:util";
-import { KpxError, type FetchLike } from "@openvireo/sdk";
+import { OpenVireoError, type FetchLike } from "@openvireo/sdk";
 import { configFromEnv, startConnect } from "./server.js";
 import { newConnectToken } from "./tokens.js";
 
@@ -42,7 +42,7 @@ export async function connectMain(argv: string[], io: ConnectIo): Promise<number
     io.stderr(CONNECT_USAGE);
     return 2;
   }
-  if (rest.length) throw new KpxError("invalid_request", `unexpected arguments: ${rest.join(" ")}`);
+  if (rest.length) throw new OpenVireoError("invalid_request", `unexpected arguments: ${rest.join(" ")}`);
   const config = configFromEnv(io.env);
   const running = await startConnect(config, { fetch: io.fetch, log: (l) => io.stderr(`${new Date().toISOString()} ${l}\n`) });
   io.stderr(`openvireo connect listening on ${running.url} (${config.tokens.length} token${config.tokens.length === 1 ? "" : "s"})\n`);

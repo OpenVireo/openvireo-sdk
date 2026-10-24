@@ -1,5 +1,5 @@
 /** SPEC §4 (wrap) and §6 (seal). */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { concat, randomBytes, wipe } from "../util/bytes.js";
 import {
   NONCE_BYTES,
@@ -17,7 +17,7 @@ function decrypt(key: Uint8Array, nonce: Uint8Array, ct: Uint8Array, aad: string
   try {
     return aeadDecrypt(key, nonce, ct, aad);
   } catch (e) {
-    throw new KpxError("decryption_failed", "decryption failed (wrong key, wrong AAD or corrupted data)", undefined, {
+    throw new OpenVireoError("decryption_failed", "decryption failed (wrong key, wrong AAD or corrupted data)", undefined, {
       cause: e,
     });
   }
@@ -25,9 +25,9 @@ function decrypt(key: Uint8Array, nonce: Uint8Array, ct: Uint8Array, aad: string
 
 function checkVersion(blob: Uint8Array, minLength: number): void {
   if (blob.length === 0 || blob[0] !== VERSION) {
-    throw new KpxError("unsupported_version", `unsupported envelope version ${blob[0] ?? "(empty)"}`);
+    throw new OpenVireoError("unsupported_version", `unsupported envelope version ${blob[0] ?? "(empty)"}`);
   }
-  if (blob.length < minLength) throw new KpxError("decryption_failed", "envelope too short");
+  if (blob.length < minLength) throw new OpenVireoError("decryption_failed", "envelope too short");
 }
 
 /** wrap(key, plaintext, aad) = 0x01 ‖ nonce(24) ‖ XChaCha20-Poly1305(key, nonce, plaintext, aad). `nonce` is for tests. */
@@ -41,7 +41,7 @@ export function unwrap(key: Uint8Array, blob: Uint8Array, aad: string): Uint8Arr
 }
 
 function sealKey(shared: Uint8Array, epk: Uint8Array, recipientPk: Uint8Array): Uint8Array {
-  if (shared.every((b) => b === 0)) throw new KpxError("low_order_point", "X25519 result is all zero");
+  if (shared.every((b) => b === 0)) throw new OpenVireoError("low_order_point", "X25519 result is all zero");
   return hkdf(shared, concat(epk, recipientPk), "ov-seal-v1", 32);
 }
 
@@ -50,7 +50,7 @@ function sharedSecret(sk: Uint8Array, pk: Uint8Array): Uint8Array {
     return x25519Shared(sk, pk);
   } catch (e) {
     // noble rejects low-order points itself
-    throw new KpxError("low_order_point", "invalid X25519 public key", undefined, { cause: e });
+    throw new OpenVireoError("low_order_point", "invalid X25519 public key", undefined, { cause: e });
   }
 }
 

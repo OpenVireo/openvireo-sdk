@@ -1,5 +1,5 @@
 /** Secret references in templates (`openvireo inject`) and env files (`openvireo run`). */
-import { KpxError, REFERENCE_PATTERN, parseReference, readField } from "@openvireo/sdk";
+import { OpenVireoError, REFERENCE_PATTERN, parseReference, readField } from "@openvireo/sdk";
 import type { VaultSource } from "./source.js";
 
 /** `{{ ov://… }}` (any spacing); needed when a reference is followed by text, e.g. `{{ ov://v/db/password }}@host`. */
@@ -35,7 +35,7 @@ export function parseEnvFile(text: string, file = ".env"): [string, string][] {
     const line = lines[i]!.trim();
     if (!line || line.startsWith("#")) continue;
     const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-    if (!m) throw new KpxError("invalid_request", `${file}:${i + 1}: expected KEY=value`);
+    if (!m) throw new OpenVireoError("invalid_request", `${file}:${i + 1}: expected KEY=value`);
     const key = m[1]!;
     let rest = m[2]!;
     let value: string;
@@ -46,19 +46,19 @@ export function parseEnvFile(text: string, file = ".env"): [string, string][] {
         body += "\n" + lines[++i];
         end = closingQuote(body);
       }
-      if (end < 0) throw new KpxError("invalid_request", `${file}:${i + 1}: unterminated "`);
+      if (end < 0) throw new OpenVireoError("invalid_request", `${file}:${i + 1}: unterminated "`);
       value = body.slice(0, end).replace(/\\(.)/g, (_, c: string) => ({ n: "\n", t: "\t", r: "\r" })[c] ?? c);
       rest = body.slice(end + 1);
     } else if (rest.startsWith("'")) {
       const end = rest.indexOf("'", 1);
-      if (end < 0) throw new KpxError("invalid_request", `${file}:${i + 1}: unterminated '`);
+      if (end < 0) throw new OpenVireoError("invalid_request", `${file}:${i + 1}: unterminated '`);
       value = rest.slice(1, end);
       rest = rest.slice(end + 1);
     } else {
       value = rest.replace(/\s+#.*$/, "").trim();
       rest = "";
     }
-    if (rest.trim() && !rest.trim().startsWith("#")) throw new KpxError("invalid_request", `${file}:${i + 1}: unexpected text after the closing quote`);
+    if (rest.trim() && !rest.trim().startsWith("#")) throw new OpenVireoError("invalid_request", `${file}:${i + 1}: unexpected text after the closing quote`);
     out.push([key, value]);
   }
   return out;

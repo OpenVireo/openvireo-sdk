@@ -2,7 +2,7 @@
  * Sync server client: the JWT routes of sync-openapi.yaml (`vaults/*`, `events`) and the legacy
  * device-token routes (`databases/*`, `devices/pairing*`, `health`), with conditional GET/PUT.
  */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { type HttpOptions, errorFromResponse, joinUrl, seg, send, sendJson } from "../http/request.js";
 import type { AccessTokenSource } from "../auth/client.js";
 import type { BlobMeta } from "../auth/types.js";
@@ -68,7 +68,7 @@ export class BlobHandle {
     const res = await this.client.request(this.path, { method: "PUT", headers, body: data, signal });
     if (res.status !== 200 && res.status !== 201) {
       const err = await errorFromResponse(res);
-      if (res.status === 412) throw new KpxError("precondition_failed", err.message, 412, { cause: err });
+      if (res.status === 412) throw new OpenVireoError("precondition_failed", err.message, 412, { cause: err });
       throw err;
     }
     let meta: BlobMeta | undefined;
@@ -143,7 +143,7 @@ export class SyncClient {
     try {
       return await sendJson<T>(this.opts, this.url(path), { ...init, token });
     } catch (e) {
-      if ((e as KpxError).status === 401 && this.opts.token && typeof this.opts.token !== "string") {
+      if ((e as OpenVireoError).status === 401 && this.opts.token && typeof this.opts.token !== "string") {
         return sendJson<T>(this.opts, this.url(path), { ...init, token: await this.token(true) });
       }
       throw e;

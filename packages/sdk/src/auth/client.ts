@@ -1,5 +1,5 @@
 /** REST client for every route of openapi.yaml (auth server, under `{api}`). */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { type HttpOptions, joinUrl, seg, sendJson } from "../http/request.js";
 import type { Jwks } from "../crypto/jwt.js";
 import type {
@@ -9,7 +9,7 @@ import type {
   Grant,
   Invitation,
   KdfParams,
-  KpxConfiguration,
+  OpenVireoConfiguration,
   Me,
   Member,
   MfaChallenge,
@@ -42,13 +42,13 @@ export interface AuthClientOptions extends HttpOptions {
 }
 
 /** Fetches `/.well-known/openvireo-configuration` from the issuer (SPEC §10). */
-export async function discover(issuer: string, http: HttpOptions = {}): Promise<KpxConfiguration> {
+export async function discover(issuer: string, http: HttpOptions = {}): Promise<OpenVireoConfiguration> {
   const base = issuer.replace(/\/+$/, "");
-  const cfg = await sendJson<KpxConfiguration>(http, `${base}/.well-known/openvireo-configuration`);
+  const cfg = await sendJson<OpenVireoConfiguration>(http, `${base}/.well-known/openvireo-configuration`);
   for (const k of ["issuer", "api", "sync", "jwks_uri"] as const) {
-    if (typeof cfg?.[k] !== "string") throw new KpxError("invalid_request", `openvireo-configuration is missing "${k}"`);
+    if (typeof cfg?.[k] !== "string") throw new OpenVireoError("invalid_request", `openvireo-configuration is missing "${k}"`);
   }
-  if (!cfg.opaque?.ids) throw new KpxError("invalid_request", "openvireo-configuration is missing opaque.ids");
+  if (!cfg.opaque?.ids) throw new OpenVireoError("invalid_request", "openvireo-configuration is missing opaque.ids");
   return cfg;
 }
 
@@ -89,12 +89,12 @@ export class AuthClient {
   /** Authenticated call: retries once with a forced refresh on 401. */
   private async authed<T>(method: Method, path: string, json?: unknown, query?: Record<string, string | number | undefined>): Promise<T> {
     const tokens = this.opts.tokens;
-    if (!tokens) throw new KpxError("signed_out", "this call needs an access token");
+    if (!tokens) throw new OpenVireoError("signed_out", "this call needs an access token");
     const url = this.url(path, query);
     try {
       return await sendJson<T>(this.opts, url, { method, json, token: await tokens.getAccessToken() });
     } catch (e) {
-      if ((e as KpxError).status !== 401) throw e;
+      if ((e as OpenVireoError).status !== 401) throw e;
       return sendJson<T>(this.opts, url, { method, json, token: await tokens.getAccessToken({ force: true }) });
     }
   }

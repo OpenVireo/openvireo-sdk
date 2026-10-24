@@ -3,7 +3,7 @@
  * HEAD/GET with the ETag → open → three-way merge with the base copy → conditional PUT → on 412
  * download, merge and retry. The base copy is the server's bytes from the last successful sync.
  */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { b64u, fromB64u } from "../util/bytes.js";
 import { type CredentialsFactory, type Kdbx, openKdbx, saveKdbx, setSyncGeneration, syncGeneration } from "../vault/kdbx.js";
 import {
@@ -83,12 +83,12 @@ async function openWith(data: Uint8Array, creds: CredentialsFactory[]): Promise<
     try {
       return { db: await openKdbx(data, creds[i]!), index: i };
     } catch (e) {
-      if ((e as KpxError).code !== "vault_key_mismatch") throw e;
+      if ((e as OpenVireoError).code !== "vault_key_mismatch") throw e;
       last = e;
     }
   }
   // Qt asks the user to unlock the server copy here; SDK callers get an error they can act on
-  throw last ?? new KpxError("vault_key_mismatch", "no credentials to open the server copy");
+  throw last ?? new OpenVireoError("vault_key_mismatch", "no credentials to open the server copy");
 }
 
 export async function syncKdbx(opts: SyncOptions): Promise<SyncResult> {
@@ -113,7 +113,7 @@ export async function syncKdbx(opts: SyncOptions): Promise<SyncResult> {
 
   const checkRevision = (revision: number) => {
     if (!opts.acceptServerState && prev && revision >= 0 && revision < prev.revision) {
-      throw new KpxError("server_rolled_back", `the sync server returned revision ${revision}, older than revision ${prev.revision} this device already synced`);
+      throw new OpenVireoError("server_rolled_back", `the sync server returned revision ${revision}, older than revision ${prev.revision} this device already synced`);
     }
   };
 
@@ -134,7 +134,7 @@ export async function syncKdbx(opts: SyncOptions): Promise<SyncResult> {
 
     if (got.status === 404) {
       if (!opts.acceptServerState && prev && prev.revision > 0) {
-        throw new KpxError("server_lost_database", "the sync server no longer has this database, although this device synced it before");
+        throw new OpenVireoError("server_lost_database", "the sync server no longer has this database, although this device synced it before");
       }
       // Nothing on the server yet: publish the local database as the first version
       await opts.beforeUpload?.(local);
@@ -144,18 +144,18 @@ export async function syncKdbx(opts: SyncOptions): Promise<SyncResult> {
         const put = await opts.blob.put(data, { create: true }, opts.signal);
         return finish("created", local, put.etag, put.revision, data, -1, attempt);
       } catch (e) {
-        if ((e as KpxError).code === "precondition_failed" && attempt < maxAttempts) continue;
+        if ((e as OpenVireoError).code === "precondition_failed" && attempt < maxAttempts) continue;
         throw e;
       }
     }
-    if (got.status !== 200) throw new KpxError("server_error", `unexpected status ${got.status}`);
+    if (got.status !== 200) throw new OpenVireoError("server_error", `unexpected status ${got.status}`);
     checkRevision(got.revision);
 
     opts.onProgress?.("merging");
     const { db: remote, index } = await openWith(got.data, creds);
     const remoteGeneration = syncGeneration(remote);
     if (!opts.acceptServerState && prev && remoteGeneration < prev.generation) {
-      throw new KpxError("server_rolled_back", `the server copy has sync generation ${remoteGeneration}, older than ${prev.generation} already synced here`);
+      throw new OpenVireoError("server_rolled_back", `the server copy has sync generation ${remoteGeneration}, older than ${prev.generation} already synced here`);
     }
 
     // The copy both sides last synced from tells which fields each side changed; only open it when needed
@@ -201,9 +201,9 @@ export async function syncKdbx(opts: SyncOptions): Promise<SyncResult> {
       return finish("uploaded", remote, put.etag, put.revision, data, index, attempt, remoteGeneration);
     } catch (e) {
       // Another device uploaded since our download: merge its version too and try again
-      if ((e as KpxError).code === "precondition_failed") {
+      if ((e as OpenVireoError).code === "precondition_failed") {
         if (attempt < maxAttempts) continue;
-        throw new KpxError("too_many_conflicts", "the database on the sync server kept changing during the sync; local changes are kept, sync again", 412, { cause: e });
+        throw new OpenVireoError("too_many_conflicts", "the database on the sync server kept changing during the sync; local changes are kept, sync again", 412, { cause: e });
       }
       throw e;
     }

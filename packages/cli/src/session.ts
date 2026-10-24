@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
-import { Account, KpxError, ServiceAccount, type FetchLike } from "@openvireo/sdk";
+import { Account, OpenVireoError, ServiceAccount, type FetchLike } from "@openvireo/sdk";
 import { FileStorage } from "@openvireo/sdk/storage/node";
 import { type VaultSource, serviceAccountSource, userSource } from "./source.js";
 
@@ -40,7 +40,7 @@ export function serviceAccountToken(env: SessionIo["env"]): string | undefined {
 }
 
 async function ask(io: SessionIo, question: string, hidden: boolean): Promise<string> {
-  if (!io.prompt) throw new KpxError("invalid_request", `${question.replace(/:\s*$/, "")} is needed, but there is no terminal to ask on`);
+  if (!io.prompt) throw new OpenVireoError("invalid_request", `${question.replace(/:\s*$/, "")} is needed, but there is no terminal to ask on`);
   return io.prompt(question, { hidden });
 }
 
@@ -50,9 +50,9 @@ export async function openSource(io: SessionIo): Promise<VaultSource> {
   if (token) return serviceAccountSource(await ServiceAccount.fromToken(token, http(io)));
   const storage = storageFor(io.env);
   const issuer = await storage.get("cli:issuer");
-  if (!issuer) throw new KpxError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `openvireo login`");
+  if (!issuer) throw new OpenVireoError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `openvireo login`");
   const account = await Account.connect({ issuer, device: device(), storage, ...http(io) });
-  if (!account.signedIn) throw new KpxError("signed_out", "the saved session has ended: run `openvireo login` again");
+  if (!account.signedIn) throw new OpenVireoError("signed_out", "the saved session has ended: run `openvireo login` again");
   const password = io.env.OPENVIREO_PASSWORD ?? (await ask(io, `Master password for ${account.tokens.current?.email}: `, true));
   await account.unlock(password);
   return userSource(account);
@@ -68,7 +68,7 @@ export async function login(io: SessionIo, p: { issuer?: string; email?: string;
   try {
     await account.login({ email, password, secretKey, totp: () => ask(io, "Authenticator code: ", false) });
   } catch (e) {
-    if (!(e instanceof KpxError) || e.code !== "invalid_secret_key" || secretKey) throw e;
+    if (!(e instanceof OpenVireoError) || e.code !== "invalid_secret_key" || secretKey) throw e;
     // First sign-in on this machine: the Secret Key from the Emergency Kit
     secretKey = await ask(io, "Secret Key (K1-…): ", true);
     await account.login({ email, password, secretKey, totp: () => ask(io, "Authenticator code: ", false) });
@@ -97,9 +97,9 @@ export async function whoami(io: SessionIo): Promise<Record<string, string>> {
   }
   const storage = storageFor(io.env);
   const issuer = await storage.get("cli:issuer");
-  if (!issuer) throw new KpxError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `openvireo login`");
+  if (!issuer) throw new OpenVireoError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `openvireo login`");
   const account = await Account.connect({ issuer, device: device(), storage, ...http(io) });
   const s = account.tokens.current;
-  if (!s) throw new KpxError("signed_out", "the saved session has ended: run `openvireo login` again");
+  if (!s) throw new OpenVireoError("signed_out", "the saved session has ended: run `openvireo login` again");
   return { kind: "user", principal: `user:${s.userId}`, email: s.email, issuer };
 }

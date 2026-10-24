@@ -1,5 +1,5 @@
-/** Every error the SDK throws on purpose is a KpxError with a machine-readable code. */
-export type KpxErrorCode =
+/** Every error the SDK throws on purpose is a OpenVireoError with a machine-readable code. */
+export type OpenVireoErrorCode =
   // crypto
   | "unsupported_version"
   | "decryption_failed"
@@ -42,10 +42,10 @@ export type KpxErrorCode =
   | "vault_upload_failed"
   | "aborted";
 
-export class KpxError extends Error {
-  override readonly name = "KpxError";
+export class OpenVireoError extends Error {
+  override readonly name = "OpenVireoError";
   constructor(
-    readonly code: KpxErrorCode | (string & {}),
+    readonly code: OpenVireoErrorCode | (string & {}),
     message: string,
     readonly status?: number,
     options?: { cause?: unknown },
@@ -54,8 +54,8 @@ export class KpxError extends Error {
   }
 }
 
-export const isKpxError = (e: unknown, code?: string): e is KpxError =>
-  e instanceof KpxError && (code === undefined || e.code === code);
+export const isOpenVireoError = (e: unknown, code?: string): e is OpenVireoError =>
+  e instanceof OpenVireoError && (code === undefined || e.code === code);
 
 /**
  * Whether an error means the server could not be reached (no network, DNS, a refused connection, or

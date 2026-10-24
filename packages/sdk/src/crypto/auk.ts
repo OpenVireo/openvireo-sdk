@@ -1,5 +1,5 @@
 /** SPEC §3: Account Unlock Key. */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { b64u, fromB64u, randomBytes, utf8, wipe } from "../util/bytes.js";
 import { argon2 } from "./argon2.js";
 import { hkdf } from "./primitives.js";
@@ -24,9 +24,9 @@ export function newKdfParams(overrides: Partial<Omit<KdfParams, "alg" | "salt">>
 
 /** Clients refuse m < 19456 or t < 2 (or the server's stricter `kdf_min`). */
 export function checkKdfParams(kdf: KdfParams, min: { m: number; t: number } = KDF_MIN): void {
-  if (kdf.alg !== "argon2id") throw new KpxError("weak_kdf", `unsupported KDF ${String(kdf.alg)}`);
+  if (kdf.alg !== "argon2id") throw new OpenVireoError("weak_kdf", `unsupported KDF ${String(kdf.alg)}`);
   if (!(kdf.m >= min.m) || !(kdf.t >= min.t) || !(kdf.p >= 1)) {
-    throw new KpxError("weak_kdf", `KDF parameters below the minimum (m >= ${min.m}, t >= ${min.t})`);
+    throw new OpenVireoError("weak_kdf", `KDF parameters below the minimum (m >= ${min.m}, t >= ${min.t})`);
   }
 }
 

@@ -4,7 +4,7 @@
  * component with no password (SPEC §7).
  */
 import * as kdbxweb from "kdbxweb";
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { argon2, type Argon2Type } from "../crypto/argon2.js";
 import { exactBuffer } from "../util/bytes.js";
 
@@ -39,7 +39,7 @@ export type CredentialsFactory = () => KdbxCredentials;
 
 /** Account vault credentials: the 32-byte vault key as a raw key file component, no password. */
 export function vaultCredentials(vaultKey: Uint8Array): CredentialsFactory {
-  if (vaultKey.length !== 32) throw new KpxError("no_vault_key", "a vault key is 32 bytes");
+  if (vaultKey.length !== 32) throw new OpenVireoError("no_vault_key", "a vault key is 32 bytes");
   // Copies (new Uint8Array, not .slice(), which is a view on Node Buffers): kdbxweb wipes what it gets
   const key = new Uint8Array(vaultKey);
   return () => new kdbxweb.Credentials(null, new Uint8Array(key));
@@ -80,9 +80,9 @@ const toArrayBuffer = (data: Uint8Array | ArrayBuffer): ArrayBuffer =>
 function mapError(e: unknown): never {
   const code = (e as { code?: string })?.code;
   if (code === kdbxweb.Consts.ErrorCodes.InvalidKey) {
-    throw new KpxError("vault_key_mismatch", "wrong key for this database", undefined, { cause: e });
+    throw new OpenVireoError("vault_key_mismatch", "wrong key for this database", undefined, { cause: e });
   }
-  throw new KpxError("kdbx_error", `could not read the database: ${(e as Error)?.message ?? e}`, undefined, { cause: e });
+  throw new OpenVireoError("kdbx_error", `could not read the database: ${(e as Error)?.message ?? e}`, undefined, { cause: e });
 }
 
 export async function openKdbx(data: Uint8Array | ArrayBuffer, credentials: CredentialsFactory | KdbxCredentials): Promise<Kdbx> {
@@ -170,14 +170,14 @@ export interface KeyVersion {
  * re-keyed upload and `activate` never locks anyone out. Returns which version worked.
  */
 export async function openWithKeyVersions(data: Uint8Array | ArrayBuffer, keys: KeyVersion[]): Promise<{ db: Kdbx; keyVersion: number }> {
-  if (keys.length === 0) throw new KpxError("no_vault_key", "no vault key available");
+  if (keys.length === 0) throw new OpenVireoError("no_vault_key", "no vault key available");
   const sorted = [...keys].sort((a, b) => b.version - a.version);
   let last: unknown;
   for (const k of sorted) {
     try {
       return { db: await openKdbx(data, vaultCredentials(k.key)), keyVersion: k.version };
     } catch (e) {
-      if ((e as KpxError).code !== "vault_key_mismatch") throw e;
+      if ((e as OpenVireoError).code !== "vault_key_mismatch") throw e;
       last = e;
     }
   }

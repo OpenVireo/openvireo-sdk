@@ -3,7 +3,7 @@
  * reference verifier (EdDSA only, iss/aud/exp/nbf with 60 s skew), used by the test vectors and by
  * `openvireo connect`-style servers.
  */
-import { KpxError } from "../errors.js";
+import { OpenVireoError } from "../errors.js";
 import { fromB64u, fromUtf8, utf8 } from "../util/bytes.js";
 import { ed25519Verify } from "./primitives.js";
 
@@ -37,11 +37,11 @@ export interface Jwks {
 
 export function decodeJwt(token: string): { header: Record<string, unknown>; claims: AccessClaims } {
   const parts = token.split(".");
-  if (parts.length !== 3) throw new KpxError("invalid_token", "not a JWT");
+  if (parts.length !== 3) throw new OpenVireoError("invalid_token", "not a JWT");
   try {
     return { header: JSON.parse(fromUtf8(fromB64u(parts[0]!))), claims: JSON.parse(fromUtf8(fromB64u(parts[1]!))) };
   } catch (e) {
-    throw new KpxError("invalid_token", "malformed JWT", undefined, { cause: e });
+    throw new OpenVireoError("invalid_token", "malformed JWT", undefined, { cause: e });
   }
 }
 
@@ -58,7 +58,7 @@ export interface VerifyOptions {
 }
 
 const fail = (msg: string): never => {
-  throw new KpxError("unauthorized", msg, 401);
+  throw new OpenVireoError("unauthorized", msg, 401);
 };
 
 export async function verifyJwt(token: string, jwks: Jwks, opts: VerifyOptions): Promise<AccessClaims> {
