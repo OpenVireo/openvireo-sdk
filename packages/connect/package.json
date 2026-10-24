@@ -2,7 +2,7 @@
   "name": "@openvireo/connect",
   "version": "0.1.0",
   "description": "openvireo connect: a self-hosted REST server that holds one OpenVireo service account token",
-  "license": "GPL-3.0-or-later",
+  "license": "MIT OR Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -21,7 +21,9 @@
   "files": [
     "dist",
     "deploy",
-    "README.md"
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
   ],
   "scripts": {
     "build": "tsup",

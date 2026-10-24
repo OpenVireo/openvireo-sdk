@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "GitHub Action: load OpenVireo vault secrets into the environment with an OpenVireo service account, masked",
-  "license": "GPL-3.0-or-later",
+  "license": "MIT OR Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=20"

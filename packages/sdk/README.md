@@ -14,7 +14,7 @@ keysets and sealed keys.
 | `@openvireo/sdk/storage/node` | `FileStorage` (0600 JSON file) for the CLI and connect |
 | `@openvireo/sdk/sync` | `SyncClient` (vault + legacy routes), `syncKdbx` merge/retry loop, SSE `subscribeEvents` |
 | `@openvireo/sdk/vault` | kdbxweb open/save, vault-key credentials, rotation helpers, entry helpers, `ov://` references |
-| `@openvireo/sdk/merge` | port of KeePassXC's three-way merge (`SyncEngine::mergeDatabases` + `Merger`) |
+| `@openvireo/sdk/merge` | the sync merge: three-way field merge against the base copy, then the structure merge (`docs/merge-behaviour.md`), matching the Qt client |
 | `@openvireo/sdk/testing` | in-memory auth and sync servers (`FakeAuthServer`, `FakeSyncServer`) for app tests; not for production |
 
 ## Hosted account
@@ -156,4 +156,4 @@ npm run build -w @openvireo/sdk && npm run smoke -w @openvireo/sdk   # dist/ in 
 OPENVIREO_OPAQUE_PYTHON=…/venv/bin/python3 OPENVIREO_OPAQUE_PYBINDING=…/libopaque/python LIBOPAQUE=…/libopaque.dylib npm test -w @openvireo/sdk
 ```
 
-License: GPL-3.0-or-later.
+License: MIT OR Apache-2.0, at your option (`LICENSE-MIT`, `LICENSE-APACHE`).
