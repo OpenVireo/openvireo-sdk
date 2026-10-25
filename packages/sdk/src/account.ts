@@ -109,6 +109,8 @@ export interface RecoveryReset {
 /** GET /me/recovery, camelCased: whether a recovery archive from a reset exists (SPEC.md §18). */
 export interface RecoveryStatus {
   archived: boolean;
+  /** the email before the reset, which the restore signs in with */
+  email?: string;
   expiresAt?: string;
   /** archived personal vaults plus archived grants */
   vaults?: number;
@@ -536,6 +538,7 @@ export class Account {
   async recoveryStatus(): Promise<RecoveryStatus> {
     const r = await this.auth.recoveryStatus();
     const out: RecoveryStatus = { archived: !!r.archived };
+    if (r.email !== undefined) out.email = r.email;
     if (r.expires_at !== undefined) out.expiresAt = r.expires_at;
     if (r.vaults !== undefined) out.vaults = r.vaults;
     if (r.locked !== undefined) out.locked = r.locked;
@@ -545,7 +548,7 @@ export class Account {
   /**
    * Restores the vaults archived by a reset into the current keys (SPEC.md §18), with the old master
    * password and the old Secret Key (the old Emergency Kit). Needs the account unlocked. OPAQUE login
-   * against the archived record (idU = `oldEmail`, default the account's email), then the old keyset
+   * against the archived record (idU = the archived email the server returns), then the old keyset
    * is unwrapped locally, each archived vault key re-sealed to the current enc_pk, and the proof signed
    * with the old signing key. The old keys are wiped afterwards and the vault list reloaded.
    *
@@ -554,7 +557,7 @@ export class Account {
    * `invalid_proof` (400); `session_expired` (410); `not_found` (404) when there is no archive;
    * `forbidden` (403) when the server wants a fresh sign-in.
    */
-  async restoreFromArchive(p: { oldPassword: string; oldSecretKey: string; oldEmail?: string }): Promise<{ restored: number }> {
+  async restoreFromArchive(p: { oldPassword: string; oldSecretKey: string }): Promise<{ restored: number }> {
     const current = this.requireKeyset();
     const session = await this.tokens.load();
     if (!session) throw new OpenVireoError("signed_out", "not signed in");
@@ -569,7 +572,7 @@ export class Account {
       const started = await this.auth.restoreStart({ ke1: b64u(login.ke1) });
       let authU: Uint8Array;
       try {
-        ({ authU } = await finishLogin(login.state, fromB64u(started.ke2), this.ids(p.oldEmail ?? session.email), this.config.opaque.context));
+        ({ authU } = await finishLogin(login.state, fromB64u(started.ke2), this.ids(started.email ?? session.email), this.config.opaque.context));
       } catch (e) {
         throw new OpenVireoError("unauthorized", "the old master password is wrong", 401, { cause: e });
       }

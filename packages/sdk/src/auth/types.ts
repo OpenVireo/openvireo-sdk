@@ -211,6 +211,7 @@ export interface RecoveryResetJson {
 /** GET /me/recovery: whether a recovery archive from a reset exists (SPEC.md §18) */
 export interface RecoveryArchiveJson {
   archived: boolean;
+  email?: string;
   expires_at?: string;
   vaults?: number;
   locked?: boolean;

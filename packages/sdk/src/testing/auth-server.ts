@@ -278,13 +278,13 @@ export class FakeAuthServer extends MockServer {
     };
     this.on("GET", P + "me/recovery", A((_r, _p, pr) => {
       const a = this.archives.get(pr.split(":")[1]!);
-      return json(200, a ? { archived: true, expires_at: new Date(a.expiresAt).toISOString(), vaults: a.grants.length, locked: a.locked } : { archived: false });
+      return json(200, a ? { archived: true, email: a.email, expires_at: new Date(a.expiresAt).toISOString(), vaults: a.grants.length, locked: a.locked } : { archived: false });
     }));
     this.on("POST", P + "me/recovery/restore/start", R(async (req, archive, userId) => {
       const r = await OS.credentialResponse(fromB64u(req.json.ke1), archive.rec, ids(archive.email));
       const sid = randomUuid();
       this.sessions.set(sid, { sec: r.sec, restore: userId, verified: null });
-      return json(200, { session_id: sid, ke2: b64u(r.ke2) });
+      return json(200, { session_id: sid, ke2: b64u(r.ke2), email: archive.email });
     }));
     // The grants verify would return now: vaults that still exist at the archived key version
     const live = (archive: FakeArchive) => archive.grants.filter((g) => this.vaults.get(g.vault_id)?.current === g.key_version);
