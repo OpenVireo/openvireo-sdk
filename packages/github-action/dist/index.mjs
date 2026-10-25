@@ -16051,8 +16051,14 @@ var OpenVireoError = class extends Error {
     super(message, options);
     this.code = code;
     this.status = status;
+    if (options?.details) this.details = options.details;
   }
   name = "OpenVireoError";
+  /**
+   * Extra data some codes carry, camelCased: `recovery_not_ready` has `notBefore` (RFC 3339, when the
+   * reset link starts working).
+   */
+  details;
 };
 
 // ../sdk/src/util/bytes.ts
@@ -18808,11 +18814,16 @@ var unwrapSaMaster = (kek, saId, wrapped) => unwrap(kek, fromB64u(wrapped), AAD.
 // ../sdk/src/http/request.ts
 var HttpError = class extends OpenVireoError {
   constructor(code, message, status, body, retryAfter) {
-    super(code, message, status);
+    super(code, message, status, { details: errorDetails(code, body) });
     this.body = body;
     this.retryAfter = retryAfter;
   }
 };
+function errorDetails(code, body) {
+  const b = body;
+  if (code === "recovery_not_ready" && typeof b?.not_before === "string") return { notBefore: b.not_before };
+  return void 0;
+}
 var codeForStatus = (status) => ({
   400: "invalid_request",
   401: "unauthorized",
@@ -18910,15 +18921,18 @@ var AuthClient = class _AuthClient {
   pub(method, path, json) {
     return sendJson(this.opts, this.url(path), { method, json });
   }
-  /** Authenticated call: retries once with a forced refresh on 401. */
-  async authed(method, path, json, query) {
+  /**
+   * Authenticated call: retries once with a forced refresh on 401, unless `retry` is false (routes
+   * whose 401 means a wrong password and counts towards a lockout).
+   */
+  async authed(method, path, json, query, retry = true) {
     const tokens = this.opts.tokens;
     if (!tokens) throw new OpenVireoError("signed_out", "this call needs an access token");
     const url = this.url(path, query);
     try {
       return await sendJson(this.opts, url, { method, json, token: await tokens.getAccessToken() });
     } catch (e) {
-      if (e.status !== 401) throw e;
+      if (e.status !== 401 || !retry) throw e;
       return sendJson(this.opts, url, { method, json, token: await tokens.getAccessToken({ force: true }) });
     }
   }
@@ -18947,6 +18961,19 @@ var AuthClient = class _AuthClient {
   serviceAccountExchange(body) {
     return this.pub("POST", "auth/service-account", body);
   }
+  // ---------------------------------------------------------------- account recovery (SPEC.md §18)
+  /** What an approved reset will do. 409 `recovery_not_ready` (details.notBefore), 410 `recovery_cancelled` / `session_expired`. */
+  recoverInfo(token) {
+    return this.pub("GET", `auth/recover/${seg(token)}`);
+  }
+  /** Reset, step 1: an OPAQUE registration request under the account email. */
+  recoverStart(body) {
+    return this.pub("POST", "auth/recover/start", body);
+  }
+  /** Reset, step 2: stores the new record, kdf and keyset, archives the old ones and signs this device in. */
+  recoverFinish(body) {
+    return this.pub("POST", "auth/recover/finish", body);
+  }
   // ---------------------------------------------------------------- me, keys, devices
   me() {
     return this.authed("GET", "me");
@@ -18965,6 +18992,25 @@ var AuthClient = class _AuthClient {
   }
   emailFinish(body) {
     return this.authed("POST", "me/email/finish", body);
+  }
+  /** Whether a recovery archive from a reset exists (SPEC.md §18) */
+  recoveryStatus() {
+    return this.authed("GET", "me/recovery");
+  }
+  /** Restore, step 1: OPAQUE login against the archived record. Needs a token issued in the last 5 minutes. */
+  restoreStart(body) {
+    return this.authed("POST", "me/recovery/restore/start", body);
+  }
+  /**
+   * Restore, step 2: 401 for a wrong old password, else the archived kdf, keyset and grants. Not retried
+   * on 401 (a failed verify counts towards the lockout), so call it with a fresh access token.
+   */
+  restoreVerify(body) {
+    return this.authed("POST", "me/recovery/restore/verify", body, void 0, false);
+  }
+  /** Restore, step 3: the vault keys re-sealed to the current keyset, and the proof. 400 `invalid_proof`. */
+  restoreFinish(body) {
+    return this.authed("POST", "me/recovery/restore/finish", body, void 0, false);
   }
   /** A one-time code that signs the browser in to the auth website (SPEC.md §16) */
   createWebSession() {
