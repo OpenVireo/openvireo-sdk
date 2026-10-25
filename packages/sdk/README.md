@@ -8,7 +8,7 @@ keysets and sealed keys.
 | Subpath | What it contains |
 |---|---|
 | `@openvireo/sdk` | everything below, plus `Account`, `ServiceAccount`, `SelfHostedSync` |
-| `@openvireo/sdk/crypto` | Secret Key, AUK (Argon2id), wrap/seal, keysets, fingerprints, vault names, SA/refresh tokens, JWT verify |
+| `@openvireo/sdk/crypto` | Secret Key, AUK (Argon2id), wrap/seal, keysets, fingerprints, vault names, SA/refresh tokens, JWT verify, restore proof/reseal |
 | `@openvireo/sdk/opaque` | OPAQUE client (opaque-ke compiled to WASM, lazy-loaded) |
 | `@openvireo/sdk/auth` | `AuthClient` (all of `openapi.yaml`), discovery, `TokenManager`, storage adapters |
 | `@openvireo/sdk/storage/node` | `FileStorage` (0600 JSON file) for the CLI and connect |
@@ -59,6 +59,26 @@ const moved = await account.importVault(localDb, { name: "Home", orgId });
 account.lock();     // wipes keys from memory
 await account.logout(); // also drops the offline cache
 ```
+
+### Account recovery (SPEC §18)
+
+After an approved reset the user opens `{web}/?view=recover#token=ov_rc_…`. Errors are
+`OpenVireoError`s: `recovery_not_ready` (409, `err.details.notBefore`), `recovery_cancelled` (410),
+`session_expired` (410, used or expired), and on restore `restore_locked` (403), `invalid_proof` (400),
+`unauthorized` (401, wrong old password) and `invalid_secret_key` (local: the old Secret Key doesn't
+open the archived keys; nothing was restored).
+
+```ts
+const info = await account.recoverInfo(token);   // { email, notBefore, expiresAt, archiveDays, archives: { personalVaults, sharedGrants, soleAdminOrgs } }
+const { secretKey } = await account.recover({ token, password }); // new keys; signed in + unlocked; show the new Emergency Kit
+
+// Later, within 30 days, with the old Emergency Kit (needs the account unlocked)
+const status = await account.recoveryStatus();  // { archived, expiresAt?, vaults?, locked? }
+const { restored } = await account.restoreFromArchive({ oldPassword, oldSecretKey }); // vault list reloaded
+```
+
+`FakeAuthServer` (`@openvireo/sdk/testing`) serves these routes too: `approveReset(email, { delaySeconds })`
+returns the token, and `cancelReset(token)` cancels it.
 
 ### Offline
 
