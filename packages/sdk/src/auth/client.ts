@@ -18,6 +18,9 @@ import type {
   OrgRole,
   Principal,
   PublicPrincipal,
+  RecoveryArchiveJson,
+  RecoveryResetJson,
+  RestoreVerified,
   SaMasterGrant,
   SaSecretInfo,
   ServiceAccount,
@@ -86,15 +89,18 @@ export class AuthClient {
     return sendJson<T>(this.opts, this.url(path), { method, json });
   }
 
-  /** Authenticated call: retries once with a forced refresh on 401. */
-  private async authed<T>(method: Method, path: string, json?: unknown, query?: Record<string, string | number | undefined>): Promise<T> {
+  /**
+   * Authenticated call: retries once with a forced refresh on 401, unless `retry` is false (routes
+   * whose 401 means a wrong password and counts towards a lockout).
+   */
+  private async authed<T>(method: Method, path: string, json?: unknown, query?: Record<string, string | number | undefined>, retry = true): Promise<T> {
     const tokens = this.opts.tokens;
     if (!tokens) throw new OpenVireoError("signed_out", "this call needs an access token");
     const url = this.url(path, query);
     try {
       return await sendJson<T>(this.opts, url, { method, json, token: await tokens.getAccessToken() });
     } catch (e) {
-      if ((e as OpenVireoError).status !== 401) throw e;
+      if ((e as OpenVireoError).status !== 401 || !retry) throw e;
       return sendJson<T>(this.opts, url, { method, json, token: await tokens.getAccessToken({ force: true }) });
     }
   }
@@ -125,6 +131,20 @@ export class AuthClient {
     return this.pub<ServiceAccountExchange>("POST", "auth/service-account", body);
   }
 
+  // ---------------------------------------------------------------- account recovery (SPEC.md §18)
+  /** What an approved reset will do. 409 `recovery_not_ready` (details.notBefore), 410 `recovery_cancelled` / `session_expired`. */
+  recoverInfo(token: string) {
+    return this.pub<RecoveryResetJson>("GET", `auth/recover/${seg(token)}`);
+  }
+  /** Reset, step 1: an OPAQUE registration request under the account email. */
+  recoverStart(body: { token: string; request: string }) {
+    return this.pub<{ session_id: string; response: string }>("POST", "auth/recover/start", body);
+  }
+  /** Reset, step 2: stores the new record, kdf and keyset, archives the old ones and signs this device in. */
+  recoverFinish(body: { session_id: string; record: string; kdf: KdfParams; keyset: WrappedKeysetJson; device: DeviceInfo }) {
+    return this.pub<Session>("POST", "auth/recover/finish", body);
+  }
+
   // ---------------------------------------------------------------- me, keys, devices
   me() {
     return this.authed<Me>("GET", "me");
@@ -143,6 +163,25 @@ export class AuthClient {
   }
   emailFinish(body: { session_id: string; record: string }) {
     return this.authed<void>("POST", "me/email/finish", body);
+  }
+  /** Whether a recovery archive from a reset exists (SPEC.md §18) */
+  recoveryStatus() {
+    return this.authed<RecoveryArchiveJson>("GET", "me/recovery");
+  }
+  /** Restore, step 1: OPAQUE login against the archived record. Needs a token issued in the last 5 minutes. */
+  restoreStart(body: { ke1: string }) {
+    return this.authed<{ session_id: string; ke2: string }>("POST", "me/recovery/restore/start", body);
+  }
+  /**
+   * Restore, step 2: 401 for a wrong old password, else the archived kdf, keyset and grants. Not retried
+   * on 401 (a failed verify counts towards the lockout), so call it with a fresh access token.
+   */
+  restoreVerify(body: { session_id: string; auth_u: string }) {
+    return this.authed<RestoreVerified>("POST", "me/recovery/restore/verify", body, undefined, false);
+  }
+  /** Restore, step 3: the vault keys re-sealed to the current keyset, and the proof. 400 `invalid_proof`. */
+  restoreFinish(body: { session_id: string; grants: VaultGrant[]; proof: string }) {
+    return this.authed<void>("POST", "me/recovery/restore/finish", body, undefined, false);
   }
   /** A one-time code that signs the browser in to the auth website (SPEC.md §16) */
   createWebSession() {
