@@ -14,6 +14,7 @@ import { type Keyset, fingerprint, generateKeyset, trustedPublicKeys, unwrapKeys
 import { formatSecretKey, generateSecretKey, parseSecretKey } from "./crypto/secret-key.js";
 import { newSaSecret } from "./crypto/tokens.js";
 import { decryptVaultName, encryptVaultName } from "./crypto/vault-name.js";
+import { resealVaultKey, restoreProof } from "./crypto/restore.js";
 import { b64u, fromB64u, randomBytes, randomUuid, wipe } from "./util/bytes.js";
 import { finishLogin, finishRegistration, opaqueIds, startLogin, startRegistration } from "./opaque/index.js";
 import { SyncClient } from "./sync/client.js";
@@ -85,6 +86,34 @@ export interface VaultInfo {
 interface VaultEntry {
   info: VaultInfo;
   keys: KeyVersion[];
+}
+
+/** GET /auth/recover/{token}, camelCased: what an approved reset will do (SPEC.md §18). */
+export interface RecoveryReset {
+  email: string;
+  /** RFC 3339; the reset link works from then on (before that the routes answer `recovery_not_ready`) */
+  notBefore: string;
+  /** RFC 3339; the link stops working then (72 hours after approval) */
+  expiresAt: string;
+  /** how long the old keys and vaults are kept for a restore (30) */
+  archiveDays: number;
+  archives: {
+    personalVaults: number;
+    /** grants on vaults the user doesn't own, including org vaults */
+    sharedGrants: number;
+    /** names of orgs whose only confirmed owner/admin is this user */
+    soleAdminOrgs: string[];
+  };
+}
+
+/** GET /me/recovery, camelCased: whether a recovery archive from a reset exists (SPEC.md §18). */
+export interface RecoveryStatus {
+  archived: boolean;
+  expiresAt?: string;
+  /** archived personal vaults plus archived grants */
+  vaults?: number;
+  /** too many failed restore attempts; an admin unlocks it */
+  locked?: boolean;
 }
 
 const ROLE_ORDER: Record<VaultRole, number> = { read: 0, write: 1, manage: 2 };
@@ -436,6 +465,141 @@ export class Account {
     url.searchParams.set("code", code);
     if (next) url.searchParams.set("next", next);
     return url.toString();
+  }
+
+  // ------------------------------------------------------------------------- account recovery
+
+  /**
+   * What an approved reset will do (SPEC.md §18), for the `{web}/?view=recover#token=` page. Works
+   * signed out. Throws `recovery_not_ready` (409, `err.details.notBefore`) before the link starts
+   * working, `recovery_cancelled` (410) after a cancel, and `session_expired` (410) once used or expired.
+   */
+  async recoverInfo(token: string): Promise<RecoveryReset> {
+    const r = await this.auth.recoverInfo(token);
+    return {
+      email: r.email,
+      notBefore: r.not_before,
+      expiresAt: r.expires_at,
+      archiveDays: r.archive_days ?? 30,
+      archives: {
+        personalVaults: r.archives?.personal_vaults ?? 0,
+        sharedGrants: r.archives?.shared_grants ?? 0,
+        soleAdminOrgs: r.archives?.sole_admin_orgs ?? [],
+      },
+    };
+  }
+
+  /**
+   * Resets the account with an approved `ov_rc_` token (SPEC.md §18): a new Secret Key, KDF salt and
+   * keyset exactly as `register` makes them, a new OPAQUE record under the account email, and the old
+   * keys and vaults archived for 30 days on the server. Afterwards this device is signed in and
+   * unlocked and keeps the new Secret Key like after `register`; every other device is signed out.
+   * Returns the new Secret Key to show once (Emergency Kit). Errors as `recoverInfo`.
+   */
+  async recover(p: { token: string; password: string; kdf?: Parameters<typeof newKdfParams>[0]; trustDevice?: boolean }): Promise<{ secretKey: string; userId: string }> {
+    // The email (idU) comes from the reset; this also fails early before not_before or after a cancel
+    const { email } = await this.recoverInfo(p.token);
+    const sk = generateSecretKey();
+    const kdf = newKdfParams(p.kdf);
+    checkKdfParams(kdf, this.config.kdf_min);
+    const reg = await startRegistration(p.password);
+    const started = await this.auth.recoverStart({ token: p.token, request: b64u(reg.request) });
+    const { record } = await finishRegistration(reg.state, fromB64u(started.response), this.ids(email));
+    const auk = await deriveAuk(p.password, kdf, sk, { kdfMin: this.config.kdf_min });
+    const keyset = generateKeyset();
+    try {
+      const wrapped = wrapKeyset(auk, keyset);
+      const session = await this.auth.recoverFinish({
+        session_id: started.session_id,
+        record: b64u(record),
+        kdf,
+        keyset: wrapped,
+        device: this.opts.device,
+      });
+      // Whatever this device held for the account belongs to the old keys
+      const known = [...this.vaults.keys()];
+      this.lock();
+      await this.clearOfflineData(session.user.id, known);
+      await this.begin(email, session, sk, p.trustDevice ?? true);
+      await this.cacheProfile(session.user.id, { kdf, keyset: wrapped });
+      this.keyset = keyset;
+      return { secretKey: formatSecretKey(sk), userId: session.user.id };
+    } catch (e) {
+      wipeKeyset(keyset);
+      throw e;
+    } finally {
+      wipe(auk, sk);
+    }
+  }
+
+  /** Whether a recovery archive from a reset exists, until when, and whether it is locked (SPEC.md §18). */
+  async recoveryStatus(): Promise<RecoveryStatus> {
+    const r = await this.auth.recoveryStatus();
+    const out: RecoveryStatus = { archived: !!r.archived };
+    if (r.expires_at !== undefined) out.expiresAt = r.expires_at;
+    if (r.vaults !== undefined) out.vaults = r.vaults;
+    if (r.locked !== undefined) out.locked = r.locked;
+    return out;
+  }
+
+  /**
+   * Restores the vaults archived by a reset into the current keys (SPEC.md §18), with the old master
+   * password and the old Secret Key (the old Emergency Kit). Needs the account unlocked. OPAQUE login
+   * against the archived record (idU = `oldEmail`, default the account's email), then the old keyset
+   * is unwrapped locally, each archived vault key re-sealed to the current enc_pk, and the proof signed
+   * with the old signing key. The old keys are wiped afterwards and the vault list reloaded.
+   *
+   * Errors: 401 `unauthorized` for a wrong old password; `invalid_secret_key` (local, before anything is
+   * restored) when the old Secret Key doesn't open the archived keyset; `restore_locked` (403);
+   * `invalid_proof` (400); `session_expired` (410); `not_found` (404) when there is no archive;
+   * `forbidden` (403) when the server wants a fresh sign-in.
+   */
+  async restoreFromArchive(p: { oldPassword: string; oldSecretKey: string; oldEmail?: string }): Promise<{ restored: number }> {
+    const current = this.requireKeyset();
+    const session = await this.tokens.load();
+    if (!session) throw new OpenVireoError("signed_out", "not signed in");
+    const oldSk = parseSecretKey(p.oldSecretKey);
+    let old: Keyset | null = null;
+    let auk: Uint8Array | null = null;
+    let restored: number;
+    try {
+      // The restore routes need an access token issued in the last 5 minutes
+      await this.tokens.getAccessToken({ force: true });
+      const login = await startLogin(p.oldPassword);
+      const started = await this.auth.restoreStart({ ke1: b64u(login.ke1) });
+      let authU: Uint8Array;
+      try {
+        ({ authU } = await finishLogin(login.state, fromB64u(started.ke2), this.ids(p.oldEmail ?? session.email), this.config.opaque.context));
+      } catch (e) {
+        throw new OpenVireoError("unauthorized", "the old master password is wrong", 401, { cause: e });
+      }
+      const verified = await this.auth.restoreVerify({ session_id: started.session_id, auth_u: b64u(authU) });
+      checkKdfParams(verified.kdf, this.config.kdf_min);
+      auk = await deriveAuk(p.oldPassword, verified.kdf, oldSk, { kdfMin: this.config.kdf_min });
+      try {
+        old = unwrapKeyset(auk, verified.keyset);
+      } catch (e) {
+        // The password was right (OPAQUE), so the Secret Key is the wrong one
+        throw (e as OpenVireoError).code === "decryption_failed" ? new OpenVireoError("invalid_secret_key", "the old Secret Key doesn't open the archived keys", undefined, { cause: e }) : e;
+      }
+      const grants: VaultGrant[] = verified.grants.map((g) => ({
+        vault_id: g.vault_id,
+        principal: this.principal,
+        role: g.role,
+        key_version: g.key_version,
+        sealed_key: b64u(resealVaultKey(old!.encSk, current.encPk, g.vault_id, fromB64u(g.sealed_key))),
+      }));
+      const proof = restoreProof(old.signSeed, session.userId, current);
+      await this.auth.restoreFinish({ session_id: verified.session_id, grants, proof: b64u(proof) });
+      restored = grants.length;
+    } finally {
+      wipeKeyset(old);
+      wipe(auk, oldSk);
+    }
+    // As on an `access` event: new vlt claims, then the vault list
+    await this.tokens.refreshNow();
+    await this.listVaults();
+    return { restored };
   }
 
   /**

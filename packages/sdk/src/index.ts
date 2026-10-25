@@ -7,6 +7,6 @@ export * from "./auth/index.js";
 export * from "./sync/index.js";
 export * from "./vault/index.js";
 export * from "./merge/index.js";
-export { Account, AccountVault, VaultUploadError, type AccountOptions, type TotpPrompt, type VaultInfo } from "./account.js";
+export { Account, AccountVault, VaultUploadError, type AccountOptions, type RecoveryReset, type RecoveryStatus, type TotpPrompt, type VaultInfo } from "./account.js";
 export { ServiceAccount, type SaVault } from "./service-account.js";
 export { SelfHostedSync, type SelfHostedOptions } from "./self-hosted.js";
