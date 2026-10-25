@@ -18,8 +18,15 @@ export class HttpError extends OpenVireoError {
     readonly body?: unknown,
     readonly retryAfter?: number,
   ) {
-    super(code, message, status);
+    super(code, message, status, { details: errorDetails(code, body) });
   }
+}
+
+/** Extra fields of an error body, camelCased into `details` (SPEC.md §18: not_before on recovery_not_ready). */
+function errorDetails(code: string, body: unknown): Record<string, unknown> | undefined {
+  const b = body as { not_before?: unknown } | undefined;
+  if (code === "recovery_not_ready" && typeof b?.not_before === "string") return { notBefore: b.not_before };
+  return undefined;
 }
 
 const codeForStatus = (status: number): string =>

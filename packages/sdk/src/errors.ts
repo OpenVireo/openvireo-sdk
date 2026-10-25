@@ -28,6 +28,11 @@ export type OpenVireoErrorCode =
   | "server_error"
   | "network_error"
   | "signed_out"
+  // account recovery (SPEC.md §18)
+  | "recovery_not_ready"
+  | "recovery_cancelled"
+  | "restore_locked"
+  | "invalid_proof"
   // vault / sync
   | "vault_key_mismatch"
   | "no_vault_key"
@@ -44,13 +49,19 @@ export type OpenVireoErrorCode =
 
 export class OpenVireoError extends Error {
   override readonly name = "OpenVireoError";
+  /**
+   * Extra data some codes carry, camelCased: `recovery_not_ready` has `notBefore` (RFC 3339, when the
+   * reset link starts working).
+   */
+  readonly details?: Record<string, unknown>;
   constructor(
     readonly code: OpenVireoErrorCode | (string & {}),
     message: string,
     readonly status?: number,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; details?: Record<string, unknown> },
   ) {
     super(message, options);
+    if (options?.details) this.details = options.details;
   }
 }
 

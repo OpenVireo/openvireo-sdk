@@ -198,3 +198,30 @@ export interface BlobMeta {
   size: number;
   updatedAt: string;
 }
+
+/** GET /auth/recover/{token}: what an approved reset will do (SPEC.md §18) */
+export interface RecoveryResetJson {
+  email: string;
+  not_before: string;
+  expires_at: string;
+  archive_days?: number;
+  archives: { personal_vaults?: number; shared_grants?: number; sole_admin_orgs?: string[] };
+}
+
+/** GET /me/recovery: whether a recovery archive from a reset exists (SPEC.md §18) */
+export interface RecoveryArchiveJson {
+  archived: boolean;
+  expires_at?: string;
+  vaults?: number;
+  locked?: boolean;
+}
+
+/** POST /me/recovery/restore/verify */
+export interface RestoreVerified {
+  session_id: string;
+  kdf: KdfParams;
+  /** the archived keyset, wrapped with the old AUK */
+  keyset: WrappedKeysetJson;
+  /** archived grants (principal = the caller) whose vault still exists at that key_version */
+  grants: VaultGrant[];
+}
