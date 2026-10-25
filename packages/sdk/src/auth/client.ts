@@ -170,7 +170,7 @@ export class AuthClient {
   }
   /** Restore, step 1: OPAQUE login against the archived record. Needs a token issued in the last 5 minutes. */
   restoreStart(body: { ke1: string }) {
-    return this.authed<{ session_id: string; ke2: string }>("POST", "me/recovery/restore/start", body);
+    return this.authed<{ session_id: string; ke2: string; email?: string }>("POST", "me/recovery/restore/start", body);
   }
   /**
    * Restore, step 2: 401 for a wrong old password, else the archived kdf, keyset and grants. Not retried

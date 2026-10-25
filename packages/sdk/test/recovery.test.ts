@@ -71,7 +71,7 @@ describe("Account recovery: reset (SPEC.md §18)", () => {
     expect(await alice.secretKey()).toBe(secretKey);
     expect(await alice.listVaults()).toEqual([]);
     expect(JSON.stringify(w.auth.calls.map((c) => c.json))).not.toContain("new pw");
-    expect(await alice.recoveryStatus()).toEqual({ archived: true, expiresAt: expect.any(String), vaults: 2, locked: false });
+    expect(await alice.recoveryStatus()).toEqual({ archived: true, email: "alice@example.com", expiresAt: expect.any(String), vaults: 2, locked: false });
     // TOTP is off and the old device is signed out
     expect(w.auth.totp.has("alice@example.com")).toBe(false);
     await expect(w.old.listVaults()).rejects.toMatchObject({ status: 401 });
@@ -142,6 +142,16 @@ describe("Account recovery: restore within 30 days (SPEC.md §18)", () => {
     const laptop = await w.connect();
     await laptop.login({ email: "alice@example.com", password: "new pw", secretKey: w.secretKey });
     expect((await laptop.openVault(w.home)).read("ov://Home/Bank/password")).toBe("hunter2");
+  });
+
+  it("signs in to the archive with the old email after the email changed", async () => {
+    const w = await resetWorld();
+    expect(await w.alice.recoveryStatus()).toMatchObject({ archived: true, email: "alice@example.com" });
+    await w.alice.requestEmailChange("alice@new.example");
+    await w.alice.changeEmail({ email: "alice@new.example", code: w.auth.emailCodes.get(w.alice.userId!)!.code, password: "new pw" });
+    const { restored } = await w.alice.restoreFromArchive({ oldPassword: "old pw", oldSecretKey: w.oldSecretKey });
+    expect(restored).toBe(2);
+    expect((await w.alice.openVault(w.home)).read("ov://Home/Bank/password")).toBe("hunter2");
   });
 
   it("refuses a wrong old password with 401 and restores nothing", async () => {
