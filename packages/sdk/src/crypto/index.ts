@@ -6,6 +6,7 @@ export * from "./keyset.js";
 export * from "./vault-name.js";
 export * from "./tokens.js";
 export * from "./jwt.js";
+export * from "./restore.js";
 export { sha256, hkdf } from "./primitives.js";
 export * from "../util/bytes.js";
 export * from "../errors.js";
