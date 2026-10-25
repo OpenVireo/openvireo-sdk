@@ -2,6 +2,7 @@
 import { opaqueServerForTests as OS, opaqueIds } from "../opaque/index.js";
 import { b64u, fromB64u, randomUuid, toHex } from "../util/bytes.js";
 import { sha256 } from "../crypto/primitives.js";
+import { verifyRestoreProof } from "../crypto/restore.js";
 import { MockServer, json } from "./mock-fetch.js";
 
 export const ISSUER = "https://auth.example";
@@ -19,12 +20,35 @@ interface Access {
   keys: Map<number, string>;
 }
 
+/** An approved reset (SPEC.md §18); the token is `ov_rc_…` */
+export interface FakeRecovery {
+  email: string;
+  notBefore: number;
+  expiresAt: number;
+  status: "approved_reset" | "cancelled" | "completed";
+}
+
+/** What a reset archived (SPEC.md §18) */
+export interface FakeArchive {
+  email: string;
+  rec: Uint8Array;
+  kdf: any;
+  keyset: any;
+  expiresAt: number;
+  /** archived grants, at the key version they had at the reset */
+  grants: { vault_id: string; role: string; key_version: number; sealed_key: string }[];
+  /** personal vaults nobody else could open, archived with the account */
+  personalVaults: string[];
+  failures: number;
+  locked: boolean;
+}
+
 export class FakeAuthServer extends MockServer {
   users = new Map<string, any>(); // email → user
   sessions = new Map<string, any>();
   refresh = new Map<string, { principal: string; used: boolean }>();
   tokens = new Map<string, string>(); // access token → principal
-  vaults = new Map<string, { org_id: string | null; encrypted_name: string; current: number; pending: number | null; access: Map<string, Access>; rotationRequired?: boolean }>();
+  vaults = new Map<string, { org_id: string | null; owner_id?: string | null; encrypted_name: string; current: number; pending: number | null; access: Map<string, Access>; rotationRequired?: boolean; archived?: boolean }>();
   orgs = new Map<string, { name: string; members: Map<string, { role: string; status: string }> }>();
   sas = new Map<string, any>();
   /** email → TOTP code; those users get an MFA challenge (SPEC.md §8) */
@@ -32,11 +56,36 @@ export class FakeAuthServer extends MockServer {
   mfa = new Map<string, { email: string; wrong: number }>();
   /** user id → the pending email change and its mailed code (SPEC.md §16) */
   emailCodes = new Map<string, { email: string; code: string }>();
+  /** ov_rc_ token → approved reset; see `approveReset` (SPEC.md §18) */
+  recoveries = new Map<string, FakeRecovery>();
+  /** user id → recovery archive */
+  archives = new Map<string, FakeArchive>();
+  /** access token → when it was issued (ms); the restore routes want one from the last `recentTokenMs` */
+  issuedAt = new Map<string, number>();
+  recentTokenMs = 5 * 60_000;
   onToken: (t: string) => void = () => {};
+
+  /**
+   * Approves a reset for an account (what the admin review does) and returns the `ov_rc_` token of the
+   * mailed link. `delaySeconds` is OPENVIREO_RECOVERY_DELAY (default 0, as in tests).
+   */
+  approveReset(email: string, opts: { delaySeconds?: number } = {}): string {
+    if (!this.users.has(email)) throw new Error(`no user ${email}`);
+    const token = `ov_rc_${b64u(sha256(new TextEncoder().encode(randomUuid())))}`;
+    const now = Date.now();
+    this.recoveries.set(token, { email, notBefore: now + (opts.delaySeconds ?? 0) * 1000, expiresAt: now + 72 * 3600_000, status: "approved_reset" });
+    return token;
+  }
+  /** The notice's cancel link */
+  cancelReset(token: string): void {
+    const r = this.recoveries.get(token);
+    if (r) r.status = "cancelled";
+  }
 
   private issue(principal: string) {
     const t = `at-${randomUuid()}`;
     this.tokens.set(t, principal);
+    this.issuedAt.set(t, Date.now());
     this.onToken(t);
     return t;
   }
@@ -141,6 +190,138 @@ export class FakeAuthServer extends MockServer {
       if (!w) return json(401, { error: "bad secret", code: "unauthorized" });
       return json(200, { access_token: this.issue(`sa:${sa.id}`), expires_in: 600, wrapped_master: w, keyset: sa.keyset });
     });
+    // ---- account recovery (SPEC.md §18)
+    const recovery = (token: string) => {
+      const r = this.recoveries.get(token);
+      if (!r) return { error: json(404, { error: "unknown token", code: "not_found" }) };
+      if (r.status === "cancelled") return { error: json(410, { error: "This reset was cancelled", code: "recovery_cancelled" }) };
+      if (r.status !== "approved_reset" || Date.now() > r.expiresAt) return { error: json(410, { error: "This link was used or has expired", code: "session_expired" }) };
+      if (Date.now() < r.notBefore) {
+        const not_before = new Date(r.notBefore).toISOString();
+        return { error: json(409, { error: `The link works from ${not_before}`, code: "recovery_not_ready", not_before }) };
+      }
+      return { r };
+    };
+    this.on("GET", P + "auth/recover/{token}", (_req, p) => {
+      const { r, error } = recovery(p.token!);
+      if (error) return error;
+      const u = this.users.get(r.email);
+      const personal = [...this.vaults.values()].filter((v) => !v.archived && v.owner_id === u.id && v.access.has(`user:${u.id}`));
+      const lone = personal.filter((v) => v.access.size === 1).length;
+      const grants = [...this.vaults.values()].filter((v) => !v.archived && v.access.has(`user:${u.id}`)).length - lone;
+      const soleAdmin = [...this.orgs.values()].filter((o) => {
+        const admins = [...o.members].filter(([, m]) => m.status === "confirmed" && (m.role === "owner" || m.role === "admin"));
+        return admins.length === 1 && admins[0]![0] === u.id;
+      });
+      return json(200, {
+        email: r.email,
+        not_before: new Date(r.notBefore).toISOString(),
+        expires_at: new Date(r.expiresAt).toISOString(),
+        archive_days: 30,
+        archives: { personal_vaults: lone, shared_grants: grants, sole_admin_orgs: soleAdmin.map((o) => o.name) },
+      });
+    });
+    this.on("POST", P + "auth/recover/start", async (req) => {
+      const { r, error } = recovery(req.json.token);
+      if (error) return error;
+      const { sec, response } = await OS.registrationResponse(fromB64u(req.json.request));
+      const sid = randomUuid();
+      this.sessions.set(sid, { sec, recoverToken: req.json.token, email: r.email });
+      return json(200, { session_id: sid, response: b64u(response) });
+    });
+    this.on("POST", P + "auth/recover/finish", async (req) => {
+      const s = this.sessions.get(req.json.session_id);
+      if (!s?.recoverToken) return json(410, { error: "expired", code: "session_expired" });
+      const { r, error } = recovery(s.recoverToken);
+      if (error) return error;
+      this.sessions.delete(req.json.session_id);
+      const u = this.users.get(r.email);
+      const principal = `user:${u.id}`;
+      const archive: FakeArchive = { email: u.email, rec: u.rec, kdf: u.kdf, keyset: u.keyset, expiresAt: Date.now() + 30 * 86400_000, grants: [], personalVaults: [], failures: 0, locked: false };
+      for (const [id, v] of this.vaults) {
+        const a = v.access.get(principal);
+        if (!a || v.archived) continue;
+        const sealed = a.keys.get(v.current);
+        if (sealed) archive.grants.push({ vault_id: id, role: a.role, key_version: v.current, sealed_key: sealed });
+        if (v.owner_id === u.id && v.access.size === 1) {
+          v.archived = true;
+          archive.personalVaults.push(id);
+        }
+        v.access.delete(principal);
+      }
+      for (const o of this.orgs.values()) {
+        const m = o.members.get(u.id);
+        if (m?.status === "confirmed") m.status = "accepted";
+      }
+      for (const sa of this.sas.values()) sa.master.delete(principal);
+      for (const [t, p] of this.tokens) if (p === principal) this.tokens.delete(t);
+      for (const [t, rt] of this.refresh) if (rt.principal === principal) this.refresh.delete(t);
+      this.totp.delete(u.email);
+      this.archives.set(u.id, archive);
+      Object.assign(u, { rec: await OS.storeRecord(s.sec, fromB64u(req.json.record)), kdf: req.json.kdf, keyset: req.json.keyset });
+      r.status = "completed";
+      return this.session(u);
+    });
+    const R = (h: (req: any, archive: FakeArchive, userId: string) => any) =>
+      A((req, _p, pr) => {
+        const issued = this.issuedAt.get((req.headers.authorization ?? "").replace("Bearer ", "")) ?? 0;
+        if (Date.now() - issued > this.recentTokenMs) return json(403, { error: "Sign in again to restore", code: "forbidden" });
+        const userId = pr.split(":")[1]!;
+        const archive = this.archives.get(userId);
+        if (!archive) return json(404, { error: "no recovery archive", code: "not_found" });
+        if (archive.locked) return json(403, { error: "Too many failed attempts", code: "restore_locked" });
+        return h(req, archive, userId);
+      });
+    const failed = (archive: FakeArchive, res: Response) => {
+      if (++archive.failures >= 10) archive.locked = true;
+      return res;
+    };
+    this.on("GET", P + "me/recovery", A((_r, _p, pr) => {
+      const a = this.archives.get(pr.split(":")[1]!);
+      return json(200, a ? { archived: true, expires_at: new Date(a.expiresAt).toISOString(), vaults: a.grants.length, locked: a.locked } : { archived: false });
+    }));
+    this.on("POST", P + "me/recovery/restore/start", R(async (req, archive, userId) => {
+      const r = await OS.credentialResponse(fromB64u(req.json.ke1), archive.rec, ids(archive.email));
+      const sid = randomUuid();
+      this.sessions.set(sid, { sec: r.sec, restore: userId, verified: null });
+      return json(200, { session_id: sid, ke2: b64u(r.ke2) });
+    }));
+    // The grants verify would return now: vaults that still exist at the archived key version
+    const live = (archive: FakeArchive) => archive.grants.filter((g) => this.vaults.get(g.vault_id)?.current === g.key_version);
+    this.on("POST", P + "me/recovery/restore/verify", R(async (req, archive, userId) => {
+      const s = this.sessions.get(req.json.session_id);
+      if (!s || s.restore !== userId || s.verified) return json(410, { error: "expired", code: "session_expired" });
+      if (!(await OS.userAuth(s.sec, fromB64u(req.json.auth_u)))) return failed(archive, json(401, { error: "The old password is wrong", code: "unauthorized" }, { "WWW-Authenticate": "Bearer" }));
+      const grants = live(archive).map((g) => ({ ...g, principal: `user:${userId}` }));
+      s.verified = grants;
+      return json(200, { session_id: req.json.session_id, kdf: archive.kdf, keyset: archive.keyset, grants });
+    }));
+    this.on("POST", P + "me/recovery/restore/finish", R((req, archive, userId) => {
+      const s = this.sessions.get(req.json.session_id);
+      if (!s || s.restore !== userId || !s.verified) return json(410, { error: "expired", code: "session_expired" });
+      const u = this.userById(userId);
+      const principal = `user:${userId}`;
+      const current = { encPk: fromB64u(u.keyset.enc_pk), signPk: fromB64u(u.keyset.sign_pk) };
+      if (!verifyRestoreProof(fromB64u(req.json.proof ?? ""), userId, current, fromB64u(archive.keyset.sign_pk))) {
+        return failed(archive, json(400, { error: "The proof doesn't match the archived keys", code: "invalid_proof" }));
+      }
+      for (const g of req.json.grants ?? []) {
+        if (g.principal !== principal || !s.verified.some((v: any) => v.vault_id === g.vault_id && v.key_version === g.key_version)) {
+          return failed(archive, json(400, { error: `grant for ${g.vault_id} was not returned by verify`, code: "invalid_request" }));
+        }
+      }
+      for (const g of req.json.grants ?? []) {
+        const v = this.vaults.get(g.vault_id);
+        // Rotated or deleted since verify: skipped
+        if (!v || v.current !== g.key_version) continue;
+        const role = archive.grants.find((a) => a.vault_id === g.vault_id)!.role;
+        v.access.set(principal, { role, keys: new Map([[g.key_version, g.sealed_key]]) });
+        v.archived = false;
+      }
+      this.sessions.delete(req.json.session_id);
+      this.archives.delete(userId);
+      return new Response(null, { status: 204 });
+    }));
     this.on("GET", P + "me", A((_r, _p, pr) => {
       const u = this.userById(pr.split(":")[1]!);
       const orgs = [...this.orgs].filter(([, o]) => o.members.has(u.id)).map(([id, o]) => ({ id, name: o.name, ...o.members.get(u.id)! }));
@@ -230,7 +411,7 @@ export class FakeAuthServer extends MockServer {
     this.on("GET", P + "orgs/{org}/service-accounts", A((_r, p, pr) =>
       json(200, { service_accounts: [...this.sas.values()].filter((sa) => sa.org_id === p.org).map((sa) => ({ id: sa.id, org_id: sa.org_id, name: sa.name, master_key: sa.master.get(pr) })) }),
     ));
-    this.on("GET", P + "vaults", A((_r, _p, pr) => json(200, { vaults: [...this.vaults].filter(([, v]) => v.access.has(pr)).map(([id]) => this.vaultJson(id, pr)) })));
+    this.on("GET", P + "vaults", A((_r, _p, pr) => json(200, { vaults: [...this.vaults].filter(([, v]) => v.access.has(pr) && !v.archived).map(([id]) => this.vaultJson(id, pr)) })));
     this.on("POST", P + "vaults", A((req, _p, pr) => {
       if (!req.json.grants.some((g: any) => g.principal === pr)) return json(400, { error: "the caller must be one of the grantees", code: "invalid_request" });
       // SPEC §7: an org vault needs a manage grant for every confirmed owner and admin
@@ -246,10 +427,10 @@ export class FakeAuthServer extends MockServer {
       }
       const access = new Map<string, Access>();
       for (const g of req.json.grants) access.set(g.principal, { role: g.role, keys: new Map([[g.key_version, g.sealed_key]]) });
-      this.vaults.set(req.json.id, { org_id: req.json.org_id ?? null, encrypted_name: req.json.encrypted_name, current: 1, pending: null, access });
+      this.vaults.set(req.json.id, { org_id: req.json.org_id ?? null, owner_id: req.json.org_id ? null : pr.split(":")[1]!, encrypted_name: req.json.encrypted_name, current: 1, pending: null, access });
       return json(201, this.vaultJson(req.json.id, pr));
     }));
-    this.on("GET", P + "vaults/{v}", A((_r, p, pr) => json(200, this.vaultJson(p.v, pr))));
+    this.on("GET", P + "vaults/{v}", A((_r, p, pr) => (this.vaults.get(p.v)?.access.has(pr) && !this.vaults.get(p.v)!.archived ? json(200, this.vaultJson(p.v, pr)) : json(404, { error: "no such vault", code: "not_found" }))));
     this.on("PATCH", P + "vaults/{v}", A((req, p, pr) => {
       this.vaults.get(p.v)!.encrypted_name = req.json.encrypted_name;
       return json(200, this.vaultJson(p.v, pr));

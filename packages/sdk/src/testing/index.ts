@@ -4,5 +4,5 @@
  * each (or a router over both) to the SDK. Not for production use.
  */
 export { MockServer, json, bytes, type Handler, type Recorded } from "./mock-fetch.js";
-export { FakeAuthServer, CONFIG, ISSUER } from "./auth-server.js";
+export { FakeAuthServer, CONFIG, ISSUER, type FakeArchive, type FakeRecovery } from "./auth-server.js";
 export { FakeSyncServer } from "./sync-server.js";
