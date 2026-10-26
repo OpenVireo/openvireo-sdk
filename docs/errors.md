@@ -48,6 +48,16 @@ as opposed to refusing the request.
 See [Account recovery](guides/recovery.md#errors) for `recovery_not_ready`, `recovery_cancelled`,
 `restore_locked` and `invalid_proof`.
 
+## Plans
+
+On the hosted service, plans limit what an account or organization can create. Self-hosted servers have no
+limits. Nothing is locked when a limit is reached: existing vaults keep opening and syncing.
+
+| Code | Status | Meaning | What to do |
+|---|---|---|---|
+| `plan_limit` | 402 | Creating this (a vault, a share, a member, a service account) would go over the plan. `err.details` has `limit` (which one, e.g. `personal_vaults`), `max`, `current`, `plan` and `upgradeUrl` | Offer `err.details.upgradeUrl`, or remove something first |
+| `quota_exceeded` | 413 | The vault is larger than the plan's storage per vault; `err.details.max` is the limit in bytes | Make the database smaller (attachments, history), or upgrade |
+
 ## Vaults and sync
 
 | Code | Status | Meaning | What to do |
@@ -80,6 +90,7 @@ Server errors keep the server's `code`; without one, the status decides:
 |---|---|
 | 400 | `invalid_request` |
 | 401 | `unauthorized` |
+| 402 | `plan_limit` |
 | 403 | `forbidden` |
 | 404 | `not_found` |
 | 409 | `conflict` |

@@ -16,6 +16,7 @@ import {
   staticToken,
 } from "../src/auth/index.js";
 import { FileStorage } from "../src/auth/storage-node.js";
+import { errorFromResponse } from "../src/http/request.js";
 import { MockServer, json } from "./helpers/mock-fetch.js";
 
 const API = "https://auth.example/api/v1";
@@ -132,6 +133,27 @@ describe("AuthClient errors and retries", () => {
     const err = await c.loginStart({ email: "a", ke1: "b" }).catch((e) => e);
     expect(err).toBeInstanceOf(HttpError);
     expect(err).toMatchObject({ code: "rate_limited", status: 429, retryAfter: 30, message: "slow down" });
+  });
+  it("carries a plan limit and a vault quota in details", async () => {
+    const s = new MockServer().on("POST", "/api/v1/orgs", () =>
+      json(402, {
+        error: "The org_free plan allows 2 members",
+        code: "plan_limit",
+        limit: "members",
+        max: 2,
+        current: 2,
+        plan: "org_free",
+        upgrade_url: "https://auth.example/subscription/orgs/o",
+      }),
+    );
+    const err = await new AuthClient({ api: API, fetch: s.fetch, tokens: staticToken("t") }).createOrg("Acme").catch((e) => e);
+    expect(err).toMatchObject({
+      code: "plan_limit",
+      status: 402,
+      details: { limit: "members", max: 2, current: 2, plan: "org_free", upgradeUrl: "https://auth.example/subscription/orgs/o" },
+    });
+    const quota = await errorFromResponse(json(413, { error: "too big", code: "quota_exceeded", max: 1024 }));
+    expect(quota).toMatchObject({ code: "quota_exceeded", status: 413, details: { max: 1024 } });
   });
   it("falls back to a code from the status", async () => {
     const s = new MockServer().on("POST", "/api/v1/auth/register/start", () => json(409, { error: "taken" }));
