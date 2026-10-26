@@ -37,7 +37,7 @@ const asReader = () => ({ OPENVIREO_SERVICE_ACCOUNT_TOKEN: w.readToken });
 const asWriter = () => ({ OPENVIREO_SERVICE_ACCOUNT_TOKEN: w.writeToken });
 const puts = () => w.sync.calls.filter((c) => c.method === "PUT").length;
 
-describe("openvireo read / inject", () => {
+describe("ov read / inject", () => {
   it("reads a field by vault name or id, entry title or UUID, with a group path", async () => {
     expect(await openvireo(["read", "ov://Team%20Infra/GitHub/password"], { env: asReader() })).toEqual({ code: 0, stdout: "s3cret\n", stderr: "" });
     expect((await openvireo(["read", "-n", `ov://${w.vaultId}/Deploy/Database/username`], { env: asReader() })).stdout).toBe("app");
@@ -64,7 +64,7 @@ describe("openvireo read / inject", () => {
     }
     expect((await openvireo(["read"], { env: asReader() })).code).toBe(2);
     const noCreds = await openvireo(["read", "ov://a/b/c"]);
-    expect([noCreds.code, noCreds.stderr]).toEqual([1, "openvireo: not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `openvireo login`\n"]);
+    expect([noCreds.code, noCreds.stderr]).toEqual([1, "ov: not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `ov login`\n"]);
   });
 
   it("injects bare and braced references from stdin or a file", async () => {
@@ -79,7 +79,7 @@ describe("openvireo read / inject", () => {
   });
 });
 
-describe("openvireo run", () => {
+describe("ov run", () => {
   const node = process.execPath;
   const script = (js: string) => ["--", node, "-e", js];
 
@@ -115,7 +115,7 @@ describe("openvireo run", () => {
   });
 });
 
-describe("openvireo item / rotate (writes)", () => {
+describe("ov item / rotate (writes)", () => {
   it("rejects writes with a read-only grant before uploading anything", async () => {
     const before = puts();
     for (const argv of [
@@ -124,7 +124,7 @@ describe("openvireo item / rotate (writes)", () => {
       ["item", "create", "ov://Team%20Infra/New", "password=x"],
     ]) {
       const r = await openvireo(argv, { env: asReader() });
-      expect([r.code, r.stderr]).toEqual([1, 'openvireo: this service account can only read vault "Team Infra"\n']);
+      expect([r.code, r.stderr]).toEqual([1, 'ov: this service account can only read vault "Team Infra"\n']);
     }
     expect(puts()).toBe(before);
   });
@@ -179,7 +179,7 @@ describe("openvireo item / rotate (writes)", () => {
   });
 });
 
-describe("openvireo vault / whoami / login", () => {
+describe("ov vault / whoami / login", () => {
   it("lists vaults and shows the principal", async () => {
     expect((await openvireo(["vault", "list"], { env: asReader() })).stdout).toBe(`${w.vaultId}  read    Team Infra\n`);
     const who = (await openvireo(["whoami"], { env: asWriter() })).stdout;
@@ -205,7 +205,7 @@ describe("openvireo vault / whoami / login", () => {
     asked.length = 0;
     expect((await openvireo(["vault", "list"], { prompt })).stdout).toContain("manage  Private");
     expect(asked).toEqual(["Master password for alice@example.com: "]);
-    expect((await openvireo(["read", "ov://Private/Bank/password"], { env: { OPENVIREO_PASSWORD: "wrong" } })).stderr).toBe("openvireo: wrong password or Secret Key\n");
+    expect((await openvireo(["read", "ov://Private/Bank/password"], { env: { OPENVIREO_PASSWORD: "wrong" } })).stderr).toBe("ov: wrong password or Secret Key\n");
     expect((await openvireo(["read", "ov://a/b/c"], {})).stderr).toMatch(/no terminal/);
 
     const rot = await openvireo(["rotate", "ov://Private/Bank/password", "--stdin"], { env: { OPENVIREO_PASSWORD: w.password }, stdin: "by-human" });
@@ -220,10 +220,10 @@ describe("openvireo vault / whoami / login", () => {
   });
 
   it("prints usage and versions", async () => {
-    expect((await openvireo(["help"])).stdout).toContain("openvireo run [--env-file .env.tpl]");
+    expect((await openvireo(["help"])).stdout).toContain("ov run [--env-file .env.tpl]");
     expect((await openvireo([])).code).toBe(2);
-    expect((await openvireo(["version"])).stdout).toBe("openvireo 0.2.0\n");
-    expect((await openvireo(["frobnicate"])).stderr).toBe('openvireo: unknown command "frobnicate" (see openvireo help)\n');
+    expect((await openvireo(["version"])).stdout).toBe("ov 0.2.0\n");
+    expect((await openvireo(["frobnicate"])).stderr).toBe('ov: unknown command "frobnicate" (see ov help)\n');
     const tok = await openvireo(["connect", "token", "--name", "ci"]);
     expect(tok.stdout).toMatch(/^ov_ct_/);
   });

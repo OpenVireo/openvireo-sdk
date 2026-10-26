@@ -1,4 +1,4 @@
-/** Secret references in templates (`openvireo inject`) and env files (`openvireo run`). */
+/** Secret references in templates (`ov inject`) and env files (`ov run`). */
 import { OpenVireoError, REFERENCE_PATTERN, parseReference, readField } from "@openvireo/sdk";
 import type { VaultSource } from "./source.js";
 

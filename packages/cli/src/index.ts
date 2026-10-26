@@ -1,4 +1,4 @@
-/** @openvireo/cli: the `openvireo` command line, and its building blocks for other tools. */
+/** @openvireo/cli: the `ov` command line, and its building blocks for other tools. */
 export { main, maskText, USAGE, type CliIo } from "./main.js";
 export { MASK, Masker, maskPatterns } from "./mask.js";
 export { CHARSETS, generatePassword, parseCharsets, type CharsetName, type GenerateOptions } from "./generate.js";

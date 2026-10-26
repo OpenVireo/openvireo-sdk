@@ -1,4 +1,4 @@
-/** Password generation for `openvireo rotate --generate` and `openvireo item create|edit --generate`. */
+/** Password generation for `ov rotate --generate` and `ov item create|edit --generate`. */
 import { OpenVireoError, randomBytes } from "@openvireo/sdk";
 
 export const CHARSETS = {

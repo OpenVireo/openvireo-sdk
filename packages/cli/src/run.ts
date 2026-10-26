@@ -1,4 +1,4 @@
-/** `openvireo run`: start a command with references resolved in its environment and its output masked. */
+/** `ov run`: start a command with references resolved in its environment and its output masked. */
 import { spawn } from "node:child_process";
 import { Masker } from "./mask.js";
 

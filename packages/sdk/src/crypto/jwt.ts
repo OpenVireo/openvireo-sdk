@@ -1,7 +1,7 @@
 /**
  * SPEC §9 access tokens. Clients only need `decodeJwt` (to read `exp` and `vlt`); `verifyJwt` is the
  * reference verifier (EdDSA only, iss/aud/exp/nbf with 60 s skew), used by the test vectors and by
- * `openvireo connect`-style servers.
+ * `ov connect`-style servers.
  */
 import { OpenVireoError } from "../errors.js";
 import { fromB64u, fromUtf8, utf8 } from "../util/bytes.js";

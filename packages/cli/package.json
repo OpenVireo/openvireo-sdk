@@ -22,7 +22,6 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "openvireo": "./dist/bin.js",
     "ov": "./dist/bin.js"
   },
   "files": [
@@ -33,7 +32,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "build:binary": "npm run build --prefix ../.. -w @openvireo/sdk -w @openvireo/connect && bun build --compile --minify --sourcemap src/bin.ts --outfile dist/openvireo",
+    "build:binary": "npm run build --prefix ../.. -w @openvireo/sdk -w @openvireo/connect && bun build --compile --minify --sourcemap src/bin.ts --outfile dist/ov",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "smoke": "bun scripts/smoke.ts"

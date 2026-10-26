@@ -1,4 +1,4 @@
-# @openvireo/cli: `openvireo` (alias `ov`)
+# @openvireo/cli: `ov`
 
 Read, inject and rotate OpenVireo vault secrets from scripts, CI and servers, with a **service
 account** (`OPENVIREO_SERVICE_ACCOUNT_TOKEN=ov_sa_…`) or your own **login**. Vaults are downloaded and
@@ -21,32 +21,32 @@ reference without the field.
 ```sh
 export OPENVIREO_SERVICE_ACCOUNT_TOKEN=ov_sa_…
 
-openvireo read ov://Team%20Infra/GitHub/password          # value + newline (-n: none, -o file: mode 0600)
+ov read ov://Team%20Infra/GitHub/password                 # value + newline (-n: none, -o file: mode 0600)
 
 # templates: bare references, or {{ ov://… }} when text follows the reference
-echo 'dsn: postgres://app:{{ ov://Team%20Infra/Deploy/Database/password }}@db/app' | openvireo inject
-openvireo inject -i config.yml.tpl -o config.yml           # output file mode 0600
+echo 'dsn: postgres://app:{{ ov://Team%20Infra/Deploy/Database/password }}@db/app' | ov inject
+ov inject -i config.yml.tpl -o config.yml                  # output file mode 0600
 
 # run a command with references resolved in its environment; its stdout/stderr are masked
 cat .env.tpl
 #   DB_PASSWORD=ov://Team%20Infra/Deploy/Database/password
 #   DB_USER="ov://Team%20Infra/Deploy/Database/username"
-openvireo run --env-file .env.tpl -- ./migrate.sh          # "echo $DB_PASSWORD" prints <concealed by openvireo>
-GH_TOKEN=ov://Team%20Infra/GitHub/password openvireo run -- gh auth status   # variables already set work too
+ov run --env-file .env.tpl -- ./migrate.sh                 # "echo $DB_PASSWORD" prints <concealed by openvireo>
+GH_TOKEN=ov://Team%20Infra/GitHub/password ov run -- gh auth status   # variables already set work too
 
-openvireo item get ov://Team%20Infra/GitHub [--reveal] [--json]
-openvireo item list "Team Infra"
-openvireo item create ov://Team%20Infra/Apps/Stripe username=billing url=https://stripe.com --generate
-openvireo item edit ov://Team%20Infra/Apps/Stripe --stdin-field api_key < key.txt
-openvireo rotate ov://Team%20Infra/Deploy/Database/password --generate [--length 40] [--charset letters,digits] [--print]
-printf %s "$NEW" | openvireo rotate ov://Team%20Infra/CI/token --stdin
+ov item get ov://Team%20Infra/GitHub [--reveal] [--json]
+ov item list "Team Infra"
+ov item create ov://Team%20Infra/Apps/Stripe username=billing url=https://stripe.com --generate
+ov item edit ov://Team%20Infra/Apps/Stripe --stdin-field api_key < key.txt
+ov rotate ov://Team%20Infra/Deploy/Database/password --generate [--length 40] [--charset letters,digits] [--print]
+printf %s "$NEW" | ov rotate ov://Team%20Infra/CI/token --stdin
 
-openvireo vault list
-openvireo whoami
-openvireo connect                                         # the REST server, see ../connect/README.md
+ov vault list
+ov whoami
+ov connect                                                # the REST server, see ../connect/README.md
 ```
 
-- `openvireo run` takes `KEY=value` lines (`export`, `#` comments, `"…"` with `\n` escapes, `'…'` literal).
+- `ov run` takes `KEY=value` lines (`export`, `#` comments, `"…"` with `\n` escapes, `'…'` literal).
   Masking replaces every resolved value, and every line (4+ characters) of a multi-line value, in the
   child's output, also when a value is split across writes. Bytes that may be the start of a secret are
   held back until the next write, or for at most 100 ms. Masking pipes the child's stdout/stderr (they are
@@ -57,17 +57,17 @@ openvireo connect                                         # the REST server, see
 - `--generate` makes 32 characters from letters, digits and `!#$%&()*+,-./:;<=>?@[]^_{|}~`, at least one
   of each chosen set (`--charset` takes `letters`, `lower`, `upper`, `digits`, `symbols`).
 - A vault granted as `read` refuses `rotate` and `item create|edit` before anything is uploaded:
-  `openvireo: this service account can only read vault "Team Infra"`, exit code 1. The sync server enforces
+  `ov: this service account can only read vault "Team Infra"`, exit code 1. The sync server enforces
   the same with 403.
-- Errors print `openvireo: <message>` with exit code 1 (2 for usage errors), never a stack trace.
+- Errors print `ov: <message>` with exit code 1 (2 for usage errors), never a stack trace.
 
 ## Human login
 
 ```sh
-openvireo login --email alice@example.com [--issuer https://accounts.openvireo.com]
+ov login --email alice@example.com [--issuer https://accounts.openvireo.com]
 # Master password, then the Secret Key (K1-…) the first time on this machine, then a TOTP code if enabled
-openvireo read ov://Private/Bank/password                # asks for the master password every time
-openvireo logout
+ov read ov://Private/Bank/password                       # asks for the master password every time
+ov logout
 ```
 
 The session (refresh token, device id, trusted Secret Key and the encrypted vault base copies) lives in
@@ -79,9 +79,9 @@ environment for non-interactive use; prefer a service account for automation.
 ## Single binary
 
 ```sh
-npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/openvireo
-./packages/cli/dist/openvireo version        # openvireo 0.1.0
-npm run smoke -w @openvireo/cli            # runs dist/openvireo against the in-memory servers over HTTP
+npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/ov
+./packages/cli/dist/ov version             # ov 0.2.0
+npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP
 # cross-compile: add --target=bun-linux-x64 | bun-linux-arm64 | bun-darwin-arm64 | bun-windows-x64
 ```
 

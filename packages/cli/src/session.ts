@@ -1,5 +1,5 @@
 /**
- * Credentials: OPENVIREO_SERVICE_ACCOUNT_TOKEN wins; otherwise the user session saved by `openvireo login`
+ * Credentials: OPENVIREO_SERVICE_ACCOUNT_TOKEN wins; otherwise the user session saved by `ov login`
  * (refresh token, device id and trusted Secret Key in <config dir>/session.json, mode 0600), unlocked
  * with the master password (OPENVIREO_PASSWORD or a prompt) for each command.
  */
@@ -50,9 +50,9 @@ export async function openSource(io: SessionIo): Promise<VaultSource> {
   if (token) return serviceAccountSource(await ServiceAccount.fromToken(token, http(io)));
   const storage = storageFor(io.env);
   const issuer = await storage.get("cli:issuer");
-  if (!issuer) throw new OpenVireoError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `openvireo login`");
+  if (!issuer) throw new OpenVireoError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `ov login`");
   const account = await Account.connect({ issuer, device: device(), storage, ...http(io) });
-  if (!account.signedIn) throw new OpenVireoError("signed_out", "the saved session has ended: run `openvireo login` again");
+  if (!account.signedIn) throw new OpenVireoError("signed_out", "the saved session has ended: run `ov login` again");
   const password = io.env.OPENVIREO_PASSWORD ?? (await ask(io, `Master password for ${account.tokens.current?.email}: `, true));
   await account.unlock(password);
   return userSource(account);
@@ -97,9 +97,9 @@ export async function whoami(io: SessionIo): Promise<Record<string, string>> {
   }
   const storage = storageFor(io.env);
   const issuer = await storage.get("cli:issuer");
-  if (!issuer) throw new OpenVireoError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `openvireo login`");
+  if (!issuer) throw new OpenVireoError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `ov login`");
   const account = await Account.connect({ issuer, device: device(), storage, ...http(io) });
   const s = account.tokens.current;
-  if (!s) throw new OpenVireoError("signed_out", "the saved session has ended: run `openvireo login` again");
+  if (!s) throw new OpenVireoError("signed_out", "the saved session has ended: run `ov login` again");
   return { kind: "user", principal: `user:${s.userId}`, email: s.email, issuer };
 }

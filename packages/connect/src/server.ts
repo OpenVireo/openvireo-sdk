@@ -1,4 +1,4 @@
-/** Runs the connect handler on node:http (also used by Bun and the single `openvireo` binary). */
+/** Runs the connect handler on node:http (also used by Bun and the single `ov` binary). */
 import { readFileSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -64,7 +64,7 @@ export function configFromEnv(env: Record<string, string | undefined>): ConnectC
     const access = env.OPENVIREO_CONNECT_TOKEN_ACCESS === "write" ? "write" : "read";
     tokens.push({ name: "default", sha256: hashConnectToken(single), vaults: ["*"], access });
   }
-  if (!tokens.length) throw new OpenVireoError("invalid_request", "no connect tokens: set OPENVIREO_CONNECT_TOKENS_FILE or OPENVIREO_CONNECT_TOKEN (create one with `openvireo connect token`)");
+  if (!tokens.length) throw new OpenVireoError("invalid_request", "no connect tokens: set OPENVIREO_CONNECT_TOKENS_FILE or OPENVIREO_CONNECT_TOKEN (create one with `ov connect token`)");
   const port = Number(env.OPENVIREO_CONNECT_PORT ?? 8080);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new OpenVireoError("invalid_request", `bad OPENVIREO_CONNECT_PORT: ${env.OPENVIREO_CONNECT_PORT}`);
   const ttl = Number(env.OPENVIREO_CONNECT_CACHE_TTL ?? 5);
