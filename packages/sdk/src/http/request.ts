@@ -22,10 +22,17 @@ export class HttpError extends OpenVireoError {
   }
 }
 
-/** Extra fields of an error body, camelCased into `details` (SPEC.md §18: not_before on recovery_not_ready). */
+/**
+ * Extra fields of an error body, camelCased into `details`: not_before on recovery_not_ready (SPEC.md §18),
+ * the limit on plan_limit and quota_exceeded (§19).
+ */
 function errorDetails(code: string, body: unknown): Record<string, unknown> | undefined {
-  const b = body as { not_before?: unknown } | undefined;
+  const b = body as Record<string, unknown> | undefined;
   if (code === "recovery_not_ready" && typeof b?.not_before === "string") return { notBefore: b.not_before };
+  if (code === "plan_limit" && b) {
+    return { limit: b.limit, max: b.max, current: b.current, plan: b.plan, upgradeUrl: b.upgrade_url };
+  }
+  if (code === "quota_exceeded" && typeof b?.max === "number") return { max: b.max };
   return undefined;
 }
 
@@ -33,6 +40,7 @@ const codeForStatus = (status: number): string =>
   ({
     400: "invalid_request",
     401: "unauthorized",
+    402: "plan_limit",
     403: "forbidden",
     404: "not_found",
     409: "conflict",

@@ -33,6 +33,9 @@ export type OpenVireoErrorCode =
   | "recovery_cancelled"
   | "restore_locked"
   | "invalid_proof"
+  // plans (SPEC.md §19)
+  | "plan_limit"
+  | "quota_exceeded"
   // vault / sync
   | "vault_key_mismatch"
   | "no_vault_key"
@@ -51,7 +54,8 @@ export class OpenVireoError extends Error {
   override readonly name = "OpenVireoError";
   /**
    * Extra data some codes carry, camelCased: `recovery_not_ready` has `notBefore` (RFC 3339, when the
-   * reset link starts working).
+   * reset link starts working); `plan_limit` has `limit`, `max`, `current`, `plan` and `upgradeUrl`
+   * (where to change plan); `quota_exceeded` has `max` (the vault's size limit in bytes).
    */
   readonly details?: Record<string, unknown>;
   constructor(

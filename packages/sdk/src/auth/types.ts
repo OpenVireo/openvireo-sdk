@@ -66,7 +66,19 @@ export interface Me {
   kdf: KdfParams;
   keyset: WrappedKeysetJson;
   mfa: { totp?: boolean };
-  orgs?: { id: string; name: string; role: OrgRole; status: MemberStatus }[];
+  /** The user's personal plan (SPEC.md §19). */
+  plan?: Plan;
+  orgs?: { id: string; name: string; role: OrgRole; status: MemberStatus; plan?: Plan }[];
+}
+
+/**
+ * A plan and its limits (SPEC.md §19). On a server without billing `id` and every limit are null; a
+ * null limit is unlimited. Users have personal_vaults, share_recipients and vault_bytes; orgs have
+ * members, org_vaults, service_accounts, audit_days and vault_bytes.
+ */
+export interface Plan {
+  id: "free" | "premium" | "org_free" | "families" | "teams" | "business" | (string & {}) | null;
+  limits: Record<string, number | null>;
 }
 
 export interface PublicPrincipal extends PublicKeysJson {
@@ -88,6 +100,8 @@ export interface Org {
   id: string;
   name: string;
   role: OrgRole;
+  /** The org's plan (SPEC.md §19). */
+  plan?: Plan;
   created_at: string;
 }
 
