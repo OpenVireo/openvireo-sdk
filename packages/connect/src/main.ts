@@ -1,4 +1,4 @@
-/** `openvireo connect [serve]` and `openvireo connect token`: shared by the openvireo-connect bin and the openvireo CLI. */
+/** `ov connect [serve]` and `ov connect token`: shared by the openvireo-connect bin and the openvireo CLI. */
 import { parseArgs } from "node:util";
 import { OpenVireoError, type FetchLike } from "@openvireo/sdk";
 import { configFromEnv, startConnect } from "./server.js";
@@ -14,8 +14,8 @@ export interface ConnectIo {
 }
 
 export const CONNECT_USAGE = `Usage:
-  openvireo connect [serve]                      run the REST server (configured by environment, see README)
-  openvireo connect token [--name N] [--vault V]... [--write]
+  ov connect [serve]                      run the REST server (configured by environment, see README)
+  ov connect token [--name N] [--vault V]... [--write]
                                            create a bearer token; prints it and its config entry
 `;
 
@@ -45,7 +45,7 @@ export async function connectMain(argv: string[], io: ConnectIo): Promise<number
   if (rest.length) throw new OpenVireoError("invalid_request", `unexpected arguments: ${rest.join(" ")}`);
   const config = configFromEnv(io.env);
   const running = await startConnect(config, { fetch: io.fetch, log: (l) => io.stderr(`${new Date().toISOString()} ${l}\n`) });
-  io.stderr(`openvireo connect listening on ${running.url} (${config.tokens.length} token${config.tokens.length === 1 ? "" : "s"})\n`);
+  io.stderr(`ov connect listening on ${running.url} (${config.tokens.length} token${config.tokens.length === 1 ? "" : "s"})\n`);
   await (io.stopSignal ?? untilSignal());
   await running.close();
   return 0;

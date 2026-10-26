@@ -40,7 +40,7 @@ function client(source: ServiceAccount, opts: { cacheTtlMs?: number; log?: strin
   };
 }
 
-describe("openvireo connect REST API", () => {
+describe("ov connect REST API", () => {
   it("needs one of its own bearer tokens, except for /health", async () => {
     const c = client(readSa);
     expect((await c("GET", "/health")).body).toEqual({ status: "ok" });
@@ -159,7 +159,7 @@ describe("connect configuration", () => {
     expect(() => configFromEnv({ OPENVIREO_SERVICE_ACCOUNT_TOKEN: "x", OPENVIREO_CONNECT_TOKEN: "t", OPENVIREO_CONNECT_PORT: "70000" })).toThrow(/PORT/);
   });
 
-  it("`openvireo connect token` prints a token and its config entry", async () => {
+  it("`ov connect token` prints a token and its config entry", async () => {
     let out = "";
     let err = "";
     const code = await connectMain(["token", "--name", "eso", "--vault", "Team Infra", "--write"], { env: {}, stdout: (s) => (out += s), stderr: (s) => (err += s) });

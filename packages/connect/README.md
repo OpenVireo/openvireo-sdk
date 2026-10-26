@@ -1,9 +1,9 @@
-# @openvireo/connect: `openvireo connect`
+# @openvireo/connect: `ov connect`
 
 A small self-hosted REST server that holds **one service account token** and gives any language
 HTTP access to the vaults that service account can open. Callers use connect's **own bearer tokens**
 (`ov_ct_…`), never the SA token: each one is stored only as its SHA-256 and can be limited to some
-vaults and to read or write. Vault data is decrypted inside openvireo connect, so run it next to its callers
+vaults and to read or write. Vault data is decrypted inside ov connect, so run it next to its callers
 (same host, pod network) and not on the public internet.
 
 Writes go through the SDK's conditional PUT with merge/retry (`If-Match`; on 412 download, merge, retry),
@@ -14,20 +14,20 @@ grant gets 403 on every write.
 
 ```sh
 # 1. a connect token (printed once) and its config entry (hash only)
-openvireo connect token --name eso --vault "Team Infra" > eso.token 2> entry.txt
+ov connect token --name eso --vault "Team Infra" > eso.token 2> entry.txt
 tail -1 entry.txt   # {"name":"eso","sha256":"…","vaults":["Team Infra"],"access":"read"}
 echo "[$(tail -1 entry.txt)]" > tokens.json
 
 # 2. the server
-OPENVIREO_SERVICE_ACCOUNT_TOKEN=ov_sa_… OPENVIREO_CONNECT_TOKENS_FILE=tokens.json openvireo connect
-# openvireo connect listening on http://127.0.0.1:8080 (1 token)
+OPENVIREO_SERVICE_ACCOUNT_TOKEN=ov_sa_… OPENVIREO_CONNECT_TOKENS_FILE=tokens.json ov connect
+# ov connect listening on http://127.0.0.1:8080 (1 token)
 
 curl -H "Authorization: Bearer $(cat eso.token)" \
   "http://127.0.0.1:8080/v1/vaults/Team%20Infra/items/Deploy/Database?field=password"
 # {"value":"…"}
 ```
 
-`openvireo connect` is the same as `openvireo-connect serve` (this package's bin, `node dist/bin.js`).
+`ov connect` is the same as `openvireo-connect serve` (this package's bin, `node dist/bin.js`).
 
 | Variable | Default | |
 |---|---|---|
@@ -70,7 +70,7 @@ vaults outside a token's scope, both answer 404.
 
 ## Kubernetes: External Secrets Operator
 
-openvireo connect plugs into ESO's built-in **webhook provider**; there is no custom operator. In `deploy/`:
+ov connect plugs into ESO's built-in **webhook provider**; there is no custom operator. In `deploy/`:
 
 - `kubernetes/`: `kubectl apply -k` manifests: namespace, the two Secrets as placeholders
   (`secrets.example.yaml`), the Deployment (non-root, read-only root filesystem, probes on `/ready`
@@ -83,7 +83,7 @@ openvireo connect plugs into ESO's built-in **webhook provider**; there is no cu
 ```sh
 helm install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace \
   -f packages/connect/deploy/helm/external-secrets-values.yaml
-openvireo connect token --name eso > eso.token 2> entry.txt
+ov connect token --name eso > eso.token 2> entry.txt
 helm install openvireo packages/connect/deploy/helm/openvireo-connect -n openvireo-connect --create-namespace \
   --set-file serviceAccountToken=sa.token --set-json "connectTokens=[$(tail -1 entry.txt)]" \
   --set-file externalSecrets.token=eso.token

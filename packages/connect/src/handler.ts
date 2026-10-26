@@ -1,5 +1,5 @@
 /**
- * The REST API of `openvireo connect`, as a fetch-style handler `(Request) => Promise<Response>` so it runs
+ * The REST API of `ov connect`, as a fetch-style handler `(Request) => Promise<Response>` so it runs
  * under node:http, Bun.serve or a test without sockets.
  *
  *   GET  /health                                   liveness (no auth)

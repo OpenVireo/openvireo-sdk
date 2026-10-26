@@ -61,7 +61,7 @@ spec:
   ports:
     - { name: http, port: 8080, targetPort: http }
 ---
-# Only ESO's controller may call openvireo connect; openvireo connect may only reach DNS and HTTPS (auth + sync servers)
+# Only ESO's controller may call ov connect; ov connect may only reach DNS and HTTPS (auth + sync servers)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

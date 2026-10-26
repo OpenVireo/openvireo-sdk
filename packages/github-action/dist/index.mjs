@@ -20238,7 +20238,7 @@ var ServiceAccount = class _ServiceAccount {
   }
   /**
    * Brings the cached copy up to date: a HEAD with the last ETag, and a download only when the server
-   * has a newer version (for long-running processes such as `openvireo connect`). Opens the vault if needed.
+   * has a newer version (for long-running processes such as `ov connect`). Opens the vault if needed.
    */
   async pull(idOrName) {
     const v = await this.vault(idOrName);
@@ -20276,7 +20276,7 @@ var ServiceAccount = class _ServiceAccount {
     const r = parseReference(ref);
     return readField(await this.openVault(r.vault), r);
   }
-  /** Replaces every ov:// reference in a template (`openvireo inject` / `run --env-file`). */
+  /** Replaces every ov:// reference in a template (`ov inject` / `run --env-file`). */
   async inject(template) {
     const refs = [...new Set(template.match(REFERENCE_PATTERN) ?? [])];
     const values = /* @__PURE__ */ new Map();
@@ -20370,25 +20370,25 @@ async function resolveTemplate(src, text) {
 }
 
 // ../cli/src/main.ts
-var USAGE = `openvireo ${VERSION2}: OpenVireo vault secrets for scripts, CI and servers
+var USAGE = `ov ${VERSION2}: OpenVireo vault secrets for scripts, CI and servers
 
 Usage: (also installed as \`ov\`)
-  openvireo read <ov://vault/[group/\u2026]entry/field> [-n] [-o file]
-  openvireo inject [-i template] [-o file]          replace ov:// references ({{ ov://\u2026 }} or bare)
-  openvireo run [--env-file .env.tpl]\u2026 [--no-masking] -- <command> [args\u2026]
-  openvireo item get <ov://vault/[group/\u2026]entry> [--reveal] [--json]
-  openvireo item list <vault> [--json]
-  openvireo item create <ov://vault/[group/\u2026]title> [field=value\u2026] [--generate [--length N] [--charset S]] [--stdin-field F]
-  openvireo item edit <ov://vault/[group/\u2026]entry> [field=value\u2026] [--generate [--length N] [--charset S]] [--stdin-field F]
-  openvireo rotate <ov://vault/[group/\u2026]entry/field> (--generate [--length N] [--charset S] | --stdin) [--print]
-  openvireo vault list [--json]
-  openvireo login [--issuer URL] [--email E] [--secret-key K1-\u2026]
-  openvireo logout | openvireo whoami
-  openvireo connect [serve | token \u2026]               the REST server (see openvireo connect --help)
-  openvireo version
+  ov read <ov://vault/[group/\u2026]entry/field> [-n] [-o file]
+  ov inject [-i template] [-o file]          replace ov:// references ({{ ov://\u2026 }} or bare)
+  ov run [--env-file .env.tpl]\u2026 [--no-masking] -- <command> [args\u2026]
+  ov item get <ov://vault/[group/\u2026]entry> [--reveal] [--json]
+  ov item list <vault> [--json]
+  ov item create <ov://vault/[group/\u2026]title> [field=value\u2026] [--generate [--length N] [--charset S]] [--stdin-field F]
+  ov item edit <ov://vault/[group/\u2026]entry> [field=value\u2026] [--generate [--length N] [--charset S]] [--stdin-field F]
+  ov rotate <ov://vault/[group/\u2026]entry/field> (--generate [--length N] [--charset S] | --stdin) [--print]
+  ov vault list [--json]
+  ov login [--issuer URL] [--email E] [--secret-key K1-\u2026]
+  ov logout | ov whoami
+  ov connect [serve | token \u2026]               the REST server (see ov connect --help)
+  ov version
 
 Credentials: OPENVIREO_SERVICE_ACCOUNT_TOKEN (or OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE), else the session from
-\`openvireo login\` unlocked with OPENVIREO_PASSWORD or a prompt. Charsets: letters, lower, upper, digits, symbols.
+\`ov login\` unlocked with OPENVIREO_PASSWORD or a prompt. Charsets: letters, lower, upper, digits, symbols.
 `;
 
 // src/core.ts

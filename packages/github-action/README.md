@@ -42,10 +42,10 @@ exported. `OPENVIREO_SERVICE_ACCOUNT_TOKEN`, `PATH`, `NODE_OPTIONS` and the `GIT
 overwritten.
 
 Give the service account a `read` grant on just the vaults the workflow needs. To change secrets from a
-workflow (`openvireo rotate`), use the CLI with a `write` grant instead:
+workflow (`ov rotate`), use the CLI with a `write` grant instead:
 
 ```yaml
-      - run: openvireo rotate ov://Team%20Infra/CI/token --generate
+      - run: ov rotate ov://Team%20Infra/CI/token --generate
         env:
           OPENVIREO_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OPENVIREO_SERVICE_ACCOUNT_TOKEN }}
 ```

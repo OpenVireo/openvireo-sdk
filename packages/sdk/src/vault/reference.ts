@@ -35,7 +35,7 @@ export function parseReference(ref: string): SecretReference {
 export const formatReference = (r: SecretReference): string =>
   SCHEME + [r.vault, ...r.groupPath, r.entry, r.field].map((s) => encodeURIComponent(s)).join("/");
 
-/** Finds all references in a template (for `openvireo run`/`inject`): ov://… up to whitespace, quotes or `}`. */
+/** Finds all references in a template (for `ov run`/`inject`): ov://… up to whitespace, quotes or `}`. */
 export const REFERENCE_PATTERN = /ov:\/\/[^\s"'`}]+/g;
 
 const STANDARD: Record<string, string> = { title: "Title", username: "UserName", user: "UserName", password: "Password", url: "URL", notes: "Notes" };

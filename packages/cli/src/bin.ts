@@ -39,7 +39,7 @@ main(process.argv.slice(2), {
     process.exitCode = code;
   },
   (e: Error) => {
-    process.stderr.write(`openvireo: ${e.message}\n`);
+    process.stderr.write(`ov: ${e.message}\n`);
     process.exitCode = 1;
   },
 );

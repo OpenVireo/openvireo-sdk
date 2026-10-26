@@ -5,8 +5,8 @@ npm workspace for the OpenVireo accounts/sharing client code. OpenVireo is a for
 | Package | |
 |---|---|
 | [`packages/sdk`](packages/sdk/README.md) | `@openvireo/sdk`: the shared TypeScript SDK (crypto, OPAQUE, auth and sync clients, vault, merge, `ServiceAccount`) |
-| [`packages/cli`](packages/cli/README.md) | `openvireo` (alias `ov`): `read`, `inject`, `run` (masked output), `item`, `rotate`, `login`; a Bun single binary |
-| [`packages/connect`](packages/connect/README.md) | `openvireo connect`: REST server holding one service account token; `deploy/` has ESO webhook manifests and Helm values |
+| [`packages/cli`](packages/cli/README.md) | `ov`: `read`, `inject`, `run` (masked output), `item`, `rotate`, `login`; a Bun single binary |
+| [`packages/connect`](packages/connect/README.md) | `ov connect`: REST server holding one service account token; `deploy/` has ESO webhook manifests and Helm values |
 | [`packages/github-action`](packages/github-action/README.md) | JavaScript action that loads secrets into a job and masks them (`action.yml`, bundled `dist/`) |
 
 ```sh

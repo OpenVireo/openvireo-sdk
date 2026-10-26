@@ -116,7 +116,7 @@ sa.close();
 
 References are `ov://<vault id or name>/[<group>/…]<entry uuid or title>/<field>`, percent-encoded.
 
-For long-running processes and whole entries (used by `openvireo connect` and `openvireo item`):
+For long-running processes and whole entries (used by `ov connect` and `ov item`):
 
 ```ts
 import { ServiceAccount, findEntry, itemOf, listItems, parseItemReference, setItemFields } from "@openvireo/sdk";

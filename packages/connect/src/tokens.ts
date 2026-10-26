@@ -1,5 +1,5 @@
 /**
- * openvireo connect's own bearer tokens. They are independent of the SA token it holds: each one is
+ * ov connect's own bearer tokens. They are independent of the SA token it holds: each one is
  * `ov_ct_` + base64url(32 random bytes), stored only as its SHA-256, and scoped to some vaults with
  * read or write access.
  */

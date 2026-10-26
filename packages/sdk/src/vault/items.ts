@@ -1,5 +1,5 @@
 /**
- * Whole entries ("items") for the CLI's `openvireo item` and `openvireo connect`'s REST API. An item reference is
+ * Whole entries ("items") for the CLI's `ov item` and `ov connect`'s REST API. An item reference is
  * a secret reference without the field: ov://<vault>/[<group>/…]<entry uuid or title>.
  */
 import { OpenVireoError } from "../errors.js";

@@ -10,7 +10,7 @@ cacheTtlSeconds: 5
 # Either name an existing Secret with keys `sa-token` and `tokens.json`, or let the chart create one
 existingSecret: ""
 serviceAccountToken: ""          # ov_sa_… (prefer existingSecret or --set-file in CI)
-connectTokens: []                # entries printed by `openvireo connect token`: {name, sha256, vaults, access}
+connectTokens: []                # entries printed by `ov connect token`: {name, sha256, vaults, access}
 
 service:
   port: 8080
@@ -21,7 +21,7 @@ resources:
 
 networkPolicy:
   enabled: true
-  # namespace of the ESO controller (and anything else allowed to call openvireo connect)
+  # namespace of the ESO controller (and anything else allowed to call ov connect)
   allowedNamespaces: [external-secrets]
 
 externalSecrets:

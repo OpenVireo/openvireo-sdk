@@ -1,7 +1,7 @@
 /**
- * Runs the compiled single binary (dist/openvireo, from `npm run build:binary`) against the SDK's in-memory
+ * Runs the compiled single binary (dist/ov, from `npm run build:binary`) against the SDK's in-memory
  * auth and sync servers served over real HTTP on 127.0.0.1: SA read/run/rotate, a read-only rejection,
- * and a human login (OPAQUE inside the binary).  Usage: bun scripts/smoke.ts [path/to/openvireo]
+ * and a human login (OPAQUE inside the binary).  Usage: bun scripts/smoke.ts [path/to/ov]
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -12,7 +12,7 @@ import { buildSaToken, parseSaToken } from "../../sdk/src/index.js";
 import { CONFIG } from "../../sdk/test/helpers/auth-server.js";
 import { makeWorld } from "../../sdk/test/helpers/world.js";
 
-const bin = process.argv[2] ?? new URL("../dist/openvireo", import.meta.url).pathname;
+const bin = process.argv[2] ?? new URL("../dist/ov", import.meta.url).pathname;
 const w = await makeWorld();
 
 const server = createServer(async (req, res) => {
@@ -67,13 +67,13 @@ try {
   r = await run(["run", "--", "sh", "-c", 'echo "pw=$PW"'], { ...reader, PW: "ov://Team%20Infra/Deploy/Database/password" });
   check("run masks the secret", r.code === 0 && r.out === "pw=<concealed by openvireo>\n", r);
   r = await run(["rotate", "ov://Team%20Infra/GitHub/password", "--generate"], reader);
-  check("read-only grant fails cleanly", r.code === 1 && r.err === 'openvireo: this service account can only read vault "Team Infra"\n', r);
+  check("read-only grant fails cleanly", r.code === 1 && r.err === 'ov: this service account can only read vault "Team Infra"\n', r);
   r = await run(["rotate", "ov://Team%20Infra/GitHub/password", "--generate", "--print"], writer);
   const rotated = r.out.trim();
   check("rotate with a write grant", r.code === 0 && rotated.length === 32, r);
   r = await run(["read", "ov://Team%20Infra/GitHub/password"], reader);
   check("rotated value is on the server", r.out === rotated + "\n", r);
-  // openvireo connect from the same binary
+  // ov connect from the same binary
   const connect = spawn(bin, ["connect"], { env: { PATH: process.env.PATH ?? "", ...reader, OPENVIREO_CONNECT_TOKEN: "ov_ct_smoke", OPENVIREO_CONNECT_PORT: "0" } });
   const url = await new Promise<string>((resolve, reject) => {
     let err = "";
@@ -86,9 +86,9 @@ try {
   });
   const res = await fetch(`${url}/v1/vaults/Team%20Infra/items/Deploy/Database?field=username`, { headers: { Authorization: "Bearer ov_ct_smoke" } });
   const body = await res.json();
-  check("openvireo connect serves an item field", res.status === 200 && body.value === "app", body);
+  check("ov connect serves an item field", res.status === 200 && body.value === "app", body);
   const denied = await fetch(`${url}/v1/vaults`, { headers: { Authorization: "Bearer wrong" } });
-  check("openvireo connect rejects unknown tokens", denied.status === 401, denied.status);
+  check("ov connect rejects unknown tokens", denied.status === 401, denied.status);
   connect.kill("SIGTERM");
   r = await run(["login", "--email", "alice@example.com", "--secret-key", w.secretKey], { OPENVIREO_ISSUER: base, OPENVIREO_PASSWORD: w.password });
   check("human login (OPAQUE in the binary)", r.code === 0 && r.err.startsWith("Signed in"), r);
