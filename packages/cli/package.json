@@ -1,6 +1,6 @@
 {
   "name": "@openvireo/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "openvireo: read, inject and rotate OpenVireo vault secrets with a service account or a user login",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -38,8 +38,8 @@
     "smoke": "bun scripts/smoke.ts"
   },
   "dependencies": {
-    "@openvireo/connect": "0.2.0",
-    "@openvireo/sdk": "0.2.0"
+    "@openvireo/connect": "0.3.0",
+    "@openvireo/sdk": "0.3.0"
   },
   "exports": {
     ".": {
