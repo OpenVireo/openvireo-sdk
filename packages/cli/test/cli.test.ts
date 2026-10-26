@@ -222,7 +222,7 @@ describe("openvireo vault / whoami / login", () => {
   it("prints usage and versions", async () => {
     expect((await openvireo(["help"])).stdout).toContain("openvireo run [--env-file .env.tpl]");
     expect((await openvireo([])).code).toBe(2);
-    expect((await openvireo(["version"])).stdout).toBe("openvireo 0.1.0\n");
+    expect((await openvireo(["version"])).stdout).toBe("openvireo 0.2.0\n");
     expect((await openvireo(["frobnicate"])).stderr).toBe('openvireo: unknown command "frobnicate" (see openvireo help)\n');
     const tok = await openvireo(["connect", "token", "--name", "ci"]);
     expect(tok.stdout).toMatch(/^ov_ct_/);
