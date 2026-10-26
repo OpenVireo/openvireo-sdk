@@ -6,3 +6,6 @@ coverage/
 
 # The GitHub Action runs its committed bundle
 !packages/github-action/dist/
+
+# The API reference, built by npm run docs:api
+docs-api/

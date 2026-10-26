@@ -1,3 +1,8 @@
+/**
+ * Secret Key, AUK, wrap and seal envelopes, keysets, fingerprints, vault names and tokens (SPEC §2–§9).
+ *
+ * @module @openvireo/sdk/crypto
+ */
 export * from "./secret-key.js";
 export * from "./argon2.js";
 export * from "./auk.js";
