@@ -9,15 +9,40 @@ npm workspace for the OpenVireo accounts/sharing client code. OpenVireo is a for
 | [`packages/connect`](packages/connect/README.md) | `ov connect`: REST server holding one service account token; `deploy/` has ESO webhook manifests and Helm values |
 | [`packages/github-action`](packages/github-action/README.md) | JavaScript action that loads secrets into a job and masks them (`action.yml`, bundled `dist/`) |
 
+**Documentation** is in [`docs/`](docs/index.md) and on [openvireo.com/docs/sdk](https://openvireo.com/docs/sdk/):
+concepts, guides, errors, the CLI, connect and the GitHub Action.
+
 ```sh
 npm install
-npm run typecheck && npm test && npm run build    # every package, the SDK first
-npm run build:binary -w @openvireo/cli            # packages/cli/dist/openvireo (needs Bun)
+npm run typecheck && npm test && npm run build    # every package, the SDK first, then the docs' code samples
+npm run build:binary -w @openvireo/cli            # packages/cli/dist/ov (needs Bun)
 npm run smoke -w @openvireo/cli                   # runs that binary against in-memory servers over HTTP
+npm run docs:api                                  # the API reference (TypeDoc) in docs-api/
 ```
 
 The CLI, connect and the action type-check and test against the SDK's sources (tsconfig `paths` and
 vitest aliases), and share the in-memory servers in `packages/sdk/test/helpers/world.ts`.
+
+## Docs
+
+`docs/` is Markdown that openvireo.com publishes from a release tag (the site's `npm run docs:dev`). Keep
+links between pages relative so they work on GitHub and on the site. `npm run typecheck` also type-checks
+every ` ```ts ` block in `docs/` and the package READMEs against the SDK's sources
+(`scripts/check-doc-samples.mjs`). A sample may use names it doesn't declare; to check it fully, declare
+them in an HTML comment right before the block, which neither GitHub nor the site shows:
+
+````md
+<!-- prelude
+import type { Account } from "@openvireo/sdk";
+declare const account: Account;
+-->
+```ts
+await account.listVaults();
+```
+````
+
+`<!-- no-check -->` before a block skips it. A user-visible change belongs in the same pull request as its
+docs.
 
 ## Releasing
 
