@@ -1,6 +1,6 @@
 {
   "name": "@openvireo/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "OpenVireo accounts, vault sync and sharing SDK (ov v1) for browsers, Node and Bun",
   "license": "MIT OR Apache-2.0",
   "repository": {

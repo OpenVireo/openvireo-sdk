@@ -83,7 +83,7 @@ export interface RunningConnect {
 
 /** Exchanges the SA token and starts listening. */
 export async function startConnect(config: ConnectConfig, opts: { fetch?: FetchLike; log?: (line: string) => void } = {}): Promise<RunningConnect> {
-  const sa = await ServiceAccount.fromToken(config.saToken, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-connect/0.2.0" } });
+  const sa = await ServiceAccount.fromToken(config.saToken, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-connect/0.3.0" } });
   const handler = createConnectHandler({ source: sa, tokens: config.tokens, cacheTtlMs: config.cacheTtlMs, log: opts.log });
   const listener = toNodeListener(handler);
   const server = config.tls ? createHttpsServer({ cert: readFileSync(config.tls.cert), key: readFileSync(config.tls.key) }, listener) : createServer(listener);

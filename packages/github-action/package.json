@@ -1,6 +1,6 @@
 {
   "name": "@openvireo/github-action",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "GitHub Action: load OpenVireo vault secrets into the environment with an OpenVireo service account, masked",
   "license": "MIT OR Apache-2.0",
@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@openvireo/cli": "0.2.0",
-    "@openvireo/sdk": "0.2.0"
+    "@openvireo/cli": "0.3.0",
+    "@openvireo/sdk": "0.3.0"
   }
 }

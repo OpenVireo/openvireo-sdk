@@ -16056,7 +16056,8 @@ var OpenVireoError = class extends Error {
   name = "OpenVireoError";
   /**
    * Extra data some codes carry, camelCased: `recovery_not_ready` has `notBefore` (RFC 3339, when the
-   * reset link starts working).
+   * reset link starts working); `plan_limit` has `limit`, `max`, `current`, `plan` and `upgradeUrl`
+   * (where to change plan); `quota_exceeded` has `max` (the vault's size limit in bytes).
    */
   details;
 };
@@ -18822,11 +18823,16 @@ var HttpError = class extends OpenVireoError {
 function errorDetails(code, body) {
   const b = body;
   if (code === "recovery_not_ready" && typeof b?.not_before === "string") return { notBefore: b.not_before };
+  if (code === "plan_limit" && b) {
+    return { limit: b.limit, max: b.max, current: b.current, plan: b.plan, upgradeUrl: b.upgrade_url };
+  }
+  if (code === "quota_exceeded" && typeof b?.max === "number") return { max: b.max };
   return void 0;
 }
 var codeForStatus = (status) => ({
   400: "invalid_request",
   401: "unauthorized",
+  402: "plan_limit",
   403: "forbidden",
   404: "not_found",
   409: "conflict",
@@ -20349,7 +20355,7 @@ function serviceAccountSource(sa) {
 }
 
 // ../cli/src/session.ts
-var VERSION2 = "0.2.0";
+var VERSION2 = "0.3.0";
 
 // ../cli/src/template.ts
 var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
@@ -20461,7 +20467,7 @@ async function run(io, opts = {}) {
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.2.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.3.0" } });
     const src = serviceAccountSource(sa);
     const resolved = [];
     try {

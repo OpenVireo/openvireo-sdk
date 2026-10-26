@@ -11,7 +11,7 @@ import { FileStorage } from "@openvireo/sdk/storage/node";
 import { type VaultSource, serviceAccountSource, userSource } from "./source.js";
 
 export const DEFAULT_ISSUER = "https://accounts.openvireo.com";
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 
 export interface Prompt {
   (question: string, opts?: { hidden?: boolean }): Promise<string>;
