@@ -1,0 +1,29 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "@openvireo/sdk",
+  "entryPoints": [
+    "packages/sdk/src/index.ts",
+    "packages/sdk/src/crypto/index.ts",
+    "packages/sdk/src/opaque/index.ts",
+    "packages/sdk/src/auth/index.ts",
+    "packages/sdk/src/auth/storage-node.ts",
+    "packages/sdk/src/sync/index.ts",
+    "packages/sdk/src/vault/index.ts",
+    "packages/sdk/src/merge/index.ts",
+    "packages/sdk/src/testing/index.ts"
+  ],
+  "tsconfig": "packages/sdk/tsconfig.json",
+  "out": "docs-api",
+  "readme": "none",
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "includeVersion": true,
+  "sourceLinkTemplate": "https://github.com/openvireo/openvireo-sdk/blob/{gitRevision}/{path}#L{line}",
+  "validation": {
+    "notExported": false,
+    "invalidLink": true,
+    "notDocumented": false
+  },
+  "excludeExternals": true
+}

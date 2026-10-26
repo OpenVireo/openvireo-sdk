@@ -1,4 +1,8 @@
-/** @openvireo/sdk: OpenVireo accounts, vault sync and sharing (ov v1). Subpaths: crypto, opaque, auth, sync, vault, merge. */
+/**
+ * @openvireo/sdk: OpenVireo accounts, vault sync and sharing (ov v1). Subpaths: crypto, opaque, auth, sync, vault, merge.
+ *
+ * @module @openvireo/sdk
+ */
 export * from "./errors.js";
 export * as crypto from "./crypto/index.js";
 export * from "./crypto/index.js";

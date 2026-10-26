@@ -1,4 +1,8 @@
-/** File storage for Node/Bun (CLI, connect): one JSON file, written atomically with mode 0600. */
+/**
+ * File storage for Node/Bun (CLI, connect): one JSON file, written atomically with mode 0600.
+ *
+ * @module @openvireo/sdk/storage/node
+ */
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { KeyValueStorage } from "./storage.js";
