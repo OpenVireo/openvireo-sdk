@@ -1,11 +1,20 @@
-# Structure merge: required behaviour
+# Merge behaviour
+
+When two devices change the same vault, a sync combines both sets of changes instead of keeping one
+and losing the other. It first merges each entry edited on both sides field by field, against the last
+version both had (the base copy): a field only one side changed takes that side's value, and a field
+both changed takes the newer one and is reported in `SyncResult.conflicts`. Then it merges the
+structure (entries and groups added, moved or deleted), as specified below. Most apps only need this
+paragraph; the rest is the exact specification.
+
+## Structure merge: required behaviour
 
 `mergeInto(source, target, mode)` brings one database's changes into another. Sync runs it twice
 (local → remote, then remote → local) after the field-by-field step (`combineEntries`), so both
 copies end up equal. The OpenVireo Qt client syncs the same files, so the observable result must
-match what it produces; `test/fixtures/merge-fixtures/` holds results recorded from the Qt client.
+match what it produces; `packages/sdk/test/fixtures/merge-fixtures/` holds results recorded from the Qt client.
 
-This document is the specification `src/merge/tree.ts` is written from. It describes outcomes only.
+This document is the specification `packages/sdk/src/merge/tree.ts` is written from. It describes outcomes only.
 
 ## Terms
 
