@@ -20349,7 +20349,7 @@ function serviceAccountSource(sa) {
 }
 
 // ../cli/src/session.ts
-var VERSION2 = "0.1.0";
+var VERSION2 = "0.2.0";
 
 // ../cli/src/template.ts
 var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
@@ -20461,7 +20461,7 @@ async function run(io, opts = {}) {
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.1.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.2.0" } });
     const src = serviceAccountSource(sa);
     const resolved = [];
     try {
