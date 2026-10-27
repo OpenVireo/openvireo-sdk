@@ -7,7 +7,7 @@
 #   scripts/build-binaries.sh --pack-only <dir> [out-dir]  # pack those dirs (default: into <dir>)
 #
 # gives ov-<version>-<platform>.tar.gz (.zip for Windows) and openvireo-connect-<version>-<platform>…
-# The release signs the executables between the two stages (scripts/sign-macos.sh, Artifact Signing), so
+# The release signs the executables between the two stages (scripts/macos/sign.sh, Artifact Signing), so
 # that the archives and SHA256SUMS hold the signed files.
 # Compiling builds the SDK and connect first, since Bun resolves @openvireo/sdk through the workspace's dist/.
 set -euo pipefail
