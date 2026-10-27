@@ -25,7 +25,7 @@ export interface CliIo {
 
 export const USAGE = `ov ${VERSION}: OpenVireo vault secrets for scripts, CI and servers
 
-Usage: (also installed as \`ov\`)
+Usage:
   ov read <ov://vault/[group/…]entry/field> [-n] [-o file]
   ov inject [-i template] [-o file]          replace ov:// references ({{ ov://… }} or bare)
   ov run [--env-file .env.tpl]… [--no-masking] -- <command> [args…]

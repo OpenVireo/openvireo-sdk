@@ -9,3 +9,6 @@ coverage/
 
 # The API reference, built by npm run docs:api
 docs-api/
+
+# The release binaries, built by scripts/build-binaries.sh
+dist-binaries/
