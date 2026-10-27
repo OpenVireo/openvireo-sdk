@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { ServiceAccount } from "@openvireo/sdk";
 import { type World, editBetweenGetAndPut, makeWorld } from "../../sdk/test/helpers/world.js";
-import { type ConnectToken, configFromEnv, connectMain, createConnectHandler, hashConnectToken, newConnectToken, parseConnectTokens, startConnect } from "../src/index.js";
+import { readFileSync } from "node:fs";
+import { type ConnectToken, VERSION, configFromEnv, connectMain, createConnectHandler, hashConnectToken, newConnectToken, parseConnectTokens, startConnect } from "../src/index.js";
 
 let w: World;
 let readSa: ServiceAccount;
@@ -169,5 +170,28 @@ describe("connect configuration", () => {
     const entry = JSON.parse(err.trim().split("\n").at(-1)!);
     expect(entry).toEqual({ name: "eso", sha256: hashConnectToken(token), vaults: ["Team Infra"], access: "write" });
     expect(err).not.toContain(token);
+  });
+
+  it("names itself as the program it runs as (openvireo-connect, or ov connect from the CLI)", async () => {
+    const run = async (argv: string[], prog?: string, env: Record<string, string> = {}) => {
+      let out = "";
+      let err = "";
+      const code = await connectMain(argv, { prog, env, fetch: w.fetch, stdout: (s) => (out += s), stderr: (s) => (err += s), stopSignal: Promise.resolve() });
+      return { code, out, err };
+    };
+    const help = await run(["--help"]);
+    expect([help.code, help.out]).toEqual([0, expect.stringContaining("  openvireo-connect token [--name N]")]);
+    expect(help.out).not.toContain("ov connect");
+    expect((await run(["help"], "ov connect")).out).toContain("  ov connect [serve] ");
+    expect(await run(["--version"])).toEqual({ code: 0, out: `openvireo-connect ${VERSION}\n`, err: "" });
+    expect((await run(["version"], "ov connect")).out).toBe(`ov connect ${VERSION}\n`);
+    expect(VERSION).toBe(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
+    const bad = await run(["frobnicate"]);
+    expect([bad.code, bad.err]).toEqual([2, expect.stringMatching(/^Usage:\n  openvireo-connect \[serve\]/)]);
+
+    const { entry } = newConnectToken({ name: "eso" });
+    const env = { OPENVIREO_SERVICE_ACCOUNT_TOKEN: w.readToken, OPENVIREO_CONNECT_TOKENS: JSON.stringify([entry]), OPENVIREO_CONNECT_PORT: "0" };
+    expect((await run([], undefined, env)).err).toMatch(/^openvireo-connect listening on http:\/\/127\.0\.0\.1:\d+ \(1 token\)\n$/);
+    expect((await run(["serve"], "ov connect", env)).err).toMatch(/^ov connect listening on /);
   });
 });

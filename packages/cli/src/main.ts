@@ -216,7 +216,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return 0;
 
       case "connect":
-        return await connectMain(rest, { env: io.env, stdout: out, stderr: err, fetch: io.fetch, stopSignal: io.stopSignal });
+        return await connectMain(rest, { prog: "ov connect", env: io.env, stdout: out, stderr: err, fetch: io.fetch, stopSignal: io.stopSignal });
 
       default:
         throw new UsageError(`unknown command "${cmd}" (see ov help)`);

@@ -27,7 +27,9 @@ curl -H "Authorization: Bearer $(cat eso.token)" \
 # {"value":"…"}
 ```
 
-`ov connect` is the same as `openvireo-connect serve` (this package's bin, `node dist/bin.js`).
+`ov connect` is the same as `openvireo-connect serve` (this package's bin, `node dist/bin.js`), and
+`ov connect token` as `openvireo-connect token`; run as `openvireo-connect`, the usage, errors and the
+`listening on` line name it that way, and `openvireo-connect --version` prints its version.
 Each [release](https://github.com/OpenVireo/openvireo-sdk/releases) also has `openvireo-connect` as a
 single binary (`openvireo-connect-<version>-<platform>.tar.gz`, `.zip` for Windows), installed the same
 way as [`ov`](cli.md#install), for a server without Node or the full CLI.

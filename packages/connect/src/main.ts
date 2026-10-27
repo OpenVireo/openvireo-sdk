@@ -1,10 +1,12 @@
-/** `ov connect [serve]` and `ov connect token`: shared by the openvireo-connect bin and the openvireo CLI. */
+/** `[serve]`, `token` and `version`: shared by the openvireo-connect bin and `ov connect` in the CLI. */
 import { parseArgs } from "node:util";
 import { OpenVireoError, type FetchLike } from "@openvireo/sdk";
-import { configFromEnv, startConnect } from "./server.js";
+import { VERSION, configFromEnv, startConnect } from "./server.js";
 import { newConnectToken } from "./tokens.js";
 
 export interface ConnectIo {
+  /** how the usage and log lines name the program (default `openvireo-connect`; the CLI passes `ov connect`) */
+  prog?: string;
   env: Record<string, string | undefined>;
   stdout: (s: string) => void;
   stderr: (s: string) => void;
@@ -13,11 +15,20 @@ export interface ConnectIo {
   stopSignal?: Promise<void>;
 }
 
-export const CONNECT_USAGE = `Usage:
-  ov connect [serve]                      run the REST server (configured by environment, see README)
-  ov connect token [--name N] [--vault V]... [--write]
-                                           create a bearer token; prints it and its config entry
-`;
+/** The usage text, naming the program as it was run (`openvireo-connect` or `ov connect`). */
+export function connectUsage(prog = "openvireo-connect"): string {
+  const col = " ".repeat(prog.length + 15);
+  const row = (cmd: string, what: string) => `  ${`${prog} ${cmd}`.padEnd(col.length - 2)}${what}\n`;
+  return (
+    "Usage:\n" +
+    row("[serve]", "run the REST server (configured by environment, see README)") +
+    `  ${prog} token [--name N] [--vault V]... [--write]\n${col}create a bearer token; prints it and its config entry\n` +
+    row("version", "print the version")
+  );
+}
+
+/** @deprecated the usage as `ov connect`; use connectUsage(prog) */
+export const CONNECT_USAGE = connectUsage("ov connect");
 
 const untilSignal = () =>
   new Promise<void>((resolve) => {
@@ -26,9 +37,14 @@ const untilSignal = () =>
   });
 
 export async function connectMain(argv: string[], io: ConnectIo): Promise<number> {
+  const prog = io.prog ?? "openvireo-connect";
   const [cmd = "serve", ...rest] = argv;
   if (cmd === "-h" || cmd === "--help" || cmd === "help") {
-    io.stdout(CONNECT_USAGE);
+    io.stdout(connectUsage(prog));
+    return 0;
+  }
+  if (cmd === "version" || cmd === "--version") {
+    io.stdout(`${prog} ${VERSION}\n`);
     return 0;
   }
   if (cmd === "token") {
@@ -39,13 +55,13 @@ export async function connectMain(argv: string[], io: ConnectIo): Promise<number
     return 0;
   }
   if (cmd !== "serve") {
-    io.stderr(CONNECT_USAGE);
+    io.stderr(connectUsage(prog));
     return 2;
   }
   if (rest.length) throw new OpenVireoError("invalid_request", `unexpected arguments: ${rest.join(" ")}`);
   const config = configFromEnv(io.env);
   const running = await startConnect(config, { fetch: io.fetch, log: (l) => io.stderr(`${new Date().toISOString()} ${l}\n`) });
-  io.stderr(`ov connect listening on ${running.url} (${config.tokens.length} token${config.tokens.length === 1 ? "" : "s"})\n`);
+  io.stderr(`${prog} listening on ${running.url} (${config.tokens.length} token${config.tokens.length === 1 ? "" : "s"})\n`);
   await (io.stopSignal ?? untilSignal());
   await running.close();
   return 0;

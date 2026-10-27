@@ -20319,6 +20319,15 @@ import { createServer as createHttpsServer } from "https";
 
 // ../connect/src/main.ts
 import { parseArgs } from "util";
+function connectUsage(prog = "openvireo-connect") {
+  const col = " ".repeat(prog.length + 15);
+  const row = (cmd, what) => `  ${`${prog} ${cmd}`.padEnd(col.length - 2)}${what}
+`;
+  return "Usage:\n" + row("[serve]", "run the REST server (configured by environment, see README)") + `  ${prog} token [--name N] [--vault V]... [--write]
+${col}create a bearer token; prints it and its config entry
+` + row("version", "print the version");
+}
+var CONNECT_USAGE = connectUsage("ov connect");
 
 // ../cli/src/mask.ts
 var enc = new TextEncoder();
@@ -20355,7 +20364,7 @@ function serviceAccountSource(sa) {
 }
 
 // ../cli/src/session.ts
-var VERSION2 = "0.3.0";
+var VERSION3 = "0.3.0";
 
 // ../cli/src/template.ts
 var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
@@ -20376,9 +20385,9 @@ async function resolveTemplate(src, text) {
 }
 
 // ../cli/src/main.ts
-var USAGE = `ov ${VERSION2}: OpenVireo vault secrets for scripts, CI and servers
+var USAGE = `ov ${VERSION3}: OpenVireo vault secrets for scripts, CI and servers
 
-Usage: (also installed as \`ov\`)
+Usage:
   ov read <ov://vault/[group/\u2026]entry/field> [-n] [-o file]
   ov inject [-i template] [-o file]          replace ov:// references ({{ ov://\u2026 }} or bare)
   ov run [--env-file .env.tpl]\u2026 [--no-masking] -- <command> [args\u2026]

@@ -1,4 +1,4 @@
-# @openvireo/connect: `ov connect`
+# @openvireo/connect: `openvireo-connect` / `ov connect`
 
 A small self-hosted REST server that holds **one service account token** and gives any language
 HTTP access to the vaults that service account can open, with its own scoped bearer tokens. It plugs into
@@ -10,6 +10,9 @@ OPENVIREO_SERVICE_ACCOUNT_TOKEN=ov_sa_… OPENVIREO_CONNECT_TOKENS="[$(tail -1 e
 curl -H "Authorization: Bearer $(cat app.token)" \
   "http://127.0.0.1:8080/v1/vaults/Team%20Infra/items/Deploy/Database?field=password"
 ```
+
+This package's own bin is `openvireo-connect` (`openvireo-connect [serve]`, `openvireo-connect token …`,
+`openvireo-connect --version`); `ov connect` is the same server inside the CLI.
 
 **Documentation:** [docs/connect.md](../../docs/connect.md), also on
 [openvireo.com/docs/sdk/connect](https://openvireo.com/docs/sdk/connect/).
