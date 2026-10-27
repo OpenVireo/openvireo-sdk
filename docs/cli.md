@@ -14,7 +14,25 @@ npm install -g @openvireo/cli
 ov version
 ```
 
-Prebuilt single binaries aren't published yet; [build one](#single-binary) to run `ov` without Node.
+Or, without Node: each [release](https://github.com/OpenVireo/openvireo-sdk/releases) has `ov` as a single binary for
+Linux (x64, arm64), macOS (x64, arm64) and Windows (x64), with a `SHA256SUMS` file:
+
+```sh
+v=VERSION p=linux-x64    # VERSION: the release without the v, e.g. 0.4.0; p: linux-arm64 | darwin-x64 | darwin-arm64 (windows-x64 is a .zip)
+curl -LO "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v/ov-$v-$p.tar.gz"
+curl -LO "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v/SHA256SUMS"
+sha256sum --ignore-missing -c SHA256SUMS      # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
+tar -xzf "ov-$v-$p.tar.gz" && sudo install "ov-$v-$p/ov" /usr/local/bin/
+ov version
+```
+
+The binaries are not signed yet. On macOS a binary downloaded with a browser is quarantined; remove that with
+`xattr -d com.apple.quarantine ov` (curl doesn't set it). Windows SmartScreen may warn before the first run.
+
+The binary is ~60 MB (the Bun runtime) and includes the SDK's OPAQUE WASM module, so login works
+without Node.
+
+To build one yourself, see [Single binary](#single-binary).
 
 ## References
 
@@ -91,10 +109,7 @@ environment for non-interactive use; prefer a service account for automation.
 
 ```sh
 npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/ov
-./packages/cli/dist/ov version             # ov 0.2.0
+./packages/cli/dist/ov version             # ov 0.3.0
 npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP
-# cross-compile: add --target=bun-linux-x64 | bun-linux-arm64 | bun-darwin-arm64 | bun-windows-x64
+scripts/build-binaries.sh                  # every release platform, both binaries, archives and SHA256SUMS in dist-binaries/
 ```
-
-The binary is ~60 MB (the Bun runtime) and includes the SDK's OPAQUE WASM module, so login works
-without Node. `npm run build` also produces `dist/bin.js` for Node ≥ 20 (`node dist/bin.js`).

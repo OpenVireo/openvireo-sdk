@@ -14,6 +14,9 @@ ov run --env-file .env.tpl -- ./migrate.sh     # references resolved in the envi
 
 ## Single binary
 
+Each [release](https://github.com/OpenVireo/openvireo-sdk/releases) has `ov` binaries for Linux, macOS
+and Windows; see [Install](../../docs/cli.md#install). To build one:
+
 ```sh
 npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/ov
 npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP

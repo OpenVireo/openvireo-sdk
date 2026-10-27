@@ -1,4 +1,6 @@
-# Publishes @openvireo/sdk, @openvireo/connect and @openvireo/cli when a vX.Y.Z tag is pushed.
+# Publishes @openvireo/sdk, @openvireo/connect and @openvireo/cli when a vX.Y.Z tag is pushed, and creates
+# the GitHub release with single binaries of `ov` and `openvireo-connect` (scripts/build-binaries.sh) for
+# Linux x64/arm64, macOS x64/arm64 and Windows x64, plus SHA256SUMS. The binaries are not signed yet.
 #
 # GitHub Packages: always, with the workflow's GITHUB_TOKEN.
 # npmjs.com: only when the repository variable NPMJS_PUBLISH is "true". Authenticates with npm
@@ -48,6 +50,63 @@ jobs:
         with:
           name: tarballs
           path: tarballs/*.tgz
+
+  binaries:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10 # the same as packages/connect/Dockerfile
+      - run: npm ci
+      - run: scripts/build-binaries.sh binaries
+      - name: Smoke-test the Linux x64 binary
+        run: |
+          tar -xzf binaries/ov-*-linux-x64.tar.gz -C "$RUNNER_TEMP"
+          timeout 300 bun packages/cli/scripts/smoke.ts "$(ls "$RUNNER_TEMP"/ov-*-linux-x64/ov)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: binaries/*
+          if-no-files-found: error
+
+  # Runs each binary on its own platform (the smoke test above covers the behaviour)
+  verify-binaries:
+    needs: binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm }
+          - { platform: darwin-x64, runner: macos-15-intel }
+          - { platform: darwin-arm64, runner: macos-15 }
+          - { platform: windows-x64, runner: windows-2025 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+      - name: Unpack
+        shell: bash
+        run: |
+          mkdir out
+          if [[ "$PLATFORM" == windows-* ]]; then
+            for z in *-"$PLATFORM".zip; do pwsh -Command "Expand-Archive -Path '$z' -DestinationPath out"; done
+          else
+            for t in *-"$PLATFORM".tar.gz; do tar -xzf "$t" -C out; done
+          fi
+        env:
+          PLATFORM: ${{ matrix.platform }}
+      - name: Run
+        shell: bash
+        run: |
+          out/ov-*/ov version
+          out/openvireo-connect-*/openvireo-connect token --name ci > /dev/null
 
   github-packages:
     needs: build
@@ -109,3 +168,39 @@ jobs:
               npm publish "$tgz" --provenance --access public
             fi
           done
+
+  github-release:
+    needs: [binaries, verify-binaries]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: binaries
+      - name: Create the release, or replace the binaries on a re-run
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" binaries/* --repo "$GITHUB_REPOSITORY" --clobber
+            exit 0
+          fi
+          args=(--repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --verify-tag --generate-notes)
+          if [[ "$version" == *-* ]]; then args+=(--prerelease); fi
+          cat > notes.md <<EOF
+          Single binaries of \`ov\` and \`openvireo-connect\` (not signed yet). On Linux and macOS:
+
+          \`\`\`sh
+          curl -LO https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/ov-$version-linux-x64.tar.gz
+          curl -LO https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/SHA256SUMS
+          sha256sum --ignore-missing -c SHA256SUMS
+          tar -xzf ov-$version-linux-x64.tar.gz && sudo install ov-$version-linux-x64/ov /usr/local/bin/
+          \`\`\`
+
+          The npm packages are \`@openvireo/sdk\`, \`@openvireo/connect\` and \`@openvireo/cli\` $version.
+          EOF
+          gh release create "$GITHUB_REF_NAME" "${args[@]}" --notes-file notes.md binaries/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
