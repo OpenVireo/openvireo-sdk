@@ -31,9 +31,6 @@ ov version
 
 ### Verifying the binaries
 
-Releases with a `SHA256SUMS.asc` have signed binaries; earlier ones (0.3.0 and before) are not signed, and
-on macOS need `xattr -d com.apple.quarantine ov` when downloaded with a browser.
-
 `SHA256SUMS.asc` is signed with the OpenVireo release key, the same one as the desktop app's releases:
 fingerprint `23F6 403E 9392 E946 475E 7FD3 B556 83A4 3E98 C11C`, from
 [openvireo.com/openvireo-release.asc](https://openvireo.com/openvireo-release.asc) or keys.openpgp.org
