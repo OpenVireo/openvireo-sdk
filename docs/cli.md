@@ -15,19 +15,50 @@ ov version
 ```
 
 Or, without Node: each [release](https://github.com/OpenVireo/openvireo-sdk/releases) has `ov` as a single binary for
-Linux (x64, arm64), macOS (x64, arm64) and Windows (x64), with a `SHA256SUMS` file:
+Linux (x64, arm64), macOS (x64, arm64) and Windows (x64), with a `SHA256SUMS` file and its GPG signature
+`SHA256SUMS.asc`:
 
 ```sh
 v=VERSION p=linux-x64    # VERSION: the release without the v, e.g. 0.4.0; p: linux-arm64 | darwin-x64 | darwin-arm64 (windows-x64 is a .zip)
-curl -LO "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v/ov-$v-$p.tar.gz"
-curl -LO "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v/SHA256SUMS"
+for f in "ov-$v-$p.tar.gz" SHA256SUMS SHA256SUMS.asc; do
+  curl -fLO "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v/$f"
+done
+gpg --verify SHA256SUMS.asc SHA256SUMS        # see Verifying the binaries
 sha256sum --ignore-missing -c SHA256SUMS      # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
 tar -xzf "ov-$v-$p.tar.gz" && sudo install "ov-$v-$p/ov" /usr/local/bin/
 ov version
 ```
 
-The binaries are not signed yet. On macOS a binary downloaded with a browser is quarantined; remove that with
-`xattr -d com.apple.quarantine ov` (curl doesn't set it). Windows SmartScreen may warn before the first run.
+### Verifying the binaries
+
+Releases with a `SHA256SUMS.asc` have signed binaries; earlier ones (0.3.0 and before) are not signed, and
+on macOS need `xattr -d com.apple.quarantine ov` when downloaded with a browser.
+
+`SHA256SUMS.asc` is signed with the OpenVireo release key, the same one as the desktop app's releases:
+fingerprint `23F6 403E 9392 E946 475E 7FD3 B556 83A4 3E98 C11C`, from
+[openvireo.com/openvireo-release.asc](https://openvireo.com/openvireo-release.asc) or keys.openpgp.org
+(see [Verifying Signatures](https://openvireo.com/verifying-signatures)):
+
+```sh
+curl -sSL https://openvireo.com/openvireo-release.asc | gpg --import
+gpg --verify SHA256SUMS.asc SHA256SUMS        # "Good signature", and the primary key fingerprint above
+```
+
+The macOS binaries are signed with OpenVireo's Developer ID (team `DP5U2UP42V`) and notarized by Apple, so
+Gatekeeper runs them even when downloaded with a browser. A bare executable can't carry its notarization
+ticket, so the first run checks it online. To check by hand:
+
+```sh
+codesign --verify --strict --verbose=2 ov     # valid on disk, satisfies its Designated Requirement
+codesign -dv ov 2>&1 | grep TeamIdentifier    # TeamIdentifier=DP5U2UP42V
+spctl --assess --type install -vv ov          # accepted, source=Notarized Developer ID
+```
+
+The Windows binaries are signed with Azure Artifact Signing, the same publisher as the desktop app's installers:
+
+```powershell
+Get-AuthenticodeSignature .\ov.exe | Format-List Status, SignerCertificate, TimeStamperCertificate   # Status: Valid
+```
 
 The binary is ~60 MB (the Bun runtime) and includes the SDK's OPAQUE WASM module, so login works
 without Node.
@@ -112,4 +143,7 @@ npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bu
 ./packages/cli/dist/ov version             # ov 0.3.0
 npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP
 scripts/build-binaries.sh                  # every release platform, both binaries, archives and SHA256SUMS in dist-binaries/
+scripts/build-binaries.sh --compile-only dist-binaries   # the same in two stages, signing in between (as the release does):
+scripts/macos/sign.sh dist-binaries [identity]           # macOS: hardened runtime + JIT entitlement; ad hoc without an identity
+scripts/build-binaries.sh --pack-only dist-binaries      # archives and SHA256SUMS next to them
 ```

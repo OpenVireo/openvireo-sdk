@@ -54,6 +54,9 @@ cross-package pins in step), commit, then push a matching tag: `git tag v0.1.0 &
 - **npmjs.com**, once the repository variable `NPMJS_PUBLISH` is `true`. The first publish needs an
   `NPM_TOKEN` secret (a granular token that can publish `@openvireo/*`); after it, add this repo and
   `release.yml` as a trusted publisher for each package on npmjs.com and delete the secret.
+- **GitHub Releases**: the `ov` and `openvireo-connect` binaries, signed (macOS: notarized Developer ID,
+  Windows: Azure Artifact Signing) with a GPG-signed `SHA256SUMS`. A tag fails to release if signing isn't
+  set up; see [.github/RELEASE-SIGNING.md](.github/RELEASE-SIGNING.md).
 
 Installing from GitHub Packages needs a token with `read:packages`, even for public packages:
 
