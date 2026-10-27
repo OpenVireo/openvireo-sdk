@@ -32,7 +32,9 @@ curl -H "Authorization: Bearer $(cat eso.token)" \
 `listening on` line name it that way, and `openvireo-connect --version` prints its version.
 Each [release](https://github.com/OpenVireo/openvireo-sdk/releases) also has `openvireo-connect` as a
 single binary (`openvireo-connect-<version>-<platform>.tar.gz`, `.zip` for Windows), installed the same
-way as [`ov`](cli.md#install), for a server without Node or the full CLI.
+way as [`ov`](cli.md#install), for a server without Node or the full CLI. It's signed the same way too: the
+macOS binaries with a notarized Developer ID, the Windows one with Azure Artifact Signing, and the checksums
+with the OpenVireo release key; see [Verifying the binaries](cli.md#verifying-the-binaries).
 
 | Variable | Default | |
 |---|---|---|
