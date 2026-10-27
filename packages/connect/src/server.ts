@@ -6,6 +6,9 @@ import { OpenVireoError, ServiceAccount, type FetchLike } from "@openvireo/sdk";
 import { type Handler, createConnectHandler } from "./handler.js";
 import { type ConnectToken, hashConnectToken, parseConnectTokens } from "./tokens.js";
 
+/** this package's version: `openvireo-connect --version` and the User-Agent */
+export const VERSION = "0.3.0";
+
 /** Bridges node:http to a fetch-style handler. */
 export function toNodeListener(handler: Handler) {
   return (req: IncomingMessage, res: ServerResponse) => {
@@ -64,7 +67,7 @@ export function configFromEnv(env: Record<string, string | undefined>): ConnectC
     const access = env.OPENVIREO_CONNECT_TOKEN_ACCESS === "write" ? "write" : "read";
     tokens.push({ name: "default", sha256: hashConnectToken(single), vaults: ["*"], access });
   }
-  if (!tokens.length) throw new OpenVireoError("invalid_request", "no connect tokens: set OPENVIREO_CONNECT_TOKENS_FILE or OPENVIREO_CONNECT_TOKEN (create one with `ov connect token`)");
+  if (!tokens.length) throw new OpenVireoError("invalid_request", "no connect tokens: set OPENVIREO_CONNECT_TOKENS_FILE or OPENVIREO_CONNECT_TOKEN (create one with `openvireo-connect token` or `ov connect token`)");
   const port = Number(env.OPENVIREO_CONNECT_PORT ?? 8080);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new OpenVireoError("invalid_request", `bad OPENVIREO_CONNECT_PORT: ${env.OPENVIREO_CONNECT_PORT}`);
   const ttl = Number(env.OPENVIREO_CONNECT_CACHE_TTL ?? 5);
@@ -83,7 +86,7 @@ export interface RunningConnect {
 
 /** Exchanges the SA token and starts listening. */
 export async function startConnect(config: ConnectConfig, opts: { fetch?: FetchLike; log?: (line: string) => void } = {}): Promise<RunningConnect> {
-  const sa = await ServiceAccount.fromToken(config.saToken, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-connect/0.3.0" } });
+  const sa = await ServiceAccount.fromToken(config.saToken, { fetch: opts.fetch, headers: { "User-Agent": `openvireo-connect/${VERSION}` } });
   const handler = createConnectHandler({ source: sa, tokens: config.tokens, cacheTtlMs: config.cacheTtlMs, log: opts.log });
   const listener = toNodeListener(handler);
   const server = config.tls ? createHttpsServer({ cert: readFileSync(config.tls.cert), key: readFileSync(config.tls.key) }, listener) : createServer(listener);

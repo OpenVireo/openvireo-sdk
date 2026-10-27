@@ -106,6 +106,7 @@ jobs:
         shell: bash
         run: |
           out/ov-*/ov version
+          out/openvireo-connect-*/openvireo-connect version
           out/openvireo-connect-*/openvireo-connect token --name ci > /dev/null
 
   github-packages:
