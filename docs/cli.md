@@ -137,7 +137,7 @@ environment for non-interactive use; prefer a service account for automation.
 
 ```sh
 npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/ov
-./packages/cli/dist/ov version             # ov 0.3.0
+./packages/cli/dist/ov version             # ov 0.3.1
 npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP
 scripts/build-binaries.sh                  # every release platform, both binaries, archives and SHA256SUMS in dist-binaries/
 scripts/build-binaries.sh --compile-only dist-binaries   # the same in two stages, signing in between (as the release does):
