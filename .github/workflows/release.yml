@@ -461,7 +461,7 @@ jobs:
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           # The OpenVireo release key (primary key); the secret holds its signing subkey
-          RELEASE_KEY: 23F6403E9392E946475E7FD3B55683A43E98C11C
+          RELEASE_KEY: FE2778BF074705E0994BBAF9FEBA35562DE104CB
         run: |
           if [ -z "$GPG_PRIVATE_KEY" ]; then
             echo "::error::GPG_PRIVATE_KEY is not set in the signing environment; see .github/RELEASE-SIGNING.md"
@@ -487,7 +487,7 @@ jobs:
           Single binaries of \`ov\` and \`openvireo-connect\`. The macOS ones are signed with a Developer ID and
           notarized, the Windows ones signed with Azure Artifact Signing, and \`SHA256SUMS.asc\` is a GPG signature of
           \`SHA256SUMS\` by the [OpenVireo release key](https://openvireo.com/verifying-signatures)
-          (\`23F6 403E 9392 E946 475E 7FD3 B556 83A4 3E98 C11C\`). On Linux and macOS:
+          (\`FE27 78BF 0747 05E0 994B BAF9 FEBA 3556 2DE1 04CB\`). On Linux and macOS:
 
           \`\`\`sh
           curl -LO https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/ov-$version-linux-x64.tar.gz
