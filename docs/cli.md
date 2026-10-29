@@ -32,7 +32,7 @@ ov version
 ### Verifying the binaries
 
 `SHA256SUMS.asc` is signed with the OpenVireo release key, the same one as the desktop app's releases:
-fingerprint `23F6 403E 9392 E946 475E 7FD3 B556 83A4 3E98 C11C`, from
+fingerprint `FE27 78BF 0747 05E0 994B BAF9 FEBA 3556 2DE1 04CB`, from
 [openvireo.com/openvireo-release.asc](https://openvireo.com/openvireo-release.asc) or keys.openpgp.org
 (see [Verifying Signatures](https://openvireo.com/verifying-signatures)):
 
