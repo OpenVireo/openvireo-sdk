@@ -22,7 +22,7 @@ import {
 
 type KdbxEntry = kdbxweb.KdbxEntry;
 
-export type { ChangeType, MergeChange, MergeMode } from "./tree.js";
+export type { ChangeType, MergeChange, MergeIntoOptions, MergeMode } from "./tree.js";
 export { findEntryByUuid, mergeInto } from "./tree.js";
 
 export interface MergeOptions {

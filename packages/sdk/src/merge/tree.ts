@@ -19,6 +19,13 @@ export interface MergeChange {
 }
 export type MergeMode = "keep-newer" | "synchronize";
 
+export interface MergeIntoOptions {
+  /** Leave the target's database custom data alone (desktop's Merger::setSkipDatabaseCustomData) */
+  skipDatabaseCustomData?: boolean;
+  /** UUIDs of source groups to leave out, with everything under them */
+  skipGroups?: ReadonlySet<string>;
+}
+
 export const entryTitle = (e: KdbxEntry): string => {
   const t = e.fields.get("Title");
   return t instanceof kdbxweb.ProtectedValue ? t.getText() : (t ?? "");
@@ -54,7 +61,7 @@ export function findEntryByUuid(db: Kdbx, id: string): KdbxEntry | undefined {
   return undefined;
 }
 
-function findGroup(db: Kdbx, id: string): KdbxGroup | undefined {
+export function findGroup(db: Kdbx, id: string): KdbxGroup | undefined {
   const root = db.getDefaultGroup();
   if (root.uuid.id === id) return root;
   for (const g of groupsUnder(root)) if (g.uuid.id === id) return g;
@@ -203,12 +210,15 @@ class Pass {
   constructor(
     private readonly from: Kdbx,
     private readonly into: Kdbx,
+    private readonly opts: MergeIntoOptions = {},
   ) {}
 
   /** §1: walks `src` (a group of `from`) into `dst` (its counterpart in `into`). */
   walk(src: KdbxGroup, dst: KdbxGroup): void {
     for (const entry of [...src.entries]) this.entry(entry, dst);
-    for (const child of [...src.groups]) this.walk(child, this.group(child, dst));
+    for (const child of [...src.groups]) {
+      if (!this.opts.skipGroups?.has(child.uuid.id)) this.walk(child, this.group(child, dst));
+    }
   }
 
   private static movedLater(src: { times: kdbxweb.KdbxTimes }, dst: { times: kdbxweb.KdbxTimes }): boolean {
@@ -353,6 +363,7 @@ class Pass {
       this.changes.push(record("metadata", null, `Adding new icon ${id}`));
       dst.customIcons.set(id, icon);
     }
+    if (this.opts.skipDatabaseCustomData) return;
     const dstTime = customDataTime(dst.customData);
     const srcTime = customDataTime(src.customData);
     const apply = !dst.customData.has("_LAST_MODIFIED") || (dstTime !== undefined && srcTime !== undefined && dstTime < srcTime);
@@ -385,8 +396,8 @@ function customDataTime(m: kdbxweb.KdbxCustomDataMap): number | undefined {
 }
 
 /** Brings `source`'s changes into `target` (docs/merge-behaviour.md). Returns what changed in `target`. */
-export function mergeInto(source: Kdbx, target: Kdbx, mode: MergeMode = "keep-newer"): MergeChange[] {
-  const pass = new Pass(source, target);
+export function mergeInto(source: Kdbx, target: Kdbx, mode: MergeMode = "keep-newer", opts: MergeIntoOptions = {}): MergeChange[] {
+  const pass = new Pass(source, target, opts);
   pass.walk(source.getDefaultGroup(), target.getDefaultGroup());
   if (mode === "synchronize") pass.deletions();
   pass.metadata();

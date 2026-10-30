@@ -26,3 +26,31 @@ try {
 - In an organisation, the vault is sealed to every confirmed owner and admin, like any new org vault.
 
 Tell the user the old file and the new vault are now separate: edits to one don't reach the other.
+
+## Importing into a vault you already have
+
+To bring a `.kdbx`'s entries into an existing vault (or any open database) instead, use `importInto` or
+`importAsCopies` from `@openvireo/sdk/merge` on `vault.db`, then `sync()` as after any other change:
+
+<!-- prelude
+import type { AccountVault } from "@openvireo/sdk";
+declare const vault: AccountVault, fileBytes: Uint8Array, password: string, groupUuid: string;
+-->
+```ts
+import { decryptKdbx } from "@openvireo/sdk";
+import { importAsCopies, importInto } from "@openvireo/sdk/merge";
+
+const { dbInstance: file } = await decryptKdbx(fileBytes, password);
+const { added, updated, unchanged } = importInto(file, vault.db!);
+// or: importAsCopies(file, vault.db!, groupUuid), with importTargets(vault.db!) listing the groups to offer
+await vault.sync();
+```
+
+- `importInto` merges by entry and group UUID and keeps the newer version of each entry (the older goes into
+  its history). It deletes nothing, so importing the same file twice changes nothing, and a file exported from
+  the vault earlier just updates it.
+- `importAsCopies` puts the file's tree, named after its root group, under the chosen group with fresh UUIDs
+  for every entry and group; references between the copied entries (`{REF:…@I:…}`) follow them. Importing
+  twice gives two copies.
+- Both leave out the file's recycle bin and its database custom data (sync server settings, browser keys), and
+  never change the vault's root group, which holds its name. The file itself is not changed.
