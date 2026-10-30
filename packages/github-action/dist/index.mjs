@@ -19613,15 +19613,18 @@ function mergeHistoryInto(kept, keptDb, other, otherDb) {
   return true;
 }
 var Pass = class _Pass {
-  constructor(from, into) {
+  constructor(from, into, opts = {}) {
     this.from = from;
     this.into = into;
+    this.opts = opts;
   }
   changes = [];
   /** §1: walks `src` (a group of `from`) into `dst` (its counterpart in `into`). */
   walk(src, dst) {
     for (const entry of [...src.entries]) this.entry(entry, dst);
-    for (const child of [...src.groups]) this.walk(child, this.group(child, dst));
+    for (const child of [...src.groups]) {
+      if (!this.opts.skipGroups?.has(child.uuid.id)) this.walk(child, this.group(child, dst));
+    }
   }
   static movedLater(src, dst) {
     return (dst.times.locationChanged?.getTime() ?? 0) < (src.times.locationChanged?.getTime() ?? 0);
@@ -19759,6 +19762,7 @@ var Pass = class _Pass {
       this.changes.push(record("metadata", null, `Adding new icon ${id}`));
       dst.customIcons.set(id, icon);
     }
+    if (this.opts.skipDatabaseCustomData) return;
     const dstTime = customDataTime(dst.customData);
     const srcTime = customDataTime(src.customData);
     const apply = !dst.customData.has("_LAST_MODIFIED") || dstTime !== void 0 && srcTime !== void 0 && dstTime < srcTime;
@@ -19787,8 +19791,8 @@ function customDataTime(m) {
   }
   return latest;
 }
-function mergeInto(source, target, mode = "keep-newer") {
-  const pass = new Pass(source, target);
+function mergeInto(source, target, mode = "keep-newer", opts = {}) {
+  const pass = new Pass(source, target, opts);
   pass.walk(source.getDefaultGroup(), target.getDefaultGroup());
   if (mode === "synchronize") pass.deletions();
   pass.metadata();
