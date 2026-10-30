@@ -14,6 +14,10 @@ curl -H "Authorization: Bearer $(cat app.token)" \
 This package's own bin is `openvireo-connect` (`openvireo-connect [serve]`, `openvireo-connect token …`,
 `openvireo-connect --version`); `ov connect` is the same server inside the CLI.
 
+Download the signed `openvireo-connect` binary from the
+[releases](https://github.com/OpenVireo/openvireo-sdk/releases), or build it from source; see
+[Install](../../docs/connect.md#install).
+
 **Documentation:** [docs/connect.md](../../docs/connect.md), also on
 [openvireo.com/docs/sdk/connect](https://openvireo.com/docs/sdk/connect/).
 

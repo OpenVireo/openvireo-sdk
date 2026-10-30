@@ -10,6 +10,37 @@ Writes go through the SDK's conditional PUT with merge/retry (`If-Match`; on 412
 so connect, the CLI, Qt and the web app can all edit the same vault. A service account with a `read`
 grant gets 403 on every write.
 
+## Install
+
+Each [release](https://github.com/OpenVireo/openvireo-sdk/releases) has `openvireo-connect` as a single
+binary (`openvireo-connect-<version>-<platform>.tar.gz`, `.zip` for Windows) for a server without Node or
+the full CLI. Download, check and install it the same way as [`ov`](cli.md#install), with
+`openvireo-connect` in place of `ov`:
+
+```sh
+v=VERSION p=linux-x64    # VERSION: the release without the v, e.g. 0.4.0; p: linux-arm64 | darwin-x64 | darwin-arm64
+for f in "openvireo-connect-$v-$p.tar.gz" SHA256SUMS SHA256SUMS.asc; do
+  curl -fLO "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v/$f"
+done
+gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum --ignore-missing -c SHA256SUMS
+tar -xzf "openvireo-connect-$v-$p.tar.gz" && sudo install "openvireo-connect-$v-$p/openvireo-connect" /usr/local/bin/
+openvireo-connect --version
+```
+
+It's signed the same way too: the macOS binaries with a notarized Developer ID, the Windows one with Azure
+Artifact Signing, and the checksums with the OpenVireo release key; see
+[Verifying the binaries](cli.md#verifying-the-binaries). The `ov` binary has connect built in as `ov connect`,
+so you don't need both.
+
+With Node ≥ 20, `npm install -g @openvireo/connect` installs it from GitHub Packages (see
+[Install](index.md#install)). To build it from source, clone the repository as for
+[`ov`](cli.md#building-from-source), then:
+
+```sh
+npm ci && npm run build -w @openvireo/sdk -w @openvireo/connect
+bun build --compile --minify packages/connect/src/bin.ts --outfile openvireo-connect   # or: node packages/connect/dist/bin.js
+```
+
 ## Run
 
 ```sh
@@ -30,11 +61,6 @@ curl -H "Authorization: Bearer $(cat eso.token)" \
 `ov connect` is the same as `openvireo-connect serve` (this package's bin, `node dist/bin.js`), and
 `ov connect token` as `openvireo-connect token`; run as `openvireo-connect`, the usage, errors and the
 `listening on` line name it that way, and `openvireo-connect --version` prints its version.
-Each [release](https://github.com/OpenVireo/openvireo-sdk/releases) also has `openvireo-connect` as a
-single binary (`openvireo-connect-<version>-<platform>.tar.gz`, `.zip` for Windows), installed the same
-way as [`ov`](cli.md#install), for a server without Node or the full CLI. It's signed the same way too: the
-macOS binaries with a notarized Developer ID, the Windows one with Azure Artifact Signing, and the checksums
-with the OpenVireo release key; see [Verifying the binaries](cli.md#verifying-the-binaries).
 
 | Variable | Default | |
 |---|---|---|

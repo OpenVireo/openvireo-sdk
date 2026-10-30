@@ -12,10 +12,16 @@ ov run --env-file .env.tpl -- ./migrate.sh     # references resolved in the envi
 **Documentation:** [docs/cli.md](../../docs/cli.md), also on
 [openvireo.com/docs/sdk/cli](https://openvireo.com/docs/sdk/cli/).
 
-## Single binary
+## Install
 
-Each [release](https://github.com/OpenVireo/openvireo-sdk/releases) has `ov` binaries for Linux, macOS
-and Windows; see [Install](../../docs/cli.md#install). To build one:
+Download the signed `ov` binary for Linux, macOS or Windows from the
+[releases](https://github.com/OpenVireo/openvireo-sdk/releases) (no Node needed), or
+`npm install -g @openvireo/cli`; see [Install](../../docs/cli.md#install).
+
+## Building from source
+
+From a clone of this repository, after `npm ci` (see
+[Building from source](../../docs/cli.md#building-from-source)):
 
 ```sh
 npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/ov
