@@ -30,7 +30,9 @@ echo "//npm.pkg.github.com/:_authToken=\${GITHUB_TOKEN}" >> .npmrc
 npm install @openvireo/sdk
 ```
 
-The `ov` CLI is also available as a single binary; see [CLI](cli.md#install).
+The `ov` CLI and the `openvireo-connect` server are command-line programs: download them as signed single
+binaries from the [releases](https://github.com/OpenVireo/openvireo-sdk/releases) (no Node needed); see
+[CLI](cli.md#install) and [Connect](connect.md#install).
 
 ## A first program
 

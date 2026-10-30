@@ -3,23 +3,16 @@
 Read, inject and rotate OpenVireo vault secrets from scripts, CI and servers, with a **service
 account** (`OPENVIREO_SERVICE_ACCOUNT_TOKEN=ov_sa_…`) or your own **login**. Vaults are downloaded and
 decrypted locally; writes use the same conditional PUT and merge/retry loop as Qt and the web app, so
-concurrent edits are merged, not lost. Runs on Node ≥ 20, or as one binary (Bun `--compile`, no Node needed).
+concurrent edits are merged, not lost. Runs as one binary (Bun `--compile`, no Node needed), or on Node ≥ 20.
 
 ## Install
 
-Install `@openvireo/cli` from GitHub Packages (see [Install](index.md#install)) and run it with Node ≥ 20:
+Each [release](https://github.com/OpenVireo/openvireo-sdk/releases) has `ov` as a single binary that needs
+nothing else installed (no Node), for Linux (x64, arm64), macOS (x64, arm64) and Windows (x64), with a
+`SHA256SUMS` file and its GPG signature `SHA256SUMS.asc`:
 
 ```sh
-npm install -g @openvireo/cli
-ov version
-```
-
-Or, without Node: each [release](https://github.com/OpenVireo/openvireo-sdk/releases) has `ov` as a single binary for
-Linux (x64, arm64), macOS (x64, arm64) and Windows (x64), with a `SHA256SUMS` file and its GPG signature
-`SHA256SUMS.asc`:
-
-```sh
-v=VERSION p=linux-x64    # VERSION: the release without the v, e.g. 0.4.0; p: linux-arm64 | darwin-x64 | darwin-arm64 (windows-x64 is a .zip)
+v=VERSION p=linux-x64    # VERSION: the release without the v, e.g. 0.4.0; p: linux-arm64 | darwin-x64 | darwin-arm64
 for f in "ov-$v-$p.tar.gz" SHA256SUMS SHA256SUMS.asc; do
   curl -fLO "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v/$f"
 done
@@ -28,6 +21,21 @@ sha256sum --ignore-missing -c SHA256SUMS      # macOS: shasum -a 256 --ignore-mi
 tar -xzf "ov-$v-$p.tar.gz" && sudo install "ov-$v-$p/ov" /usr/local/bin/
 ov version
 ```
+
+On Windows, in PowerShell:
+
+```powershell
+$v = "VERSION"
+$base = "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v"
+foreach ($f in "ov-$v-windows-x64.zip", "SHA256SUMS", "SHA256SUMS.asc") { Invoke-WebRequest "$base/$f" -OutFile $f }
+gpg --verify SHA256SUMS.asc SHA256SUMS                  # gpg from Gpg4win
+(Get-FileHash "ov-$v-windows-x64.zip").Hash             # compare with its line in SHA256SUMS
+Expand-Archive "ov-$v-windows-x64.zip" .
+.\ov-$v-windows-x64\ov.exe version                       # or put that directory on your PATH
+```
+
+The binary is ~60 MB (the Bun runtime) and includes the SDK's OPAQUE WASM module, so login works
+without Node.
 
 ### Verifying the binaries
 
@@ -57,10 +65,17 @@ The Windows binaries are signed with Azure Artifact Signing, the same publisher 
 Get-AuthenticodeSignature .\ov.exe | Format-List Status, SignerCertificate, TimeStamperCertificate   # Status: Valid
 ```
 
-The binary is ~60 MB (the Bun runtime) and includes the SDK's OPAQUE WASM module, so login works
-without Node.
+### With Node
 
-To build one yourself, see [Single binary](#single-binary).
+`@openvireo/cli` is also on GitHub Packages (see [Install](index.md#install) for the registry setup) and runs
+on Node ≥ 20:
+
+```sh
+npm install -g @openvireo/cli
+ov version
+```
+
+To build `ov` yourself, see [Building from source](#building-from-source).
 
 ## References
 
@@ -133,12 +148,25 @@ The master password is never stored. `OPENVIREO_PASSWORD`, `OPENVIREO_SECRET_KEY
 environment for non-interactive use; prefer a service account for automation.
 `OPENVIREO_SERVICE_ACCOUNT_TOKEN` (or `OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE`) always takes precedence over a login.
 
-## Single binary
+## Building from source
+
+You need Node ≥ 20 and npm, and [Bun](https://bun.sh) 1.3 or later for the single binary:
 
 ```sh
+git clone https://github.com/OpenVireo/openvireo-sdk && cd openvireo-sdk
+npm ci
 npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/ov
 ./packages/cli/dist/ov version             # ov 0.3.1
 npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP
+```
+
+Check out a release tag (`git checkout v0.3.1`) to build that release rather than `develop`. Without Bun,
+`npm run build` builds every package for Node, and `node packages/cli/dist/bin.js` runs `ov`.
+
+The release archives for every platform (both `ov` and `openvireo-connect`) come from one script, which
+cross-compiles, so it works on any of them:
+
+```sh
 scripts/build-binaries.sh                  # every release platform, both binaries, archives and SHA256SUMS in dist-binaries/
 scripts/build-binaries.sh --compile-only dist-binaries   # the same in two stages, signing in between (as the release does):
 scripts/macos/sign.sh dist-binaries [identity]           # macOS: hardened runtime + JIT entitlement; ad hoc without an identity
