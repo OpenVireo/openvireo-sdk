@@ -156,11 +156,11 @@ You need Node ≥ 20 and npm, and [Bun](https://bun.sh) 1.3 or later for the sin
 git clone https://github.com/OpenVireo/openvireo-sdk && cd openvireo-sdk
 npm ci
 npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/ov
-./packages/cli/dist/ov version             # ov 0.3.1
+./packages/cli/dist/ov version             # ov 0.4.0
 npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP
 ```
 
-Check out a release tag (`git checkout v0.3.1`) to build that release rather than `develop`. Without Bun,
+Check out a release tag (`git checkout v0.4.0`) to build that release rather than `develop`. Without Bun,
 `npm run build` builds every package for Node, and `node packages/cli/dist/bin.js` runs `ov`.
 
 The release archives for every platform (both `ov` and `openvireo-connect`) come from one script, which

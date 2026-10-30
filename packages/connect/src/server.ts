@@ -7,7 +7,7 @@ import { type Handler, createConnectHandler } from "./handler.js";
 import { type ConnectToken, hashConnectToken, parseConnectTokens } from "./tokens.js";
 
 /** this package's version: `openvireo-connect --version` and the User-Agent */
-export const VERSION = "0.3.1";
+export const VERSION = "0.4.0";
 
 /** Bridges node:http to a fetch-style handler. */
 export function toNodeListener(handler: Handler) {
