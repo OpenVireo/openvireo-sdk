@@ -8,7 +8,7 @@ export type { KdfParams, PublicKeysJson, WrappedKeysetJson, VaultRole };
 export type Principal = string;
 export type OrgRole = "owner" | "admin" | "member";
 export type MemberStatus = "invited" | "accepted" | "confirmed";
-export type Platform = "qt-linux" | "qt-macos" | "qt-windows" | "web" | "cli" | "connect";
+export type Platform = "qt-linux" | "qt-macos" | "qt-windows" | "web" | "cli" | "connect" | "ios";
 
 /** GET /.well-known/openvireo-configuration (SPEC §10) */
 export interface OpenVireoConfiguration {

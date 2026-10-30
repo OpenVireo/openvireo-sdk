@@ -22,7 +22,7 @@ const account = await Account.connect({
 session if `storage` has one. A resumed session is **signed in but locked** (`account.signedIn` is true,
 `account.unlocked` false): the keys need the master password again.
 
-`device.platform` is one of `web`, `cli`, `connect`, `qt-linux`, `qt-macos`, `qt-windows`. The name shows up in
+`device.platform` is one of `web`, `cli`, `connect`, `qt-linux`, `qt-macos`, `qt-windows`, `ios`. The name shows up in
 the user's device list.
 
 ### Storage
