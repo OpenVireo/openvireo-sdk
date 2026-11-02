@@ -282,10 +282,12 @@ describe("storage adapters", () => {
   it("IndexedDbStorage + EncryptedStorage with a non-extractable key", async () => {
     const idb = new IndexedDbStorage("ov-test-" + Math.random());
     const enc = new EncryptedStorage(idb, nonExtractableIdbKey(idb));
-    await enc.set("secret_key", "K1-…");
-    expect(await enc.get("secret_key")).toBe("K1-…");
+    // Long enough that random ciphertext can't contain it by chance (a short marker like "K1" sometimes did)
+    const secret = "K1-ABCDEF-GHIJKL-MNOPQR-STUVWX-YZ2345";
+    await enc.set("secret_key", secret);
+    expect(await enc.get("secret_key")).toBe(secret);
     const raw = await idb.get("secret_key");
-    expect(raw).not.toContain("K1");
+    expect(raw).not.toContain(secret);
     const key = await idb.getRaw<CryptoKey>("__ov_wrapping_key");
     expect(key?.extractable).toBe(false);
     // Values are bound to their key name
