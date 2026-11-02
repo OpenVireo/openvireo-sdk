@@ -27,6 +27,7 @@ export type OpenVireoErrorCode =
   | "gone"
   | "server_error"
   | "network_error"
+  | "insecure_url"
   | "signed_out"
   // account recovery (SPEC.md §18)
   | "recovery_not_ready"

@@ -16,7 +16,7 @@ import {
   staticToken,
 } from "../src/auth/index.js";
 import { FileStorage } from "../src/auth/storage-node.js";
-import { errorFromResponse } from "../src/http/request.js";
+import { errorFromResponse, isLoopbackHost, requireSecureUrl } from "../src/http/request.js";
 import { MockServer, json } from "./helpers/mock-fetch.js";
 
 const API = "https://auth.example/api/v1";
@@ -39,6 +39,21 @@ describe("discovery", () => {
   it("rejects an incomplete document", async () => {
     const s = new MockServer().on("GET", "/.well-known/openvireo-configuration", () => json(200, { ...config, sync: undefined }));
     await expect(discover("https://auth.example", { fetch: s.fetch })).rejects.toThrow(/sync/);
+  });
+  it("requires https except for localhost (SPEC.md §1)", async () => {
+    const s = new MockServer().on("GET", "/.well-known/openvireo-configuration", () => json(200, config));
+    await expect(discover("http://auth.example", { fetch: s.fetch })).rejects.toMatchObject({ code: "insecure_url" });
+    expect(s.calls).toHaveLength(0);
+    const downgraded = new MockServer().on("GET", "/.well-known/openvireo-configuration", () => json(200, { ...config, sync: "http://sync.example/api/v1" }));
+    await expect(discover("https://auth.example", { fetch: downgraded.fetch })).rejects.toMatchObject({ code: "insecure_url", message: expect.stringMatching(/sync/) });
+    const local = { ...config, issuer: "http://localhost:8000", api: "http://localhost:8000/api/v1", sync: "http://127.0.0.1:8787/api/v1", jwks_uri: "http://localhost:8000/.well-known/jwks.json", web: "http://app.localhost:3000" };
+    const l = new MockServer().on("GET", "/.well-known/openvireo-configuration", () => json(200, local));
+    expect(await discover("http://localhost:8000", { fetch: l.fetch })).toEqual(local);
+  });
+  it("knows which hosts are loopback", () => {
+    for (const h of ["localhost", "LOCALHOST", "app.localhost", "127.0.0.1", "127.1.2.3", "[::1]"]) expect(isLoopbackHost(h), h).toBe(true);
+    for (const h of ["localhost.example", "128.0.0.1", "10.0.0.2", "192.168.1.5", "example.com", "[::2]"]) expect(isLoopbackHost(h), h).toBe(false);
+    expect(() => requireSecureUrl("ftp://localhost/x")).toThrow(/https/);
   });
 });
 

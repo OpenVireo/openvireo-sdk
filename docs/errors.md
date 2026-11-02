@@ -102,6 +102,10 @@ Server errors keep the server's `code`; without one, the status decides:
 
 `network_error` means the request never got an answer, and `aborted` that your `AbortSignal` cancelled it.
 
+`insecure_url` means a URL isn't `https://`, so nothing was sent. Plain `http://` is only allowed for this
+computer: `localhost`, `*.localhost`, `127.0.0.0/8` and `[::1]`. The SDK checks the issuer you pass, every URL
+in the server's `openvireo-configuration`, and self-hosted sync servers.
+
 ## Crypto
 
 `decryption_failed`, `unsupported_version`, `invalid_public_keys`, `invalid_token` and `low_order_point` mean

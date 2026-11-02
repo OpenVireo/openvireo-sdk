@@ -1,6 +1,6 @@
 /** REST client for every route of openapi.yaml (auth server, under `{api}`). */
 import { OpenVireoError } from "../errors.js";
-import { type HttpOptions, joinUrl, seg, sendJson } from "../http/request.js";
+import { type HttpOptions, joinUrl, requireSecureUrl, seg, sendJson } from "../http/request.js";
 import type { Jwks } from "../crypto/jwt.js";
 import type {
   AuditEvent,
@@ -47,10 +47,13 @@ export interface AuthClientOptions extends HttpOptions {
 /** Fetches `/.well-known/openvireo-configuration` from the issuer (SPEC §10). */
 export async function discover(issuer: string, http: HttpOptions = {}): Promise<OpenVireoConfiguration> {
   const base = issuer.replace(/\/+$/, "");
+  requireSecureUrl(base, "issuer");
   const cfg = await sendJson<OpenVireoConfiguration>(http, `${base}/.well-known/openvireo-configuration`);
   for (const k of ["issuer", "api", "sync", "jwks_uri"] as const) {
     if (typeof cfg?.[k] !== "string") throw new OpenVireoError("invalid_request", `openvireo-configuration is missing "${k}"`);
+    requireSecureUrl(cfg[k], k);
   }
+  if (typeof cfg.web === "string") requireSecureUrl(cfg.web, "web");
   if (!cfg.opaque?.ids) throw new OpenVireoError("invalid_request", "openvireo-configuration is missing opaque.ids");
   return cfg;
 }
