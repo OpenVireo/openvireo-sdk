@@ -10,18 +10,21 @@ import { type DeviceInfo, type Grant, type OpenVireoConfiguration, type Member, 
 import type { HttpOptions } from "./http/request.js";
 import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
 import { sealSaMaster, sealVaultKey, unsealSaMaster, unsealVaultKey } from "./crypto/envelope.js";
-import { type Keyset, fingerprint, generateKeyset, trustedPublicKeys, unwrapKeyset, wipeKeyset, wrapKeyset } from "./crypto/keyset.js";
+import { type Keyset, fingerprint, generateKeyset, keysetFromSecrets, trustedPublicKeys, unwrapKeyset, wipeKeyset, wrapKeyset } from "./crypto/keyset.js";
 import { formatSecretKey, generateSecretKey, parseSecretKey } from "./crypto/secret-key.js";
 import { newSaSecret } from "./crypto/tokens.js";
 import { decryptVaultName, encryptVaultName } from "./crypto/vault-name.js";
 import { resealVaultKey, restoreProof } from "./crypto/restore.js";
-import { b64u, fromB64u, randomBytes, randomUuid, wipe } from "./util/bytes.js";
+import { b64u, concat, ctEqual, exactBuffer, fromB64u, randomBytes, randomUuid, utf8, wipe } from "./util/bytes.js";
 import { finishLogin, finishRegistration, opaqueIds, startLogin, startRegistration } from "./opaque/index.js";
 import { SyncClient } from "./sync/client.js";
 import { type EventStream, type SyncEvent, subscribeEvents } from "./sync/events.js";
 import { type SyncResult, type SyncState, deserializeSyncState, serializeSyncState, syncKdbx } from "./sync/engine.js";
 import { type Kdbx, type KeyVersion, copyKdbx, createVaultKdbx, dropServerRemotes, openWithKeyVersions, rekeyToVaultKey, saveKdbx, vaultCredentials } from "./vault/kdbx.js";
 import { parseReference, readField, writeField, type SecretReference } from "./vault/reference.js";
+
+// Format of sealUnlocked: "<version>.<b64u iv>.<b64u AES-GCM(enc_sk ‖ sign_seed)>"
+const SEAL_VERSION = "s1";
 
 const isManager = (role: OrgRole) => role === "owner" || role === "admin";
 
@@ -350,6 +353,83 @@ export class Account {
     } finally {
       wipe(sk);
     }
+  }
+
+  /**
+   * Seals the unlocked keyset under `key` (AES-GCM, random IV, bound to this issuer and user), so a
+   * page can unlock again after a reload with `resumeUnlocked` instead of the master password. Pass a
+   * non-extractable AES-GCM key and keep the result apart from it; `lock()` doesn't revoke a seal, so
+   * delete both when the app locks.
+   */
+  async sealUnlocked(key: CryptoKey): Promise<string> {
+    const ks = this.requireKeyset();
+    const userId = this.userId;
+    if (!userId) throw new OpenVireoError("signed_out", "not signed in");
+    const iv = randomBytes(12);
+    const joined = concat(ks.encSk, ks.signSeed);
+    const plain = exactBuffer(joined);
+    wipe(joined);
+    try {
+      const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: exactBuffer(iv), additionalData: exactBuffer(this.sealAad(userId)) }, key, plain));
+      return `${SEAL_VERSION}.${b64u(iv)}.${b64u(sealed)}`;
+    } finally {
+      wipe(new Uint8Array(plain));
+    }
+  }
+
+  /**
+   * Unlocks from a `sealUnlocked` string. The unsealed keys must match the account's public keys (from
+   * /me, or offline the cached profile), so a seal never unlocks another account or a reset one.
+   * Fails with `signed_out` without a session and `decryption_failed` for a seal this key can't open.
+   */
+  async resumeUnlocked(sealed: string, key: CryptoKey): Promise<void> {
+    const session = await this.tokens.load();
+    if (!session) throw new OpenVireoError("signed_out", "not signed in");
+    const [version, iv, data, ...rest] = sealed.split(".");
+    if (version !== SEAL_VERSION || !iv || !data || rest.length > 0) throw new OpenVireoError("unsupported_version", "not a sealed keyset");
+    let plain: Uint8Array;
+    try {
+      plain = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: exactBuffer(fromB64u(iv)), additionalData: exactBuffer(this.sealAad(session.userId)) }, key, exactBuffer(fromB64u(data))));
+    } catch (e) {
+      throw new OpenVireoError("decryption_failed", "the sealed keyset can't be opened with this key", undefined, { cause: e });
+    }
+    if (plain.length !== 64) {
+      wipe(plain);
+      throw new OpenVireoError("decryption_failed", "the sealed keyset has the wrong length");
+    }
+    const ks = keysetFromSecrets(plain.subarray(0, 32), plain.subarray(32, 64));
+    wipe(plain);
+    try {
+      let profile: Profile;
+      let offline = false;
+      try {
+        const me = await this.auth.me();
+        profile = { kdf: me.kdf, keyset: me.keyset };
+        await this.followEmail(me.email);
+      } catch (e) {
+        const cached = isUnreachable(e) ? await this.cachedProfile(session.userId) : null;
+        if (!cached) throw e;
+        profile = cached;
+        offline = true;
+      }
+      const pub = trustedPublicKeys(profile.keyset);
+      if (!ctEqual(ks.encPk, pub.encPk) || !ctEqual(ks.signPk, pub.signPk)) {
+        throw new OpenVireoError("invalid_public_keys", "the sealed keyset isn't this account's");
+      }
+      ks.sig = pub.sig;
+      if (!offline) await this.cacheProfile(session.userId, profile);
+      this.lock();
+      this.keyset = ks;
+      this.cacheUser = session.userId;
+      this._offline = offline;
+    } catch (e) {
+      wipeKeyset(ks);
+      throw e;
+    }
+  }
+
+  private sealAad(userId: string): Uint8Array {
+    return utf8(`ov-unlock-seal-v1|${this.config.issuer.replace(/\/+$/, "")}|${userId}`);
   }
 
   /**
