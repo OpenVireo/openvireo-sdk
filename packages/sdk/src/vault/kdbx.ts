@@ -50,6 +50,26 @@ export function passwordCredentials(password: string | null, keyFile?: Uint8Arra
   return () => new kdbxweb.Credentials(password === null ? null : kdbxweb.ProtectedValue.fromString(password), keyFile ? new Uint8Array(keyFile) : undefined);
 }
 
+/**
+ * SHA-256 of the password: the password component of a KDBX composite key. An app that has to keep
+ * a database openable (e.g. across a page reload) can keep this instead of the password itself.
+ */
+export async function passwordHash(password: string): Promise<Uint8Array> {
+  return new Uint8Array(await kdbxweb.ProtectedValue.fromString(password).getHash());
+}
+
+/** Credentials from a `passwordHash`, equivalent to `passwordCredentials(password)`. */
+export function passwordHashCredentials(hash: Uint8Array): CredentialsFactory {
+  if (hash.length !== 32) throw new OpenVireoError("invalid_password_hash", "a password hash is 32 bytes");
+  const copy = new Uint8Array(hash);
+  return () => {
+    // the constructor clears passwordHash synchronously for a null password, so this assignment stays
+    const creds = new kdbxweb.Credentials(null);
+    creds.passwordHash = kdbxweb.ProtectedValue.fromBinary(exactBuffer(copy));
+    return creds;
+  };
+}
+
 /** The vault KDF (SPEC §7): Argon2id, m = 1 MiB, t = 2, p = 1. */
 export const VAULT_KDF = { m: 1024 * 1024, t: 2, p: 1 } as const;
 

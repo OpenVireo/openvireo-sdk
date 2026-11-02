@@ -49,6 +49,10 @@ the last common version, and upload the result, retrying on conflicts. The sync 
 base copy) is kept in `storage` under the database id; without `storage`, pass it yourself as `state` and
 keep `result.state`.
 
+To keep a database openable without keeping its password (for example, sealed for a page reload), keep
+`await passwordHash(password)` instead: the 32-byte password part of the KDBX key.
+`passwordHashCredentials(hash)` works anywhere `passwordCredentials(password)` does.
+
 If another device changed the database's password, the server copy doesn't open with yours
 (`vault_key_mismatch`): ask for the other password and pass both, newest first, as
 `credentials: [passwordCredentials(newPassword), passwordCredentials(password)]`.

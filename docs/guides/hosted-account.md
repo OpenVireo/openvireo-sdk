@@ -93,6 +93,34 @@ await account.logout({ forgetDevice: true });   // also forgets the trusted Secr
 
 `unlock` needs no OPAQUE round trip: it unwraps the keyset with the password and the kept Secret Key.
 
+### Staying unlocked across a page reload
+
+A web app loses its memory on every reload. To unlock again without the master password, seal the
+unlocked keyset under a non-extractable WebCrypto key and keep the two apart: the key in IndexedDB, the
+sealed string somewhere that ends with the tab, such as `sessionStorage`.
+
+<!-- prelude
+import type { Account } from "@openvireo/sdk";
+declare const account: Account, reloaded: Account;
+declare function saveKey(key: CryptoKey): Promise<void>;
+declare function loadKey(): Promise<CryptoKey>;
+-->
+```ts
+const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+await saveKey(key);
+sessionStorage.setItem("unlocked", await account.sealUnlocked(key));
+
+// after the reload, on a connected (signed-in, locked) account
+const sealed = sessionStorage.getItem("unlocked");
+if (sealed) await reloaded.resumeUnlocked(sealed, await loadKey());
+```
+
+The seal is bound to this issuer and user. `resumeUnlocked` checks the unsealed keys against the account's
+public keys (from `/me`, or offline the cached profile). It fails with `signed_out` when the session has
+ended, `decryption_failed` for a seal the key can't open, and `invalid_public_keys` when the account's keys
+changed (an account reset). `lock()` doesn't revoke a seal, so delete the string and the key when your app
+locks.
+
 The session can also end on its own: when the refresh token expires, is revoked from another device, or is
 used twice (`token_reused`, a sign of a stolen token). Listen for it:
 
