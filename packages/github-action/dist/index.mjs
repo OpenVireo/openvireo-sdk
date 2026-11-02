@@ -18856,6 +18856,20 @@ async function errorFromResponse(res) {
   const ra = res.headers.get("Retry-After");
   return new HttpError(code, message, res.status, body, ra && /^\d+$/.test(ra) ? Number(ra) : void 0);
 }
+function isLoopbackHost(hostname2) {
+  const h = hostname2.toLowerCase().replace(/\.$/, "");
+  return h === "localhost" || h.endsWith(".localhost") || h === "[::1]" || h === "::1" || /^127(\.\d{1,3}){3}$/.test(h);
+}
+function requireSecureUrl(url, what = "server") {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new OpenVireoError("invalid_request", `the ${what} URL is not valid: ${url}`);
+  }
+  if (u.protocol === "https:" || u.protocol === "http:" && isLoopbackHost(u.hostname)) return;
+  throw new OpenVireoError("insecure_url", `the ${what} URL must use https:// (plain http:// is only allowed for localhost): ${u.origin}`);
+}
 function joinUrl(base, path) {
   return base.replace(/\/+$/, "") + "/" + path.replace(/^\/+/, "");
 }
@@ -18863,6 +18877,7 @@ var seg = (s) => encodeURIComponent(s).replace(/%3A/gi, ":");
 async function send(http, url, opts = {}) {
   const f = http.fetch ?? globalThis.fetch;
   if (!f) throw new OpenVireoError("network_error", "no fetch implementation available");
+  requireSecureUrl(url);
   const headers = { ...http.headers, ...opts.headers };
   let body;
   if (opts.json !== void 0) {
@@ -18896,10 +18911,13 @@ async function sendJson(http, url, opts = {}) {
 // ../sdk/src/auth/client.ts
 async function discover(issuer, http = {}) {
   const base = issuer.replace(/\/+$/, "");
+  requireSecureUrl(base, "issuer");
   const cfg = await sendJson(http, `${base}/.well-known/openvireo-configuration`);
   for (const k of ["issuer", "api", "sync", "jwks_uri"]) {
     if (typeof cfg?.[k] !== "string") throw new OpenVireoError("invalid_request", `openvireo-configuration is missing "${k}"`);
+    requireSecureUrl(cfg[k], k);
   }
+  if (typeof cfg.web === "string") requireSecureUrl(cfg.web, "web");
   if (!cfg.opaque?.ids) throw new OpenVireoError("invalid_request", "openvireo-configuration is missing opaque.ids");
   return cfg;
 }
@@ -20368,7 +20386,7 @@ function serviceAccountSource(sa) {
 }
 
 // ../cli/src/session.ts
-var VERSION3 = "0.5.0";
+var VERSION3 = "0.6.0";
 
 // ../cli/src/template.ts
 var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
@@ -20480,7 +20498,7 @@ async function run(io, opts = {}) {
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.5.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.6.0" } });
     const src = serviceAccountSource(sa);
     const resolved = [];
     try {
