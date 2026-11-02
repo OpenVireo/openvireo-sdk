@@ -62,7 +62,7 @@ describe("Account.sealUnlocked / resumeUnlocked", () => {
     const sealed = await acct.sealUnlocked(await sealingKey());
     const reloaded = await connect();
     await expect(reloaded.resumeUnlocked(sealed, await sealingKey())).rejects.toMatchObject({ code: "decryption_failed" });
-    const [v, iv, data] = sealed.split(".");
+    const [v, iv, data] = sealed.split(".") as [string, string, string];
     const flipped = `${v}.${iv}.${data.slice(0, -2)}${data.endsWith("A") ? "B" : "A"}${data.slice(-1)}`;
     await expect(reloaded.resumeUnlocked(flipped, await sealingKey())).rejects.toMatchObject({ code: "decryption_failed" });
     await expect(reloaded.resumeUnlocked("nope", await sealingKey())).rejects.toMatchObject({ code: "unsupported_version" });
