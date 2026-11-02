@@ -67,6 +67,24 @@ export async function errorFromResponse(res: Response): Promise<HttpError> {
   return new HttpError(code, message, res.status, body, ra && /^\d+$/.test(ra) ? Number(ra) : undefined);
 }
 
+/** localhost, *.localhost, 127.0.0.0/8 and ::1: the only hosts plain http:// is allowed for (SPEC.md §1). */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/\.$/, "");
+  return h === "localhost" || h.endsWith(".localhost") || h === "[::1]" || h === "::1" || /^127(\.\d{1,3}){3}$/.test(h);
+}
+
+/** Throws `insecure_url` unless the URL is https://, or http:// to this computer (SPEC.md §1). */
+export function requireSecureUrl(url: string, what = "server"): void {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new OpenVireoError("invalid_request", `the ${what} URL is not valid: ${url}`);
+  }
+  if (u.protocol === "https:" || (u.protocol === "http:" && isLoopbackHost(u.hostname))) return;
+  throw new OpenVireoError("insecure_url", `the ${what} URL must use https:// (plain http:// is only allowed for localhost): ${u.origin}`);
+}
+
 export function joinUrl(base: string, path: string): string {
   return base.replace(/\/+$/, "") + "/" + path.replace(/^\/+/, "");
 }
@@ -88,6 +106,7 @@ export interface RequestOptions {
 export async function send(http: HttpOptions, url: string, opts: RequestOptions = {}): Promise<Response> {
   const f = http.fetch ?? (globalThis.fetch as FetchLike | undefined);
   if (!f) throw new OpenVireoError("network_error", "no fetch implementation available");
+  requireSecureUrl(url);
   const headers: Record<string, string> = { ...http.headers, ...opts.headers };
   let body: BodyInit | undefined;
   if (opts.json !== undefined) {
