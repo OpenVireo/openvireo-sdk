@@ -19171,6 +19171,10 @@ var BlobHandle = class {
     this.client = client;
     this.path = path;
   }
+  /** The client's `clockOffsetMs`: this computer's clock against the server's. */
+  get clockOffsetMs() {
+    return this.client.clockOffsetMs;
+  }
   async head(ifNoneMatch) {
     const res = await this.client.request(this.path, { method: "HEAD", headers: ifNoneMatch ? { "If-None-Match": ifNoneMatch } : {} });
     if (res.status === 404) return { status: 404 };
@@ -19242,8 +19246,19 @@ var SyncClient = class _SyncClient {
     return typeof t === "string" ? t : t.getAccessToken({ force });
   }
   /** Sends with the bearer token; on 401 with a refreshable source, retries once with a fresh token. */
+  /**
+   * How far this computer's clock is ahead of the server's, in milliseconds (negative: behind), from the
+   * `Date` header of the last response that had a readable one; undefined until then. Good to about a
+   * second: the header has whole seconds, and the response took a moment to arrive.
+   */
+  clockOffsetMs;
   async request(path, init = {}) {
-    const go = async (force) => send(this.opts, this.url(path), { ...init, token: await this.token(force) });
+    const go = async (force) => {
+      const res2 = await send(this.opts, this.url(path), { ...init, token: await this.token(force) });
+      const serverTime = Date.parse(res2.headers.get("Date") ?? "");
+      if (Number.isFinite(serverTime)) this.clockOffsetMs = Date.now() - serverTime;
+      return res2;
+    };
     const res = await go(false);
     if (res.status === 401 && this.opts.token && typeof this.opts.token !== "string") {
       await res.body?.cancel();
@@ -19889,16 +19904,120 @@ async function mergeDatabases(local, remote, base, opts = {}) {
       }
     }
   }
+  const pending = base ? new Map([...pendingDeletions(local, remote), ...pendingDeletions(remote, local)]) : /* @__PURE__ */ new Map();
   const mode = opts.mode ?? "keep-newer";
   const toRemote = mergeInto(local, remote, mode);
   const toLocal = mergeInto(remote, local, mode);
   changes.push(...toRemote, ...toLocal);
+  const after = [...base && pending.size ? applyDeletions(local, remote, base, pending) : [], ...mergeRecycleBins(local, remote)];
+  changes.push(...after);
   if (changes.length) {
     const generation = Math.max(syncGeneration(local), syncGeneration(remote)) + 1;
     setSyncGeneration(local, generation);
     setSyncGeneration(remote, generation);
   }
-  return { changes, conflicts, remoteChanged: combined > 0 || toRemote.length > 0, localChanged: combined > 0 || toLocal.length > 0 };
+  return {
+    changes,
+    conflicts,
+    remoteChanged: combined > 0 || after.length > 0 || toRemote.length > 0,
+    localChanged: combined > 0 || after.length > 0 || toLocal.length > 0
+  };
+}
+function idsOf(db) {
+  const ids = /* @__PURE__ */ new Set();
+  for (const e of entriesUnder(db.getDefaultGroup())) ids.add(e.uuid.id);
+  for (const g of groupsUnder(db.getDefaultGroup())) ids.add(g.uuid.id);
+  return ids;
+}
+function pendingDeletions(from, into) {
+  const mine = idsOf(from);
+  mine.add(from.getDefaultGroup().uuid.id);
+  const theirs = idsOf(into);
+  const pending = /* @__PURE__ */ new Map();
+  for (const rec of from.deletedObjects) {
+    const id = rec.uuid?.id;
+    if (id && !mine.has(id) && theirs.has(id) && !pending.has(id)) pending.set(id, rec);
+  }
+  return pending;
+}
+function hasPendingDeletions(local, remote) {
+  return pendingDeletions(local, remote).size > 0 || pendingDeletions(remote, local).size > 0;
+}
+var parentId = (item) => item.parentGroup?.uuid.id;
+var sameGroup = (a, b) => a.name === b.name && (a.notes ?? "") === (b.notes ?? "") && a.icon === b.icon && a.customIcon?.id === b.customIcon?.id && parentId(a) === parentId(b);
+var depthOf = (g) => {
+  let d = 0;
+  for (let p = g.parentGroup; p; p = p.parentGroup) d++;
+  return d;
+};
+function setDeletion(db, id, rec) {
+  db.deletedObjects = db.deletedObjects.filter((r) => r.uuid?.id !== id);
+  if (rec) db.deletedObjects.push(rec);
+}
+function applyDeletions(local, remote, base, pending) {
+  const changes = [];
+  const both = [local, remote];
+  for (const [id, rec] of pending) {
+    const b = findEntryByUuid(base, id);
+    const copies = both.map((db) => findEntryByUuid(db, id)).filter((e) => !!e);
+    if (!copies.length) continue;
+    const unchanged = !!b && copies.every((e) => parentId(e) === parentId(b) && sameFields(e, b));
+    if (unchanged) {
+      changes.push(record("deleted", copies[0], "Deleted on another device"));
+      for (const e of copies) detach(e, (g) => g.entries);
+    }
+    for (const db of both) setDeletion(db, id, unchanged ? rec : null);
+  }
+  const groups = [...pending.keys()].map((id) => findGroup(local, id)).filter((g) => !!g && g !== local.getDefaultGroup()).sort((a, b) => depthOf(b) - depthOf(a));
+  for (const localGroup of groups) {
+    const id = localGroup.uuid.id;
+    const b = findGroup(base, id);
+    const copies = both.map((db) => findGroup(db, id)).filter((g) => !!g);
+    const unchanged = !!b && b !== base.getDefaultGroup() && copies.every((g) => !g.entries.length && !g.groups.length && sameGroup(g, b));
+    if (unchanged) {
+      changes.push(record("deleted", localGroup, "Deleted on another device"));
+      for (const g of copies) detach(g, (p) => p.groups);
+    }
+    for (const db of both) setDeletion(db, id, unchanged ? pending.get(id) : null);
+  }
+  return changes;
+}
+function mergeRecycleBins(local, remote) {
+  const binOf = (db) => db.meta.recycleBinUuid ? findGroup(db, db.meta.recycleBinUuid.id) : void 0;
+  const localBin = binOf(local);
+  const remoteBin = binOf(remote);
+  if (!localBin && !remoteBin) return [];
+  if (localBin && remoteBin && localBin.uuid.id === remoteBin.uuid.id) return [];
+  let winner;
+  if (!remoteBin) winner = local;
+  else if (!localBin) winner = remote;
+  else {
+    const lt = Math.floor((local.meta.recycleBinChanged?.getTime() ?? 0) / 1e3);
+    const rt = Math.floor((remote.meta.recycleBinChanged?.getTime() ?? 0) / 1e3);
+    const hex = (g) => toHex(new Uint8Array(g.uuid.toBytes()));
+    winner = lt !== rt ? lt > rt ? local : remote : hex(localBin) < hex(remoteBin) ? local : remote;
+  }
+  const binId = (winner === local ? localBin : remoteBin).uuid.id;
+  const binChanged = winner.meta.recycleBinChanged;
+  const others = [localBin, remoteBin].filter((g) => !!g && g.uuid.id !== binId).map((g) => g.uuid.id);
+  for (const db of [local, remote]) {
+    const bin = findGroup(db, binId);
+    if (!bin) continue;
+    for (const id of others) {
+      const other = findGroup(db, id);
+      if (!other || other === bin) continue;
+      let inside = false;
+      for (let p = bin.parentGroup; p; p = p.parentGroup) if (p === other) inside = true;
+      if (inside) continue;
+      for (const item of [...other.entries, ...other.groups]) db.move(item, bin);
+      db.move(other, null);
+    }
+    if (db.meta.recycleBinUuid?.id !== binId) {
+      db.meta.recycleBinUuid = bin.uuid;
+      db.meta.recycleBinChanged = binChanged;
+    }
+  }
+  return [record("metadata", null, "Recycle Bin set from another device")];
 }
 function snapshotOf(db) {
   const s = {};
@@ -19913,6 +20032,7 @@ function changesSince(local, remote, snapshotMs) {
   return { local: localChanged, remote: remoteChanged };
 }
 function needsCommonBase(local, remote, snapshot) {
+  if (hasPendingDeletions(local, remote)) return true;
   for (const [id, ms] of Object.entries(snapshot)) {
     const l = findEntryByUuid(local, id);
     const r = findEntryByUuid(remote, id);
@@ -19943,6 +20063,7 @@ function findConflicts(local, remote, snapshot) {
 }
 
 // ../sdk/src/sync/engine.ts
+var CLOCK_SKEW_WARNING_MS = 5 * 60 * 1e3;
 async function openWith(data2, creds) {
   let last;
   for (let i = 0; i < creds.length; i++) {
@@ -19971,7 +20092,7 @@ async function syncKdbx(opts) {
       base: data2 ?? prev?.base,
       lastSync: (/* @__PURE__ */ new Date()).toISOString()
     };
-    return { outcome, db, credentialsIndex: index, data: data2, state, conflicts, changes, attempts };
+    return { outcome, db, credentialsIndex: index, data: data2, state, conflicts, changes, attempts, clockOffsetMs: opts.blob.clockOffsetMs };
   };
   const checkRevision = (revision) => {
     if (!opts.acceptServerState && prev && revision >= 0 && revision < prev.revision) {
@@ -20386,7 +20507,7 @@ function serviceAccountSource(sa) {
 }
 
 // ../cli/src/session.ts
-var VERSION3 = "0.6.0";
+var VERSION3 = "0.7.0";
 
 // ../cli/src/template.ts
 var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
@@ -20498,7 +20619,7 @@ async function run(io, opts = {}) {
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.6.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.7.0" } });
     const src = serviceAccountSource(sa);
     const resolved = [];
     try {

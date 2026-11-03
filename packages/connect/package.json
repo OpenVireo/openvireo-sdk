@@ -1,6 +1,6 @@
 {
   "name": "@openvireo/connect",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "openvireo connect: a self-hosted REST server that holds one OpenVireo service account token",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -43,6 +43,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@openvireo/sdk": "0.6.0"
+    "@openvireo/sdk": "0.7.0"
   }
 }
