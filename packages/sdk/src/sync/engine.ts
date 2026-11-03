@@ -55,7 +55,24 @@ export interface SyncResult {
   conflicts: SyncConflict[];
   changes: MergeChange[];
   attempts: number;
+  /**
+   * How far this computer's clock is ahead of the sync server's, in milliseconds (negative: behind);
+   * undefined when the server sent no readable `Date`. See `isClockSkewed`.
+   */
+  clockOffsetMs?: number;
 }
+
+/** How far off a clock may be before apps warn (5 minutes), as the desktop and iOS apps do. */
+export const CLOCK_SKEW_WARNING_MS = 5 * 60 * 1000;
+
+/**
+ * Whether this computer's clock is far enough off the server's to warn the user. Sync itself doesn't
+ * depend on the clock (deletions and edits are decided against the base copy), but a wrong clock still
+ * gives entries wrong modification times, which decide between two copies when there is no base, and it
+ * breaks TOTP codes.
+ */
+export const isClockSkewed = (clockOffsetMs: number | undefined): boolean =>
+  clockOffsetMs !== undefined && Math.abs(clockOffsetMs) > CLOCK_SKEW_WARNING_MS;
 
 export interface SyncOptions {
   blob: BlobHandle;
@@ -108,7 +125,7 @@ export async function syncKdbx(opts: SyncOptions): Promise<SyncResult> {
       base: data ?? prev?.base,
       lastSync: new Date().toISOString(),
     };
-    return { outcome, db, credentialsIndex: index, data, state, conflicts, changes, attempts };
+    return { outcome, db, credentialsIndex: index, data, state, conflicts, changes, attempts, clockOffsetMs: opts.blob.clockOffsetMs };
   };
 
   const checkRevision = (revision: number) => {

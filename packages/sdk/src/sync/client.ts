@@ -41,6 +41,11 @@ export class BlobHandle {
     readonly path: string,
   ) {}
 
+  /** The client's `clockOffsetMs`: this computer's clock against the server's. */
+  get clockOffsetMs(): number | undefined {
+    return this.client.clockOffsetMs;
+  }
+
   async head(ifNoneMatch?: string): Promise<HeadResult> {
     const res = await this.client.request(this.path, { method: "HEAD", headers: ifNoneMatch ? { "If-None-Match": ifNoneMatch } : {} });
     if (res.status === 404) return { status: 404 };
@@ -128,8 +133,21 @@ export class SyncClient {
   }
 
   /** Sends with the bearer token; on 401 with a refreshable source, retries once with a fresh token. */
+  /**
+   * How far this computer's clock is ahead of the server's, in milliseconds (negative: behind), from the
+   * `Date` header of the last response that had a readable one; undefined until then. Good to about a
+   * second: the header has whole seconds, and the response took a moment to arrive.
+   */
+  clockOffsetMs?: number;
+
   async request(path: string, init: { method?: string; headers?: Record<string, string>; body?: Uint8Array; signal?: AbortSignal } = {}): Promise<Response> {
-    const go = async (force: boolean) => send(this.opts, this.url(path), { ...init, token: await this.token(force) });
+    const go = async (force: boolean) => {
+      const res = await send(this.opts, this.url(path), { ...init, token: await this.token(force) });
+      // A browser only sees Date when the server exposes it (Access-Control-Expose-Headers)
+      const serverTime = Date.parse(res.headers.get("Date") ?? "");
+      if (Number.isFinite(serverTime)) this.clockOffsetMs = Date.now() - serverTime;
+      return res;
+    };
     const res = await go(false);
     if (res.status === 401 && this.opts.token && typeof this.opts.token !== "string") {
       await res.body?.cancel();
