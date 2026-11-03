@@ -170,8 +170,8 @@ Without a base nothing is deleted, and the records are left as they are.
 
 **Recycle Bin.** The structure merge doesn't carry the database's Recycle Bin. After it, when the
 sides' bins differ (an unset bin, or one whose group is missing, counts as none): a side without one
-takes the other's; with two different bins, the one with the later `recycleBinChanged` wins (the
-smaller UUID on a tie). On both sides the bin is set to the winner with the winner's
+takes the other's; with two different bins, the one with the later `recycleBinChanged` in whole seconds
+wins (on a tie, the one whose UUID bytes sort first). On both sides the bin is set to the winner with the winner's
 `recycleBinChanged`, and the other bin, unless the winner is inside it, has its entries and groups
 moved into the winner and is then deleted for good (with a deletion record). Recorded as `metadata`,
 `Recycle Bin set from another device`.
