@@ -30,6 +30,13 @@ the base copy, the `If-Match` upload, and on `412` download, merge and retry (`m
 Persist `result.state` next to the file; it holds the ETag, the revision and the base copy for the next
 three-way merge. The web app keeps it in IndexedDB with its cached database.
 
+`result.clockOffsetMs` is how far this computer's clock is ahead of the sync server's (negative: behind),
+from the server's `Date` header; it is undefined when the server sent none the client could read (a browser
+needs the server to list `Date` in `Access-Control-Expose-Headers`). Sync decides edits and deletions against
+the base copy, not by clocks, but a wrong clock still stamps entries with wrong times and breaks TOTP codes, so
+warn when `isClockSkewed(result.clockOffsetMs)` (off by more than `CLOCK_SKEW_WARNING_MS`, 5 minutes), as the
+desktop and iOS apps do.
+
 ## Merge
 
 `mergeDatabases(local, remote, base)` is the merge on its own; see [Merge behaviour](merge-behaviour.md). Like

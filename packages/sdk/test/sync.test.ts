@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SseParser, SyncClient, deserializeSyncState, serializeSyncState, subscribeEvents, syncKdbx, toSyncEvent, type SyncEvent } from "../src/sync/index.js";
+import { CLOCK_SKEW_WARNING_MS, SseParser, SyncClient, deserializeSyncState, isClockSkewed, serializeSyncState, subscribeEvents, syncKdbx, toSyncEvent, type SyncEvent } from "../src/sync/index.js";
 import { openKdbx, saveKdbx, vaultCredentials } from "../src/vault/kdbx.js";
 import { KEY, addEntry, edit, get, threeCopies } from "./helpers/dbs.js";
 import { FakeSyncServer } from "./helpers/sync-server.js";
@@ -55,6 +55,32 @@ describe("SyncClient (legacy and JWT routes)", () => {
     const paired = SyncClient.selfHosted("https://sync.example", { fetch: s.fetch, token: claim.token });
     expect(await paired.createPairingCode()).toEqual({ code: "WXYZ-2345", expiresAt: "2026-10-17T00:05:00Z" });
     expect(await paired.health()).toEqual({ status: "ok" });
+  });
+});
+
+describe("clock offset from the server's Date header", () => {
+  it("measures this computer's clock against the server's on every sync", async () => {
+    const s = new FakeSyncServer();
+    let serverAhead = 0;
+    // The server's clock, `serverAhead` ms off this computer's
+    const fetch: typeof s.fetch = async (input, init) => {
+      const res = await s.fetch(input, init);
+      const headers = new Headers(res.headers);
+      headers.set("Date", new Date(Date.now() + serverAhead).toUTCString());
+      return new Response(res.status === 204 || res.status === 304 || init?.method === "HEAD" ? null : await res.arrayBuffer(), { status: res.status, headers });
+    };
+    const blob = SyncClient.selfHosted("https://sync.example", { fetch, token: "dev-token" }).database("db");
+    const { local } = await threeCopies((db) => void addEntry(db, "A"));
+
+    const first = await syncKdbx({ blob, db: local, credentials: creds });
+    expect(Math.abs(first.clockOffsetMs!)).toBeLessThan(1500);
+    expect(isClockSkewed(first.clockOffsetMs)).toBe(false);
+
+    serverAhead = -2 * CLOCK_SKEW_WARNING_MS; // this computer is 10 minutes ahead
+    const second = await syncKdbx({ blob, db: first.db, credentials: creds, state: first.state, localChanged: false });
+    expect(second.clockOffsetMs! / 60_000).toBeCloseTo(10, 1);
+    expect(isClockSkewed(second.clockOffsetMs)).toBe(true);
+    expect(isClockSkewed(undefined)).toBe(false);
   });
 });
 
