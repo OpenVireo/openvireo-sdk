@@ -4,6 +4,7 @@
  * merge in both directions (tree.ts), then the sync generation bump; plus the conflict checks against
  * the last-sync snapshot. Operates on kdbxweb objects.
  */
+import { toHex } from "../util/bytes.js";
 import { kdbxweb, type Kdbx, setSyncGeneration, syncGeneration } from "../vault/kdbx.js";
 import { applyField, binaryBytes, entrySeconds, fieldsOf, resolveFields, sameFields, sameValue, seconds } from "./fields.js";
 import {
@@ -275,9 +276,11 @@ function mergeRecycleBins(local: Kdbx, remote: Kdbx): MergeChange[] {
   if (!remoteBin) winner = local;
   else if (!localBin) winner = remote;
   else {
-    const lt = local.meta.recycleBinChanged?.getTime() ?? 0;
-    const rt = remote.meta.recycleBinChanged?.getTime() ?? 0;
-    winner = lt !== rt ? (lt > rt ? local : remote) : localBin.uuid.id < remoteBin.uuid.id ? local : remote;
+    // Whole seconds, as the files keep them; the UUIDs' bytes break a tie
+    const lt = Math.floor((local.meta.recycleBinChanged?.getTime() ?? 0) / 1000);
+    const rt = Math.floor((remote.meta.recycleBinChanged?.getTime() ?? 0) / 1000);
+    const hex = (g: KdbxGroup) => toHex(new Uint8Array(g.uuid.toBytes()));
+    winner = lt !== rt ? (lt > rt ? local : remote) : hex(localBin) < hex(remoteBin) ? local : remote;
   }
   const binId = (winner === local ? localBin : remoteBin)!.uuid.id;
   const binChanged = winner.meta.recycleBinChanged;
