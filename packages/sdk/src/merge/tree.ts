@@ -49,7 +49,7 @@ export function* entriesUnder(group: KdbxGroup): Generator<KdbxEntry> {
   }
 }
 
-function* groupsUnder(group: KdbxGroup): Generator<KdbxGroup> {
+export function* groupsUnder(group: KdbxGroup): Generator<KdbxGroup> {
   for (const child of group.groups) {
     yield child;
     yield* groupsUnder(child);
@@ -68,7 +68,7 @@ export function findGroup(db: Kdbx, id: string): KdbxGroup | undefined {
   return undefined;
 }
 
-function detach<T>(item: T & { parentGroup?: KdbxGroup }, list: (g: KdbxGroup) => T[]): void {
+export function detach<T>(item: T & { parentGroup?: KdbxGroup }, list: (g: KdbxGroup) => T[]): void {
   const parent = item.parentGroup;
   if (!parent) return;
   const siblings = list(parent);

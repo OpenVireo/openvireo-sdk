@@ -33,8 +33,9 @@ three-way merge. The web app keeps it in IndexedDB with its cached database.
 ## Merge
 
 `mergeDatabases(local, remote, base)` is the merge on its own; see [Merge behaviour](merge-behaviour.md). Like
-the desktop app, the default mode doesn't apply permanent deletions (`mode: "synchronize"` does); deleting to
-the Recycle Bin is a move and syncs normally.
+the desktop app, it applies permanent deletions only with the base: an item deleted on one side goes from
+both unless the other side changed it since the base. Deleting to the Recycle Bin is a move and syncs
+normally.
 
 ## HTTP clients
 

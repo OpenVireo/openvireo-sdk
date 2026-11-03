@@ -11,9 +11,12 @@ import {
   type MergeMode,
   copyEntry,
   customDataKey,
+  detach,
   entriesUnder,
   entryTitle,
   findEntryByUuid,
+  findGroup,
+  groupsUnder,
   mergeInto,
   overwriteEntryData,
   record,
@@ -21,12 +24,17 @@ import {
 } from "./tree.js";
 
 type KdbxEntry = kdbxweb.KdbxEntry;
+type KdbxGroup = kdbxweb.KdbxGroup;
+type Deleted = kdbxweb.KdbxDeletedObject;
 
 export type { ChangeType, MergeChange, MergeIntoOptions, MergeMode } from "./tree.js";
 export { findEntryByUuid, mergeInto } from "./tree.js";
 
 export interface MergeOptions {
-  /** "keep-newer" (the sync default: deletions are not applied) or "synchronize" */
+  /**
+   * "keep-newer" (the sync default) or "synchronize". Either way, with a base the sync applies each
+   * side's deletions to the other where the other side hasn't changed the item since the base.
+   */
   mode?: MergeMode;
   now?: () => Date;
 }
@@ -137,16 +145,164 @@ export async function mergeDatabases(local: Kdbx, remote: Kdbx, base?: Kdbx | nu
       }
     }
   }
+  // Found before the structure merge brings the deleted items back from the other side
+  const pending = base ? new Map([...pendingDeletions(local, remote), ...pendingDeletions(remote, local)]) : new Map<string, Deleted>();
   const mode = opts.mode ?? "keep-newer";
   const toRemote = mergeInto(local, remote, mode);
   const toLocal = mergeInto(remote, local, mode);
   changes.push(...toRemote, ...toLocal);
+  const after = [...(base && pending.size ? applyDeletions(local, remote, base, pending) : []), ...mergeRecycleBins(local, remote)];
+  changes.push(...after);
   if (changes.length) {
     const generation = Math.max(syncGeneration(local), syncGeneration(remote)) + 1;
     setSyncGeneration(local, generation);
     setSyncGeneration(remote, generation);
   }
-  return { changes, conflicts, remoteChanged: combined > 0 || toRemote.length > 0, localChanged: combined > 0 || toLocal.length > 0 };
+  return {
+    changes,
+    conflicts,
+    remoteChanged: combined > 0 || after.length > 0 || toRemote.length > 0,
+    localChanged: combined > 0 || after.length > 0 || toLocal.length > 0,
+  };
+}
+
+// ------------------------------------------------------------------- deletions (SyncEngine)
+
+/** Uuids (base64 ids) of the entries and of the groups below the root. */
+function idsOf(db: Kdbx): Set<string> {
+  const ids = new Set<string>();
+  for (const e of entriesUnder(db.getDefaultGroup())) ids.add(e.uuid.id);
+  for (const g of groupsUnder(db.getDefaultGroup())) ids.add(g.uuid.id);
+  return ids;
+}
+
+/**
+ * The deletions `from` made that `into` hasn't applied: recorded in `from`, gone there, still in `into`.
+ * The root group is never deleted.
+ */
+function pendingDeletions(from: Kdbx, into: Kdbx): Map<string, Deleted> {
+  const mine = idsOf(from);
+  mine.add(from.getDefaultGroup().uuid.id);
+  const theirs = idsOf(into);
+  const pending = new Map<string, Deleted>();
+  for (const rec of from.deletedObjects) {
+    const id = rec.uuid?.id;
+    if (id && !mine.has(id) && theirs.has(id) && !pending.has(id)) pending.set(id, rec);
+  }
+  return pending;
+}
+
+/** Whether a sync has deletions to apply, which needs the common base. */
+export function hasPendingDeletions(local: Kdbx, remote: Kdbx): boolean {
+  return pendingDeletions(local, remote).size > 0 || pendingDeletions(remote, local).size > 0;
+}
+
+const parentId = (item: KdbxEntry | KdbxGroup) => item.parentGroup?.uuid.id;
+const sameGroup = (a: KdbxGroup, b: KdbxGroup) =>
+  a.name === b.name &&
+  (a.notes ?? "") === (b.notes ?? "") &&
+  a.icon === b.icon &&
+  a.customIcon?.id === b.customIcon?.id &&
+  parentId(a) === parentId(b);
+const depthOf = (g: KdbxGroup) => {
+  let d = 0;
+  for (let p = g.parentGroup; p; p = p.parentGroup) d++;
+  return d;
+};
+
+/** Replaces `db`'s deletion records for `id` with `rec`, or drops them. */
+function setDeletion(db: Kdbx, id: string, rec: Deleted | null): void {
+  db.deletedObjects = db.deletedObjects.filter((r) => r.uuid?.id !== id);
+  if (rec) db.deletedObjects.push(rec);
+}
+
+/**
+ * Applies the deletions either side made since the last sync (`pending`, found before the structure
+ * merge brought the items back) to both. Whether to delete is decided by the base, not by deletion and
+ * modification times, so a device with a wrong clock can't delete what another device changed: an item
+ * goes only when both copies still match the base (same fields, or for a group the same name, notes and
+ * icon; in the same parent group) and, for a group, nothing is left in it. A deletion held back is
+ * dropped, so the item stays on both.
+ */
+function applyDeletions(local: Kdbx, remote: Kdbx, base: Kdbx, pending: Map<string, Deleted>): MergeChange[] {
+  const changes: MergeChange[] = [];
+  const both = [local, remote];
+  for (const [id, rec] of pending) {
+    const b = findEntryByUuid(base, id);
+    const copies = both.map((db) => findEntryByUuid(db, id)).filter((e): e is KdbxEntry => !!e);
+    if (!copies.length) continue;
+    const unchanged = !!b && copies.every((e) => parentId(e) === parentId(b) && sameFields(e, b));
+    if (unchanged) {
+      changes.push(record("deleted", copies[0]!, "Deleted on another device"));
+      for (const e of copies) detach(e, (g) => g.entries);
+    }
+    for (const db of both) setDeletion(db, id, unchanged ? rec : null);
+  }
+
+  // Deepest first, so a group's deleted subgroups are gone before it is looked at
+  const groups = [...pending.keys()]
+    .map((id) => findGroup(local, id))
+    .filter((g): g is KdbxGroup => !!g && g !== local.getDefaultGroup())
+    .sort((a, b) => depthOf(b) - depthOf(a));
+  for (const localGroup of groups) {
+    const id = localGroup.uuid.id;
+    const b = findGroup(base, id);
+    const copies = both.map((db) => findGroup(db, id)).filter((g): g is KdbxGroup => !!g);
+    const unchanged =
+      !!b && b !== base.getDefaultGroup() && copies.every((g) => !g.entries.length && !g.groups.length && sameGroup(g, b));
+    if (unchanged) {
+      changes.push(record("deleted", localGroup, "Deleted on another device"));
+      for (const g of copies) detach(g, (p) => p.groups);
+    }
+    for (const db of both) setDeletion(db, id, unchanged ? pending.get(id)! : null);
+  }
+  return changes;
+}
+
+/**
+ * The structure merge doesn't carry the Recycle Bin (KeePassXC's "missing handling of recycle bin"), so
+ * a bin made on one device was a plain group on the others, and deleting from it there moved things into
+ * a bin of their own. As in KeePass, the bin changed last wins on both sides; another bin is emptied into
+ * it and deleted.
+ */
+function mergeRecycleBins(local: Kdbx, remote: Kdbx): MergeChange[] {
+  const binOf = (db: Kdbx) => (db.meta.recycleBinUuid ? findGroup(db, db.meta.recycleBinUuid.id) : undefined);
+  const localBin = binOf(local);
+  const remoteBin = binOf(remote);
+  if (!localBin && !remoteBin) return [];
+  if (localBin && remoteBin && localBin.uuid.id === remoteBin.uuid.id) return [];
+  let winner: Kdbx;
+  if (!remoteBin) winner = local;
+  else if (!localBin) winner = remote;
+  else {
+    const lt = local.meta.recycleBinChanged?.getTime() ?? 0;
+    const rt = remote.meta.recycleBinChanged?.getTime() ?? 0;
+    winner = lt !== rt ? (lt > rt ? local : remote) : localBin.uuid.id < remoteBin.uuid.id ? local : remote;
+  }
+  const binId = (winner === local ? localBin : remoteBin)!.uuid.id;
+  const binChanged = winner.meta.recycleBinChanged;
+  const others = [localBin, remoteBin].filter((g): g is KdbxGroup => !!g && g.uuid.id !== binId).map((g) => g.uuid.id);
+
+  for (const db of [local, remote]) {
+    const bin = findGroup(db, binId);
+    if (!bin) continue;
+    for (const id of others) {
+      const other = findGroup(db, id);
+      if (!other || other === bin) continue;
+      // A bin inside the other one stays where it is
+      let inside = false;
+      for (let p = bin.parentGroup; p; p = p.parentGroup) if (p === other) inside = true;
+      if (inside) continue;
+      for (const item of [...other.entries, ...other.groups]) db.move(item, bin);
+      // Recorded, so the devices that sync next delete it too
+      db.move(other, null);
+    }
+    if (db.meta.recycleBinUuid?.id !== binId) {
+      db.meta.recycleBinUuid = bin.uuid;
+      db.meta.recycleBinChanged = binChanged;
+    }
+  }
+  return [record("metadata", null, "Recycle Bin set from another device")];
 }
 
 // --------------------------------------------------------------------- conflict detection (SyncEngine)
@@ -169,8 +325,9 @@ function changesSince(local: KdbxEntry, remote: KdbxEntry, snapshotMs: number) {
   return { local: localChanged, remote: remoteChanged };
 }
 
-/** Whether merging needs the common base (SyncEngine needsCommonBase). */
+/** Whether merging needs the common base (SyncEngine needsCommonBase): to combine entries, or to apply deletions. */
 export function needsCommonBase(local: Kdbx, remote: Kdbx, snapshot: Snapshot): boolean {
+  if (hasPendingDeletions(local, remote)) return true;
   for (const [id, ms] of Object.entries(snapshot)) {
     const l = findEntryByUuid(local, id);
     const r = findEntryByUuid(remote, id);
