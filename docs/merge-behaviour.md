@@ -4,8 +4,10 @@ When two devices change the same vault, a sync combines both sets of changes ins
 and losing the other. It first merges each entry edited on both sides field by field, against the last
 version both had (the base copy): a field only one side changed takes that side's value, and a field
 both changed takes the newer one and is reported in `SyncResult.conflicts`. Then it merges the
-structure (entries and groups added, moved or deleted), as specified below. Most apps only need this
-paragraph; the rest is the exact specification.
+structure (entries and groups added, moved or deleted), as specified below. Deletions are decided
+against the base too, not by the devices' clocks: something deleted on one device is deleted
+everywhere unless another device changed it since the last sync, and then it stays. Most apps only need
+this paragraph; the rest is the exact specification.
 
 ## Structure merge: required behaviour
 
@@ -117,7 +119,7 @@ item.
 ## 4. Deletions
 
 Only in `synchronize` mode; `keep-newer` (the sync default) skips this step and keeps the target's
-list of deleted objects as it is.
+list of deleted objects as it is. Sync applies deletions against the base instead (§6).
 
 1. Go through the target's deletion records, then the source's, skipping any without a UUID or a
    time. The first record for a UUID decides what it refers to: an entry in the target, a non-root
@@ -146,3 +148,30 @@ list of deleted objects as it is.
      `KPXC_SYNC_GENERATION` and every key starting with `KPXC_BROWSER_`;
    - copies every source item whose value differs (`Adding custom data <key> [<value>]`), except the
      generated keys `_LAST_MODIFIED`, `KPXC_RANDOM_SLUG` and `KPXC_SYNC_GENERATION`.
+
+## 6. Sync: deletions and the Recycle Bin
+
+`mergeDatabases(local, remote, base)` adds two steps around the structure merge, as the Qt client's
+`SyncEngine::mergeDatabases` does.
+
+**Deletions** (only with a base). Before the structure merge, find each side's pending deletions: a
+deletion record on one side for an entry or non-root group that is gone on that side and still on the
+other (the first record per UUID). After the structure merge has brought those items back, decide each
+one against the base; deletion and modification times play no part, so a wrong clock can't decide:
+
+1. Entries: delete from both copies when the entry is in the base and every copy is in the same group as
+   in the base with the same fields (§3); both copies then carry the record, recorded as `deleted`
+   with details `Deleted on another device`. Otherwise keep it and drop every record for its UUID
+   from both.
+2. Groups, deepest first: the same, where a group matches the base when its name, notes, icon and
+   parent group are the same, and it is deleted only when every copy is empty.
+
+Without a base nothing is deleted, and the records are left as they are.
+
+**Recycle Bin.** The structure merge doesn't carry the database's Recycle Bin. After it, when the
+sides' bins differ (an unset bin, or one whose group is missing, counts as none): a side without one
+takes the other's; with two different bins, the one with the later `recycleBinChanged` wins (the
+smaller UUID on a tie). On both sides the bin is set to the winner with the winner's
+`recycleBinChanged`, and the other bin, unless the winner is inside it, has its entries and groups
+moved into the winner and is then deleted for good (with a deletion record). Recorded as `metadata`,
+`Recycle Bin set from another device`.

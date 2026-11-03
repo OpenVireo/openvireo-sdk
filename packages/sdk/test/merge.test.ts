@@ -116,7 +116,7 @@ describe("Merger (structure)", () => {
     expect(r.changes.some((c) => c.type === "modified" && c.details.includes("Group name"))).toBe(true);
   });
 
-  it("deletions: kept in KeepNewer (KeePassXC's sync default), applied in Synchronize unless edited later", async () => {
+  it("deletions without a base: kept in KeepNewer (KeePassXC's default), applied in Synchronize unless edited later", async () => {
     const make = () =>
       threeCopies((db) => {
         addEntry(db, "Gone");
@@ -127,17 +127,17 @@ describe("Merger (structure)", () => {
       e.parentGroup!.entries.splice(e.parentGroup!.entries.indexOf(e), 1);
       db.addDeletedObject(e.uuid, at(time));
     };
-    let { local, remote, base } = await make();
+    let { local, remote } = await make();
     del(remote, "Gone", 200);
-    await mergeDatabases(local, remote, base, { now });
+    await mergeDatabases(local, remote, null, { now });
     expect(byTitle(local, "Gone")).toBeDefined();
     expect(byTitle(remote, "Gone")).toBeDefined(); // re-added from local, as KeePassXC does
 
-    ({ local, remote, base } = await make());
+    ({ local, remote } = await make());
     del(remote, "Gone", 200);
     del(remote, "Edited after delete", 200);
     edit(local, "Edited after delete", { Notes: "still here" }, 300);
-    await mergeDatabases(local, remote, base, { now, mode: "synchronize" });
+    await mergeDatabases(local, remote, null, { now, mode: "synchronize" });
     expect(byTitle(local, "Gone")).toBeUndefined();
     expect(get(local, "Edited after delete", "Notes")).toBe("still here");
   });

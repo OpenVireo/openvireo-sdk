@@ -178,12 +178,9 @@ function isInsideRecycleBin(group: KdbxGroup | undefined, rb: string | undefined
 export async function deleteEntryFromDb(db: Kdbx, entryUuid: string): Promise<void> {
   const entry = findEntryInKdbx(db.getDefaultGroup(), entryUuid);
   if (!entry) throw new Error("Entry not found");
-  if (isInsideRecycleBin(entry.parentGroup, recycleBinId(db)) && entry.parentGroup) {
-    const i = entry.parentGroup.entries.indexOf(entry);
-    if (i >= 0) entry.parentGroup.entries.splice(i, 1);
-  } else {
-    db.remove(entry);
-  }
+  // Already in the Recycle Bin: delete for good, recorded in DeletedObjects so syncing applies it elsewhere
+  if (isInsideRecycleBin(entry.parentGroup, recycleBinId(db))) db.move(entry, null);
+  else db.remove(entry);
 }
 
 export async function createGroupInDb(db: Kdbx, parentGroupUuid: string, groupName: string): Promise<KdbxGroup> {
@@ -197,12 +194,9 @@ export async function deleteGroupFromDb(db: Kdbx, groupUuid: string): Promise<vo
   const group = findGroupInKdbx(root, groupUuid);
   if (!group) throw new Error("Group not found");
   if (group === root) throw new Error("Cannot delete root group");
-  if (isInsideRecycleBin(group.parentGroup, recycleBinId(db)) && group.parentGroup) {
-    const i = group.parentGroup.groups.indexOf(group);
-    if (i >= 0) group.parentGroup.groups.splice(i, 1);
-  } else {
-    db.remove(group);
-  }
+  // The Recycle Bin itself, or a group in it: delete for good
+  if (isInsideRecycleBin(group, recycleBinId(db))) db.move(group, null);
+  else db.remove(group);
 }
 
 export async function emptyRecycleBinInDb(db: Kdbx): Promise<void> {
@@ -210,8 +204,7 @@ export async function emptyRecycleBinInDb(db: Kdbx): Promise<void> {
   if (!rb) throw new Error("No Recycle Bin configured in this database.");
   const bin = findGroupInKdbx(db.getDefaultGroup(), rb);
   if (!bin) throw new Error("Recycle Bin group not found.");
-  bin.entries.splice(0, bin.entries.length);
-  bin.groups.splice(0, bin.groups.length);
+  for (const item of [...bin.entries, ...bin.groups]) db.move(item, null);
 }
 
 export async function renameGroupInDb(db: Kdbx, groupUuid: string, newName: string): Promise<void> {
