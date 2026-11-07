@@ -18740,7 +18740,9 @@ var AAD = {
   keyset: "ov-keyset-v1",
   vaultKey: (vaultId) => `ov-vault-key|${vaultId}`,
   vaultName: (vaultId) => `ov-vault-name|${vaultId}`,
-  saMaster: (saId) => `ov-sa-master-v1|${saId}`
+  saMaster: (saId) => `ov-sa-master-v1|${saId}`,
+  share: (shareId) => `ov-share-v1|${shareId}`,
+  shareRef: (shareId) => `ov-share-ref|${shareId}`
 };
 var unsealVaultKey = (encSk, vaultId, sealed) => unseal(encSk, sealed, AAD.vaultKey(vaultId));
 
@@ -18827,6 +18829,7 @@ function errorDetails(code, body) {
     return { limit: b.limit, max: b.max, current: b.current, plan: b.plan, upgradeUrl: b.upgrade_url };
   }
   if (code === "quota_exceeded" && typeof b?.max === "number") return { max: b.max };
+  if (code === "invalid_passcode" && typeof b?.attempts_left === "number") return { attemptsLeft: b.attempts_left };
   return void 0;
 }
 var codeForStatus = (status) => ({
@@ -18918,6 +18921,7 @@ async function discover(issuer, http = {}) {
     requireSecureUrl(cfg[k], k);
   }
   if (typeof cfg.web === "string") requireSecureUrl(cfg.web, "web");
+  if (typeof cfg.share === "string") requireSecureUrl(cfg.share, "share");
   if (!cfg.opaque?.ids) throw new OpenVireoError("invalid_request", "openvireo-configuration is missing opaque.ids");
   return cfg;
 }
@@ -19071,6 +19075,10 @@ var AuthClient = class _AuthClient {
   renameOrg(org, name2) {
     return this.authed("PATCH", `orgs/${seg(org)}`, { name: name2 });
   }
+  /** Who may make share links from the org's vaults (owner/admin, SPEC.md §22). */
+  setOrgShareLinks(org, policy) {
+    return this.authed("PATCH", `orgs/${seg(org)}`, { item_share_links: policy });
+  }
   deleteOrg(org) {
     return this.authed("DELETE", `orgs/${seg(org)}`);
   }
@@ -19154,6 +19162,19 @@ var AuthClient = class _AuthClient {
   }
   revokeSaSecret(sa, id) {
     return this.authed("DELETE", `service-accounts/${seg(sa)}/secrets/${seg(id)}`);
+  }
+  // ---------------------------------------------------------------- share links (SPEC.md §22)
+  createShare(body) {
+    return this.authed("POST", "shares", body);
+  }
+  uploadShare(id, body) {
+    return this.authed("PUT", `shares/${seg(id)}`, body);
+  }
+  listShares() {
+    return this.authed("GET", "shares");
+  }
+  revokeShare(id) {
+    return this.authed("DELETE", `shares/${seg(id)}`);
   }
   // ---------------------------------------------------------------- audit
   audit(org, opts = {}) {
@@ -20507,7 +20528,7 @@ function serviceAccountSource(sa) {
 }
 
 // ../cli/src/session.ts
-var VERSION3 = "0.8.0";
+var VERSION3 = "0.9.0";
 
 // ../cli/src/template.ts
 var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
@@ -20540,6 +20561,10 @@ Usage:
   ov item edit <ov://vault/[group/\u2026]entry> [field=value\u2026] [--generate [--length N] [--charset S]] [--stdin-field F]
   ov rotate <ov://vault/[group/\u2026]entry/field> (--generate [--length N] [--charset S] | --stdin) [--print]
   ov vault list [--json]
+  ov share <ov://vault/[group/\u2026]entry> [--field F]\u2026 [--expires 7d] [--once | --max-opens N] [--passcode]
+  ov share --text [--title T] [--expires 7d] [--once | --max-opens N] [--passcode]   text from stdin
+  ov share list [--json]
+  ov share revoke <id>                       share links open without an account (users only)
   ov login [--issuer URL] [--email E] [--secret-key K1-\u2026]
   ov logout [--forget]                       --forget also removes the Secret Key from this machine
   ov whoami
@@ -20620,7 +20645,7 @@ async function run(io, opts = {}) {
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.8.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.9.0" } });
     const src = serviceAccountSource(sa);
     const resolved = [];
     try {
