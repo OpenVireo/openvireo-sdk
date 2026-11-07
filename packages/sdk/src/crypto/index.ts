@@ -1,5 +1,6 @@
 /**
- * Secret Key, AUK, wrap and seal envelopes, keysets, fingerprints, vault names and tokens (SPEC §2–§9).
+ * Secret Key, AUK, wrap and seal envelopes, keysets, fingerprints, vault names, tokens (SPEC §2–§9) and
+ * share links (§22).
  *
  * @module @openvireo/sdk/crypto
  */
@@ -12,6 +13,7 @@ export * from "./vault-name.js";
 export * from "./tokens.js";
 export * from "./jwt.js";
 export * from "./restore.js";
+export * from "./share.js";
 export { sha256, hkdf } from "./primitives.js";
 export * from "../util/bytes.js";
 export * from "../errors.js";

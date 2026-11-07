@@ -68,6 +68,7 @@ limited to a few vaults.
 - [Offline](guides/offline.md): keep working without the network
 - [Moving a database to an account](guides/move-to-account.md)
 - [Account recovery](guides/recovery.md): resets and restoring the old vaults
+- [Share links](guides/share-links.md): give an item or some text to someone without an account
 - [Service accounts](guides/service-accounts.md): CI, servers and long-running processes
 - [Self-hosted sync servers](guides/self-hosted-sync.md): no account, just a sync server
 - [Testing your app](guides/testing.md): the in-memory servers
@@ -94,6 +95,7 @@ Everything is exported from `@openvireo/sdk`. Smaller entry points keep bundles 
 | `@openvireo/sdk/sync` | `SyncClient`, the `syncKdbx` merge and retry loop, `subscribeEvents` |
 | `@openvireo/sdk/vault` | kdbxweb open and save, vault-key credentials, entry helpers, `ov://` references |
 | `@openvireo/sdk/merge` | The sync merge, matching the desktop app |
+| `@openvireo/sdk/share` | Opening share links without an account, share payloads, TOTP codes |
 | `@openvireo/sdk/testing` | In-memory auth and sync servers for tests (not for production) |
 
 ## License

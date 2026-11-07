@@ -56,6 +56,10 @@
       "types": "./dist/merge/index.d.ts",
       "default": "./dist/merge/index.js"
     },
+    "./share": {
+      "types": "./dist/share/index.d.ts",
+      "default": "./dist/share/index.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"

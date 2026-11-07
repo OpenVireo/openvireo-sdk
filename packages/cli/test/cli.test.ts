@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ServiceAccount } from "@openvireo/sdk";
+import { ServiceAccount, openShare } from "@openvireo/sdk";
 import { type World, editBetweenGetAndPut, makeWorld } from "../../sdk/test/helpers/world.js";
 import { MASK, main } from "../src/index.js";
 
@@ -219,6 +219,40 @@ describe("ov vault / whoami / login", () => {
     expect((await openvireo(["read", "ov://a/b/c"], { env: { OPENVIREO_PASSWORD: w.password } })).stderr).toMatch(/not signed in/);
     expect((await openvireo(["logout", "--nope"])).code).not.toBe(0);
     expect((await openvireo(["logout", "--forget"])).stderr).toBe("Not signed in\n");
+  });
+
+  it("makes share links as a user", async () => {
+    const env = { OPENVIREO_ISSUER: "https://auth.example" };
+    const prompt = (q: string) => (q.startsWith("Email") ? "alice@example.com" : q.startsWith("Master") ? w.password : q.startsWith("Passcode") ? "tiger lily" : "");
+    expect((await openvireo(["login"], { env, prompt })).code).toBe(0);
+    const user = { OPENVIREO_PASSWORD: w.password };
+    const api = "https://auth.example/api/v1";
+
+    const r = await openvireo(["share", "ov://Team%20Infra/GitHub", "--field", "UserName", "--field", "Password", "--once"], { env: user });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toMatch(/opens once\. Anyone with the link can open it\.\n$/);
+    const url = r.stdout.trim();
+    expect(url).toMatch(/^https:\/\/share\.example\/[A-Za-z0-9_-]{22}#[A-Za-z0-9_-]{43}$/);
+    const opened = await openShare(api, url, { http: { fetch: w.fetch } });
+    // earlier tests rotate the password, so only its presence is checked
+    expect(opened.payload.fields.map((f) => [f.k, f.k === "password" ? !!f.value : f.value])).toEqual([["username", "ci"], ["password", true]]);
+    await expect(openShare(api, url, { http: { fetch: w.fetch } })).rejects.toMatchObject({ code: "not_found" });
+
+    const text = await openvireo(["share", "--text", "--title", "Door", "--passcode", "--expires", "1h"], { env: user, stdin: "4321\n", prompt });
+    expect(text.code).toBe(0);
+    const door = await openShare(api, text.stdout.trim(), { passcode: "tiger lily", http: { fetch: w.fetch } });
+    expect([door.payload.title, door.payload.fields[0]!.value]).toEqual(["Door", "4321"]);
+
+    const list = (await openvireo(["share", "list"], { env: user })).stdout.split("\n").filter(Boolean);
+    expect(list).toHaveLength(2);
+    expect(list[1]).toMatch(/GitHub\s+1\/1 opens\s+ended \(opened\)/);
+    const id = list[0]!.split(" ")[0]!;
+    expect((await openvireo(["share", "revoke", id], { env: user })).stderr).toBe(`Revoked ${id}\n`);
+
+    expect((await openvireo(["share", "ov://Team%20Infra/GitHub", "--field", "Nope"], { env: user })).stderr).toBe("ov: GitHub has no Nope to share\n");
+    expect((await openvireo(["share", "ov://Team%20Infra/GitHub", "--expires", "soon"], { env: user })).code).toBe(2);
+    expect((await openvireo(["share", "ov://Team%20Infra/GitHub"], { env: asReader() })).stderr).toBe("ov: share links are made by users, not service accounts\n");
+    await openvireo(["logout"]);
   });
 
   it("prints usage and versions", async () => {

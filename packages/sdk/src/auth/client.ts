@@ -26,6 +26,8 @@ import type {
   ServiceAccount,
   ServiceAccountExchange,
   Session,
+  ShareJson,
+  ShareLinkPolicy,
   TokenPair,
   Vault,
   VaultAccess,
@@ -54,6 +56,7 @@ export async function discover(issuer: string, http: HttpOptions = {}): Promise<
     requireSecureUrl(cfg[k], k);
   }
   if (typeof cfg.web === "string") requireSecureUrl(cfg.web, "web");
+  if (typeof cfg.share === "string") requireSecureUrl(cfg.share, "share");
   if (!cfg.opaque?.ids) throw new OpenVireoError("invalid_request", "openvireo-configuration is missing opaque.ids");
   return cfg;
 }
@@ -222,6 +225,10 @@ export class AuthClient {
   renameOrg(org: string, name: string) {
     return this.authed<Org>("PATCH", `orgs/${seg(org)}`, { name });
   }
+  /** Who may make share links from the org's vaults (owner/admin, SPEC.md §22). */
+  setOrgShareLinks(org: string, policy: ShareLinkPolicy) {
+    return this.authed<Org>("PATCH", `orgs/${seg(org)}`, { item_share_links: policy });
+  }
   deleteOrg(org: string) {
     return this.authed<void>("DELETE", `orgs/${seg(org)}`);
   }
@@ -310,6 +317,20 @@ export class AuthClient {
   }
   revokeSaSecret(sa: string, id: string) {
     return this.authed<void>("DELETE", `service-accounts/${seg(sa)}/secrets/${seg(id)}`);
+  }
+
+  // ---------------------------------------------------------------- share links (SPEC.md §22)
+  createShare(body: { vault_id?: string | null; expires_in: number; max_opens?: number | null; kdf?: KdfParams | null; auth?: string }) {
+    return this.authed<ShareJson>("POST", "shares", body);
+  }
+  uploadShare(id: string, body: { ct: string; ref: string }) {
+    return this.authed<ShareJson>("PUT", `shares/${seg(id)}`, body);
+  }
+  listShares() {
+    return this.authed<{ shares: ShareJson[] }>("GET", "shares");
+  }
+  revokeShare(id: string) {
+    return this.authed<void>("DELETE", `shares/${seg(id)}`);
   }
 
   // ---------------------------------------------------------------- audit

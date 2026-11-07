@@ -82,6 +82,17 @@ limits. Nothing is locked when a limit is reached: existing vaults keep opening 
 | `entry_not_found` | No entry, or several, match the reference; use the entry UUID when titles repeat |
 | `conflict` (409) | `create: "only"` and the entry exists; on the server, also an email that is taken or a key version that moved on |
 
+## Share links
+
+| Code | Status | Meaning | What to do |
+|---|---|---|---|
+| `not_found` | 404 | The link expired, was opened as often as allowed, was revoked, or never existed | Ask the sender for a new link |
+| `passcode_required` | | The link needs a passcode and none was given | Ask for it |
+| `invalid_passcode` | 403 | Wrong passcode; `details.attemptsLeft` says how many tries are left before the link ends | Ask again |
+| `invalid_link` | | The link is incomplete (no key after `#`) | Ask the sender to send it again |
+| `too_large` | | The content is over 64 KiB | Share fewer fields |
+| `invalid_totp` | | A one-time code field isn't a valid `otpauth://totp` URI | Show the value as text |
+
 ## HTTP and transport
 
 Server errors keep the server's `code`; without one, the status decides:

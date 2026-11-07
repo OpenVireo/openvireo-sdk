@@ -96,12 +96,14 @@ export function unseal(recipientEncSk: Uint8Array, sealed: Uint8Array, aad: stri
   }
 }
 
-// ---- AAD strings (SPEC §4, §6), used byte for byte
+// ---- AAD strings (SPEC §4, §6, §22), used byte for byte
 export const AAD = {
   keyset: "ov-keyset-v1",
   vaultKey: (vaultId: string) => `ov-vault-key|${vaultId}`,
   vaultName: (vaultId: string) => `ov-vault-name|${vaultId}`,
   saMaster: (saId: string) => `ov-sa-master-v1|${saId}`,
+  share: (shareId: string) => `ov-share-v1|${shareId}`,
+  shareRef: (shareId: string) => `ov-share-ref|${shareId}`,
 } as const;
 
 export const sealVaultKey = (recipientEncPk: Uint8Array, vaultId: string, vaultKey: Uint8Array, opts?: SealOptions) =>

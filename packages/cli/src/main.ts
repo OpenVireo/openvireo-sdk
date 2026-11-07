@@ -2,13 +2,13 @@
 import { writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { type ParseArgsOptionsConfig, parseArgs } from "node:util";
-import { OpenVireoError, type FetchLike, findEntry, formatReference, itemOf, listItems, parseItemReference, parseReference, setItemFields, writeField } from "@openvireo/sdk";
+import { DEFAULT_SHARE_FIELDS, OpenVireoError, type FetchLike, findEntry, formatReference, itemOf, itemSharePayload, listItems, parseItemReference, parseReference, setItemFields, shareableFields, textSharePayload, writeField } from "@openvireo/sdk";
 import { connectMain } from "@openvireo/connect";
 import { generatePassword, parseCharsets } from "./generate.js";
 import { Masker } from "./mask.js";
 import { STRIPPED_ENV, runCommand } from "./run.js";
 import { type Prompt, VERSION, login, logout, openSource, whoami } from "./session.js";
-import type { VaultSource } from "./source.js";
+import { type VaultSource, pickVault } from "./source.js";
 import { parseEnvFile, readReference, resolveTemplate } from "./template.js";
 
 export interface CliIo {
@@ -35,6 +35,10 @@ Usage:
   ov item edit <ov://vault/[group/…]entry> [field=value…] [--generate [--length N] [--charset S]] [--stdin-field F]
   ov rotate <ov://vault/[group/…]entry/field> (--generate [--length N] [--charset S] | --stdin) [--print]
   ov vault list [--json]
+  ov share <ov://vault/[group/…]entry> [--field F]… [--expires 7d] [--once | --max-opens N] [--passcode]
+  ov share --text [--title T] [--expires 7d] [--once | --max-opens N] [--passcode]   text from stdin
+  ov share list [--json]
+  ov share revoke <id>                       share links open without an account (users only)
   ov login [--issuer URL] [--email E] [--secret-key K1-…]
   ov logout [--forget]                       --forget also removes the Secret Key from this machine
   ov whoami
@@ -81,6 +85,24 @@ function assignments(list: string[]): Record<string, string> {
 }
 
 const stripNewline = (s: string) => s.replace(/\r?\n$/, "");
+
+/** "1h", "7d", "30d" → seconds */
+function duration(text: string): number {
+  const m = /^(\d+)([hd])$/.exec(text.trim());
+  if (!m) throw new UsageError(`--expires takes hours or days, like 1h or 7d: ${text}`);
+  return Number(m[1]) * (m[2] === "h" ? 3600 : 86400);
+}
+
+const SHARE_OPTIONS = {
+  field: { type: "string", multiple: true },
+  expires: { type: "string" },
+  once: { type: "boolean" },
+  "max-opens": { type: "string" },
+  passcode: { type: "boolean" },
+  text: { type: "boolean" },
+  title: { type: "string" },
+  json: { type: "boolean" },
+} as const;
 
 export async function main(argv: string[], io: CliIo): Promise<number> {
   const out = (s: string) => io.stdout.write(s);
@@ -200,6 +222,66 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         const vaults = await (await src()).listVaults();
         if (values.json) out(JSON.stringify(vaults, null, 2) + "\n");
         else for (const v of vaults) out(`${v.id}  ${v.role.padEnd(6)}  ${v.name}\n`);
+        return 0;
+      }
+
+      case "share": {
+        const { values, positionals } = parse(rest, SHARE_OPTIONS);
+        const account = async () => {
+          const s = await src();
+          if (!s.account) throw new OpenVireoError("forbidden", "share links are made by users, not service accounts", 403);
+          return { s, account: s.account };
+        };
+        if (positionals[0] === "list") {
+          const shares = await (await account()).account.listShares();
+          if (values.json) out(JSON.stringify(shares, null, 2) + "\n");
+          else {
+            for (const sh of shares) {
+              const opens = sh.maxOpens === null ? `${sh.opens} opens` : `${sh.opens}/${sh.maxOpens} opens`;
+              const state = sh.status === "ended" ? `ended (${sh.endReason})` : `until ${sh.expiresAt}`;
+              out(`${sh.id}  ${(sh.ref?.title || "(untitled)").padEnd(24)}  ${opens.padEnd(10)}  ${state}\n`);
+            }
+          }
+          return 0;
+        }
+        if (positionals[0] === "revoke") {
+          if (positionals.length !== 2) throw new UsageError("usage: ov share revoke <id>");
+          await (await account()).account.revokeShare(positionals[1]!);
+          err(`Revoked ${positionals[1]}\n`);
+          return 0;
+        }
+        if (values.text ? positionals.length : positionals.length !== 1) {
+          throw new UsageError("usage: ov share <ov://vault/[group/…]entry> [options] | ov share --text [options] | ov share list | ov share revoke <id>");
+        }
+        if (values.once && values["max-opens"]) throw new UsageError("use --once or --max-opens, not both");
+        const maxOpens = values.once ? 1 : values["max-opens"] ? Number(values["max-opens"]) : null;
+        if (maxOpens !== null && !Number.isInteger(maxOpens)) throw new UsageError(`--max-opens must be a number: ${values["max-opens"]}`);
+        const expiresIn = duration(values.expires ?? "7d");
+        const { s, account: acct } = await account();
+        let payload;
+        let where: { vaultId?: string; entryId?: string } = {};
+        if (values.text) {
+          const text = stripNewline(await io.stdin());
+          if (!text) throw new UsageError("nothing to share: pipe the text to stdin");
+          payload = textSharePayload(text, values.title);
+        } else {
+          const ref = parseItemReference(positionals[0]!);
+          const item = itemOf(findEntry(await s.open(ref.vault), ref), { reveal: true });
+          const names = values.field?.length ? values.field : [...DEFAULT_SHARE_FIELDS];
+          const known = new Set(shareableFields(item).map((f) => f.name));
+          const missing = names.filter((n) => !known.has(n));
+          if (missing.length) throw new UsageError(`${item.title} has no ${missing.join(", ")} to share`);
+          payload = itemSharePayload(item, names);
+          where = { vaultId: pickVault(await s.listVaults(), ref.vault, "this account").id, entryId: item.id };
+        }
+        let passcode: string | undefined;
+        if (values.passcode) {
+          passcode = io.env.OPENVIREO_SHARE_PASSCODE ?? (io.prompt ? await io.prompt("Passcode for the link: ", { hidden: true }) : undefined);
+          if (!passcode) throw new UsageError("--passcode needs OPENVIREO_SHARE_PASSCODE or a terminal to ask on");
+        }
+        const share = await acct.createShare(payload, { expiresIn, maxOpens, passcode, ...where });
+        err(`Expires ${share.expiresAt}${maxOpens ? `, opens ${maxOpens === 1 ? "once" : `${maxOpens} times`}` : ""}. Anyone with the link can open it.\n`);
+        out(share.url + "\n");
         return 0;
       }
 

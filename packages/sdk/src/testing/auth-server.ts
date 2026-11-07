@@ -1,6 +1,6 @@
 /** An in-memory auth server following openapi.yaml closely enough for end-to-end tests of the SDK. */
 import { opaqueServerForTests as OS, opaqueIds } from "../opaque/index.js";
-import { b64u, fromB64u, randomUuid, toHex } from "../util/bytes.js";
+import { b64u, fromB64u, randomBytes, randomUuid, toHex } from "../util/bytes.js";
 import { sha256 } from "../crypto/primitives.js";
 import { verifyRestoreProof } from "../crypto/restore.js";
 import { MockServer, json } from "./mock-fetch.js";
@@ -13,6 +13,7 @@ export const CONFIG = {
   jwks_uri: ISSUER + "/.well-known/jwks.json",
   opaque: { lib: "opaque-ke", version: "4.0.1", context: "ov-opaque-v1", ids: "auth.example" },
   kdf_min: { m: 19456, t: 2 },
+  share: "https://share.example",
 };
 
 interface Access {
@@ -64,6 +65,8 @@ export class FakeAuthServer extends MockServer {
   issuedAt = new Map<string, number>();
   recentTokenMs = 5 * 60_000;
   onToken: (t: string) => void = () => {};
+  /** share links by id (SPEC.md §22) */
+  shares = new Map<string, { owner: string; vault_id: string | null; ct: string | null; ref: string | null; kdf: any; authHash: string | null; failed: number; max_opens: number | null; opens: number; opened_at: string[]; created_at: string; expires_at: string; ended: string | null }>();
 
   /**
    * Approves a reset for an account (what the admin review does) and returns the `ov_rc_` token of the
@@ -460,6 +463,77 @@ export class FakeAuthServer extends MockServer {
       for (const a of v.access.values()) for (const k of [...a.keys.keys()]) if (k < v.current) a.keys.delete(k);
       return new Response(null, { status: 204 });
     }));
+    // ---- share links (SPEC.md §22)
+    const shareJson = (id: string) => {
+      const s = this.shares.get(id)!;
+      const status = s.ended ? "ended" : s.ct ? "active" : "pending";
+      return { id, vault_id: s.vault_id, ref: s.ref, passcode: !!s.kdf, max_opens: s.max_opens, opens: s.opens, opened_at: s.opened_at, created_at: s.created_at, expires_at: s.expires_at, status, ended_at: s.ended ? s.created_at : null, end_reason: s.ended };
+    };
+    const gone = () => json(404, { error: "This link has expired, was already opened, or doesn't exist", code: "not_found" });
+    const liveShare = (id: string) => {
+      const s = this.shares.get(id);
+      if (!s || !s.ct || s.ended) return null;
+      if (Date.parse(s.expires_at) <= Date.now()) {
+        s.ended = "expired";
+        s.ct = null;
+        return null;
+      }
+      return s;
+    };
+    this.on("POST", P + "shares", A((req, _p, pr) => {
+      const b = req.json;
+      if (!pr.startsWith("user:")) return json(403, { error: "users only", code: "forbidden" });
+      if (b.vault_id && !this.vaults.get(b.vault_id)?.access.has(pr)) return json(404, { error: "Vault not found", code: "not_found" });
+      if (!(b.expires_in >= 3600 && b.expires_in <= 30 * 86400)) return json(400, { error: "expires_in", code: "invalid_request" });
+      const id = b64u(randomBytes(16));
+      const now = new Date();
+      this.shares.set(id, { owner: pr, vault_id: b.vault_id ?? null, ct: null, ref: null, kdf: b.kdf ?? null, authHash: b.auth ? toHex(sha256(fromB64u(b.auth))) : null, failed: 0, max_opens: b.max_opens ?? null, opens: 0, opened_at: [], created_at: now.toISOString(), expires_at: new Date(now.getTime() + b.expires_in * 1000).toISOString(), ended: null });
+      return json(201, shareJson(id));
+    }));
+    this.on("PUT", P + "shares/{id}", A((req, p, pr) => {
+      const s = this.shares.get(p.id);
+      if (!s || s.owner !== pr) return json(404, { error: "Share not found", code: "not_found" });
+      if (s.ct) return json(409, { error: "already uploaded", code: "conflict" });
+      const ct = fromB64u(req.json.ct);
+      if (ct[0] !== 1 || (ct.length - 41) % 512 !== 0) return json(400, { error: "ct", code: "invalid_request" });
+      s.ct = req.json.ct;
+      s.ref = req.json.ref;
+      return json(200, shareJson(p.id));
+    }));
+    this.on("GET", P + "shares", A((_r, _p, pr) => json(200, { shares: [...this.shares].filter(([, s]) => s.owner === pr && (s.ct || s.ended)).reverse().map(([id]) => shareJson(id)) })));
+    this.on("DELETE", P + "shares/{id}", A((_r, p, pr) => {
+      const s = this.shares.get(p.id);
+      if (!s || s.owner !== pr) return json(404, { error: "Share not found", code: "not_found" });
+      if (!s.ended) {
+        s.ended = "revoked";
+        s.ct = null;
+      }
+      return new Response(null, { status: 204 });
+    }));
+    this.on("GET", P + "public/shares/{id}", (_r, p) => {
+      const s = liveShare(p.id!);
+      return s ? json(200, { expires_at: s.expires_at, opens_left: s.max_opens === null ? null : s.max_opens - s.opens, kdf: s.kdf }) : gone();
+    });
+    this.on("POST", P + "public/shares/{id}/open", (req, p) => {
+      const s = liveShare(p.id!);
+      if (!s) return gone();
+      if (s.authHash && (!req.json?.auth || toHex(sha256(fromB64u(req.json.auth))) !== s.authHash)) {
+        if (++s.failed >= 5) {
+          s.ended = "passcode";
+          s.ct = null;
+          return gone();
+        }
+        return json(403, { error: "Wrong passcode", code: "invalid_passcode", attempts_left: 5 - s.failed });
+      }
+      const ct = s.ct!;
+      s.opens++;
+      s.opened_at.push(new Date().toISOString());
+      if (s.max_opens !== null && s.opens >= s.max_opens) {
+        s.ended = "opened";
+        s.ct = null;
+      }
+      return json(200, { ct, opens_left: s.max_opens === null ? null : s.max_opens - s.opens });
+    });
     this.on("POST", P + "orgs/{org}/service-accounts", A((req, p, pr) => {
       const b = req.json;
       const sa = { id: b.id, org_id: p.org, name: b.name, keyset: b.keyset, master: new Map(b.master_keys.map((m: any) => [m.principal, m.sealed_key])), secrets: new Map([[b.secret.secret_hash, b.secret.wrapped_master]]) };

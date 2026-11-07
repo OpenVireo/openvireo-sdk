@@ -6,7 +6,7 @@ import { OpenVireoError, isUnreachable } from "./errors.js";
 import { AuthClient, discover } from "./auth/client.js";
 import { MemoryStorage, NamespacedStorage, type KeyValueStorage } from "./auth/storage.js";
 import { TokenManager, type SignedOutReason, type StoredSession } from "./auth/token-manager.js";
-import { type DeviceInfo, type Grant, type OpenVireoConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
+import { type DeviceInfo, type Grant, type OpenVireoConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type ShareJson, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
 import type { HttpOptions } from "./http/request.js";
 import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
 import { sealSaMaster, sealVaultKey, unsealSaMaster, unsealVaultKey } from "./crypto/envelope.js";
@@ -15,6 +15,7 @@ import { formatSecretKey, generateSecretKey, parseSecretKey } from "./crypto/sec
 import { newSaSecret } from "./crypto/tokens.js";
 import { decryptVaultName, encryptVaultName } from "./crypto/vault-name.js";
 import { resealVaultKey, restoreProof } from "./crypto/restore.js";
+import { type ShareRef, type SharePayload, decryptShareRef, encryptSharePayload, encryptShareRef, shareAuth, shareLink, sharePasscodeKey } from "./crypto/share.js";
 import { b64u, concat, ctEqual, exactBuffer, fromB64u, randomBytes, randomUuid, utf8, wipe } from "./util/bytes.js";
 import { finishLogin, finishRegistration, opaqueIds, startLogin, startRegistration } from "./opaque/index.js";
 import { SyncClient } from "./sync/client.js";
@@ -116,6 +117,43 @@ export interface RecoveryReset {
 }
 
 /** GET /me/recovery, camelCased: whether a recovery archive from a reset exists (SPEC.md §18). */
+/** Options of a new share link (SPEC.md §22). */
+export interface ShareOptions {
+  /** seconds, 3600 to 30 days (and the plan's share_link_days) */
+  expiresIn: number;
+  /** null or absent: unlimited until it expires */
+  maxOpens?: number | null;
+  /** the recipient types this as well as opening the link */
+  passcode?: string;
+  /** the vault and entry it came from; leave out for text */
+  vaultId?: string;
+  entryId?: string;
+}
+
+export interface CreatedShare {
+  id: string;
+  /** the link to send; the key is after `#` and is never sent to the server */
+  url: string;
+  expiresAt: string;
+}
+
+/** A share link in its owner's list, with where it came from when this account can read that. */
+export interface ShareListing {
+  id: string;
+  vaultId: string | null;
+  /** null when the reference can't be read (made with keys this account no longer has) */
+  ref: ShareRef | null;
+  passcode: boolean;
+  maxOpens: number | null;
+  opens: number;
+  openedAt: string[];
+  createdAt: string;
+  expiresAt: string;
+  status: ShareJson["status"];
+  endedAt: string | null;
+  endReason: ShareJson["end_reason"];
+}
+
 export interface RecoveryStatus {
   archived: boolean;
   /** the email before the reset, which the restore signs in with */
@@ -1108,6 +1146,81 @@ export class Account {
     // The cached vault list must hold the new sealed key, or the re-keyed copy won't open offline
     if (this.opts.offline) await this.auth.getVault(vaultId).then((v) => this.cacheVault(v), () => undefined);
     return result;
+  }
+
+  // --------------------------------------------------------------------------- share links (SPEC §22)
+
+  /** Where links point: the discovery `share` URL, else the web app's `/s`. Null when neither is known. */
+  get shareBase(): string | null {
+    return this.config.share ?? (this.config.web ? `${this.config.web.replace(/\/+$/, "")}/s` : null);
+  }
+
+  /**
+   * Makes a share link for `payload` (see `itemSharePayload` and `textSharePayload` in the share
+   * module). The content is encrypted here with a fresh key that only the link holds.
+   */
+  async createShare(payload: SharePayload, opts: ShareOptions): Promise<CreatedShare> {
+    const ks = this.requireKeyset();
+    const base = this.shareBase;
+    if (!base) throw new OpenVireoError("unsupported", "this server has no share page");
+    let passcodeKey: Uint8Array | undefined;
+    let kdf: ReturnType<typeof newKdfParams> | undefined;
+    let auth: Uint8Array | undefined;
+    if (opts.passcode) {
+      kdf = newKdfParams();
+      passcodeKey = await sharePasscodeKey(opts.passcode, kdf);
+      auth = shareAuth(passcodeKey);
+    }
+    const key = randomBytes(32);
+    try {
+      const share = await this.auth.createShare({
+        vault_id: opts.vaultId ?? null,
+        expires_in: opts.expiresIn,
+        max_opens: opts.maxOpens ?? null,
+        ...(kdf && auth ? { kdf, auth: b64u(auth) } : {}),
+      });
+      const ct = encryptSharePayload(key, share.id, payload, passcodeKey);
+      const ref = encryptShareRef(ks.encSk, share.id, { vault: opts.vaultId ?? null, entry: opts.entryId ?? null, title: payload.title ?? "" });
+      await this.auth.uploadShare(share.id, { ct: b64u(ct), ref });
+      return { id: share.id, url: shareLink(base, share.id, key), expiresAt: share.expires_at };
+    } finally {
+      wipe(key);
+      if (passcodeKey) wipe(passcodeKey);
+      if (auth) wipe(auth);
+    }
+  }
+
+  /** This account's share links, newest first, with those that ended in the last 30 days. */
+  async listShares(): Promise<ShareListing[]> {
+    const ks = this.requireKeyset();
+    const { shares } = await this.auth.listShares();
+    return shares.map((s) => {
+      let ref: ShareRef | null = null;
+      try {
+        if (s.ref) ref = decryptShareRef(ks.encSk, s.id, s.ref);
+      } catch {
+        ref = null;
+      }
+      return {
+        id: s.id,
+        vaultId: s.vault_id,
+        ref,
+        passcode: s.passcode,
+        maxOpens: s.max_opens,
+        opens: s.opens,
+        openedAt: s.opened_at,
+        createdAt: s.created_at,
+        expiresAt: s.expires_at,
+        status: s.status,
+        endedAt: s.ended_at,
+        endReason: s.end_reason,
+      };
+    });
+  }
+
+  /** Ends a share link at once; its content is deleted from the server. */
+  async revokeShare(id: string): Promise<void> {
+    await this.auth.revokeShare(id);
   }
 
   // --------------------------------------------------------------------------- service accounts

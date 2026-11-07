@@ -13,6 +13,8 @@ export interface VaultSummary {
 export interface VaultSource {
   readonly kind: "service-account" | "user";
   readonly principal: string;
+  /** the signed-in user's account, for what only users can do (share links) */
+  readonly account?: Account;
   listVaults(): Promise<VaultSummary[]>;
   /** the vault's current contents (downloaded once per process) */
   open(idOrName: string): Promise<Kdbx>;
@@ -54,6 +56,7 @@ export function userSource(account: Account): VaultSource {
   return {
     kind: "user",
     principal: account.principal,
+    account,
     listVaults,
     open: async (idOrName) => (await vault(idOrName)).av.db!,
     edit: async (idOrName, fn) => {

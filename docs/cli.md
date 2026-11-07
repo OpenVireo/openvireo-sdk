@@ -148,6 +148,23 @@ The master password is never stored. `OPENVIREO_PASSWORD`, `OPENVIREO_SECRET_KEY
 environment for non-interactive use; prefer a service account for automation.
 `OPENVIREO_SERVICE_ACCOUNT_TOKEN` (or `OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE`) always takes precedence over a login.
 
+## Share links
+
+Share links open in a browser without an account (see the [share links guide](guides/share-links.md)). Only
+users make them, not service accounts.
+
+```sh
+ov share ov://Private/Wi-Fi                                    # username, password and website; 7 days
+ov share ov://Private/Bank --field Password --once --expires 1d
+ov share ov://Private/Bank --field otp --passcode               # asks for a passcode (or OPENVIREO_SHARE_PASSCODE)
+echo "The alarm code is 4321" | ov share --text --title "Front door" --expires 1h
+ov share list                                                   # add --json for everything
+ov share revoke <id>
+```
+
+The link is printed on stdout; what it allows goes to stderr. `--field` takes KeePass field names (`UserName`,
+`Password`, `URL`, `Notes`, a custom field) or `otp` for the one-time code, which shares the TOTP secret.
+
 ## Building from source
 
 You need Node ≥ 20 and npm, and [Bun](https://bun.sh) 1.3 or later for the single binary:

@@ -24,7 +24,7 @@ export class HttpError extends OpenVireoError {
 
 /**
  * Extra fields of an error body, camelCased into `details`: not_before on recovery_not_ready (SPEC.md §18),
- * the limit on plan_limit and quota_exceeded (§19).
+ * the limit on plan_limit and quota_exceeded (§19), attempts_left on invalid_passcode (§22).
  */
 function errorDetails(code: string, body: unknown): Record<string, unknown> | undefined {
   const b = body as Record<string, unknown> | undefined;
@@ -33,6 +33,7 @@ function errorDetails(code: string, body: unknown): Record<string, unknown> | un
     return { limit: b.limit, max: b.max, current: b.current, plan: b.plan, upgradeUrl: b.upgrade_url };
   }
   if (code === "quota_exceeded" && typeof b?.max === "number") return { max: b.max };
+  if (code === "invalid_passcode" && typeof b?.attempts_left === "number") return { attemptsLeft: b.attempts_left };
   return undefined;
 }
 

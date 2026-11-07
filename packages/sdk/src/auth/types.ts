@@ -20,6 +20,8 @@ export interface OpenVireoConfiguration {
   kdf_min?: { m: number; t: number };
   /** The web app: account settings and the auth website's sign-in (SPEC.md §16) */
   web?: string;
+  /** The public share page (SPEC.md §22); `${web}/s` when absent */
+  share?: string;
 }
 
 export interface DeviceInfo {
@@ -68,7 +70,7 @@ export interface Me {
   mfa: { totp?: boolean };
   /** The user's personal plan (SPEC.md §19). */
   plan?: Plan;
-  orgs?: { id: string; name: string; role: OrgRole; status: MemberStatus; plan?: Plan }[];
+  orgs?: { id: string; name: string; role: OrgRole; status: MemberStatus; plan?: Plan; item_share_links?: ShareLinkPolicy }[];
 }
 
 /**
@@ -102,7 +104,28 @@ export interface Org {
   role: OrgRole;
   /** The org's plan (SPEC.md §19). */
   plan?: Plan;
+  /** Who may make share links from the org's vaults (SPEC.md §22). */
+  item_share_links?: ShareLinkPolicy;
   created_at: string;
+}
+
+/** SPEC.md §22: everyone, only owners and admins, or nobody. */
+export type ShareLinkPolicy = "on" | "managers" | "off";
+
+/** A share link as its owner sees it (the `Share` schema; never the ciphertext). */
+export interface ShareJson {
+  id: string;
+  vault_id: string | null;
+  ref: string | null;
+  passcode: boolean;
+  max_opens: number | null;
+  opens: number;
+  opened_at: string[];
+  created_at: string;
+  expires_at: string;
+  status: "pending" | "active" | "ended";
+  ended_at: string | null;
+  end_reason: "expired" | "opened" | "revoked" | "passcode" | "access_lost" | "policy" | null;
 }
 
 export interface Member {
