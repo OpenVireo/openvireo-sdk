@@ -139,7 +139,7 @@ ov connect                                                # the REST server, see
 ov login --email alice@example.com [--issuer https://accounts.openvireo.com]
 # Master password, then the Secret Key (K1-…) the first time on this machine, then a TOTP code if enabled
 ov read ov://Private/Bank/password                       # asks for the master password every time
-ov logout
+ov logout                                                 # add --forget to also remove the Secret Key from this machine
 ```
 
 The session (refresh token, device id, trusted Secret Key and the encrypted vault base copies) lives in

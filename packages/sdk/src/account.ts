@@ -5,7 +5,7 @@
 import { OpenVireoError, isUnreachable } from "./errors.js";
 import { AuthClient, discover } from "./auth/client.js";
 import { MemoryStorage, NamespacedStorage, type KeyValueStorage } from "./auth/storage.js";
-import { TokenManager, type SignedOutReason } from "./auth/token-manager.js";
+import { TokenManager, type SignedOutReason, type StoredSession } from "./auth/token-manager.js";
 import { type DeviceInfo, type Grant, type OpenVireoConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
 import type { HttpOptions } from "./http/request.js";
 import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
@@ -57,12 +57,18 @@ interface Profile {
   keyset: WrappedKeysetJson;
 }
 
-/** Storage keys of the offline cache (the sync state keys are `sync:<vault id>`, as before). */
+/**
+ * Storage keys of the offline cache. Sync state and pending edits are per user, since two accounts on a
+ * device can share a vault (SPEC §21); the `sync:<vault id>` keys from before that are still read.
+ */
 const OFFLINE = {
   config: (issuer: string) => `offline:config:${issuer.replace(/\/+$/, "")}`,
   profile: (userId: string) => `offline:profile:${userId}`,
   vaults: (userId: string) => `offline:vaults:${userId}`,
-  pending: (vaultId: string) => `sync:${vaultId}:pending`,
+  state: (userId: string, vaultId: string) => `sync:${userId}:${vaultId}`,
+  pending: (userId: string, vaultId: string) => `sync:${userId}:${vaultId}:pending`,
+  olderState: (vaultId: string) => `sync:${vaultId}`,
+  olderPending: (vaultId: string) => `sync:${vaultId}:pending`,
 };
 
 /** Thrown by `importVault` when the vault was created but its first upload failed; `vault.sync()` retries it. */
@@ -213,8 +219,34 @@ export class Account {
   private ids(email: string) {
     return opaqueIds(email, this.config.opaque.ids);
   }
-  private skKey = (email: string) => `secret_key:${this.ids(email).idU}`;
-  private devKey = (email: string) => `device:${this.ids(email).idU}`;
+  private skKey = (email: string) => `secret_key:${this.ids(email).idS}:${this.ids(email).idU}`;
+  private devKey = (email: string) => `device:${this.ids(email).idS}:${this.ids(email).idU}`;
+  // From before these keys named the server. Whichever server it came from, it's only moved once it has worked.
+  private olderSkKey = (email: string) => `secret_key:${this.ids(email).idU}`;
+  private olderDevKey = (email: string) => `device:${this.ids(email).idU}`;
+
+  private async storedSk(email: string): Promise<string | null> {
+    return (await this.storage.get(this.skKey(email))) ?? (await this.storage.get(this.olderSkKey(email)));
+  }
+
+  private async storedDevice(email: string): Promise<string | null> {
+    return (await this.storage.get(this.devKey(email))) ?? (await this.storage.get(this.olderDevKey(email)));
+  }
+
+  /** `text` opened this account: it's kept under the key naming this server, and an older copy of the same key goes. */
+  private async keepSk(text: string, email: string): Promise<void> {
+    await this.storage.set(this.skKey(email), text);
+    if ((await this.storage.get(this.olderSkKey(email))) !== text) return;
+    const device = await this.storage.get(this.olderDevKey(email));
+    if (device && !(await this.storage.get(this.devKey(email)))) await this.storage.set(this.devKey(email), device);
+    await this.storage.delete(this.olderSkKey(email));
+    await this.storage.delete(this.olderDevKey(email));
+  }
+
+  /** Whether this device can sign in to `email` without being given the Secret Key. */
+  async hasSecretKey(email: string): Promise<boolean> {
+    return (await this.storedSk(email)) !== null;
+  }
 
   /** Creates an account. Returns the Secret Key to show once (Emergency Kit). Signs in and unlocks. */
   async register(p: { email: string; password: string; kdf?: Parameters<typeof newKdfParams>[0]; trustDevice?: boolean }): Promise<{ secretKey: string; userId: string }> {
@@ -252,11 +284,10 @@ export class Account {
    * on a device; with `trustDevice` (default) it is kept in storage for next time.
    */
   async login(p: { email: string; password: string; secretKey?: string; totp?: string | TotpPrompt; trustDevice?: boolean }): Promise<void> {
-    const stored = await this.storage.get(this.skKey(p.email));
-    const skText = p.secretKey ?? stored;
+    const skText = p.secretKey ?? (await this.storedSk(p.email));
     if (!skText) throw new OpenVireoError("invalid_secret_key", "this device needs the account's Secret Key");
     const sk = parseSecretKey(skText);
-    const deviceId = await this.storage.get(this.devKey(p.email));
+    const deviceId = await this.storedDevice(p.email);
     const ids = this.ids(p.email);
     const login = await startLogin(p.password);
     const started = await this.auth.loginStart({ email: p.email.trim(), ke1: b64u(login.ke1) });
@@ -305,8 +336,8 @@ export class Account {
   private async begin(email: string, s: Session, sk: Uint8Array, trust: boolean) {
     await this.tokens.start({ issuer: this.config.issuer, userId: s.user.id, email: s.user.email ?? email, deviceId: s.device_id, refreshToken: s.refresh_token }, s.access_token, s.expires_in);
     this.cacheUser = s.user.id;
+    if (trust) await this.keepSk(formatSecretKey(sk), email);
     await this.storage.set(this.devKey(email), s.device_id);
-    if (trust) await this.storage.set(this.skKey(email), formatSecretKey(sk));
   }
 
   private async unlockWith(password: string, kdf: Session["kdf"], wrapped: Session["keyset"], sk: Uint8Array) {
@@ -331,7 +362,7 @@ export class Account {
     const session = await this.tokens.load();
     if (!session) throw new OpenVireoError("signed_out", "not signed in");
     this.cacheUser = session.userId;
-    const skText = secretKey ?? (await this.storage.get(this.skKey(session.email)));
+    const skText = secretKey ?? (await this.storedSk(session.email));
     if (!skText) throw new OpenVireoError("invalid_secret_key", "this device needs the account's Secret Key");
     const sk = parseSecretKey(skText);
     try {
@@ -478,7 +509,7 @@ export class Account {
   private async storedSecretKey(): Promise<{ session: NonNullable<TokenManager["current"]>; sk: Uint8Array }> {
     const session = await this.tokens.load();
     if (!session) throw new OpenVireoError("signed_out", "not signed in");
-    const skText = await this.storage.get(this.skKey(session.email));
+    const skText = await this.storedSk(session.email);
     if (!skText) throw new OpenVireoError("invalid_secret_key", "this device needs the account's Secret Key");
     return { session, sk: parseSecretKey(skText) };
   }
@@ -520,13 +551,10 @@ export class Account {
     if (!session || !email) return;
     const [from, to] = [this.ids(session.email).idU, this.ids(email).idU];
     if (from === to) return;
-    for (const key of [this.skKey, this.devKey]) {
-      const value = await this.storage.get(key(session.email));
-      if (value !== null && value !== undefined) {
-        await this.storage.set(key(email), value);
-        await this.storage.delete(key(session.email));
-      }
-    }
+    const [sk, device] = [await this.storedSk(session.email), await this.storedDevice(session.email)];
+    if (sk) await this.storage.set(this.skKey(email), sk);
+    if (device) await this.storage.set(this.devKey(email), device);
+    for (const key of [this.skKey, this.devKey, this.olderSkKey, this.olderDevKey]) await this.storage.delete(key(session.email));
     await this.tokens.update({ email });
   }
 
@@ -534,7 +562,7 @@ export class Account {
   async secretKey(): Promise<string | null> {
     this.requireKeyset();
     const session = await this.tokens.load();
-    return session ? this.storage.get(this.skKey(session.email)) : null;
+    return session ? this.storedSk(session.email) : null;
   }
 
   /**
@@ -602,6 +630,7 @@ export class Account {
       const known = [...this.vaults.keys()];
       this.lock();
       await this.clearOfflineData(session.user.id, known);
+      await this.storage.delete(this.olderSkKey(email));
       await this.begin(email, session, sk, p.trustDevice ?? true);
       await this.cacheProfile(session.user.id, { kdf, keyset: wrapped });
       this.keyset = keyset;
@@ -707,7 +736,7 @@ export class Account {
     this.vaults.clear();
   }
 
-  /** Revokes this device's session on the server and forgets it locally (the trusted Secret Key stays unless `forgetDevice`). */
+  /** Revokes this device's session on the server and forgets it locally (the trusted Secret Key stays unless `forgetDevice`; `forgetDevice()` works signed out too). */
   async logout(opts: { forgetDevice?: boolean } = {}): Promise<void> {
     const email = this.tokens.current?.email;
     const user = this.tokens.current?.userId;
@@ -725,9 +754,132 @@ export class Account {
     this._offline = false;
     await this.tokens.clear("logout");
     if (opts.forgetDevice && email) {
-      await this.storage.delete(this.skKey(email));
-      await this.storage.delete(this.devKey(email));
+      await this.forgetDevice(email);
     }
+  }
+
+  // ------------------------------------------------------- several accounts on a device (SPEC §21)
+
+  /** The key a session set aside lives under, unnamespaced. */
+  private static parkedKey(issuer: string, userId: string): string {
+    return `parked_session:${opaqueIds("", issuer).idS}:${userId}`;
+  }
+
+  /**
+   * Whether a user has a session in `storage`, with no network. A crash while moving a session can
+   * leave it under both keys: the active one wins (its token may be newer, and presenting the other
+   * would end the session).
+   */
+  static async sessionState(storage: KeyValueStorage, account: { issuer: string; userId: string }): Promise<"active" | "parked" | "signed_out"> {
+    const ns = new NamespacedStorage(storage, "ov:");
+    const parked = Account.parkedKey(account.issuer, account.userId);
+    const raw = await ns.get("session");
+    if (raw && (JSON.parse(raw) as StoredSession).userId === account.userId) {
+      await ns.delete(parked);
+      return "active";
+    }
+    return (await ns.get(parked)) ? "parked" : "signed_out";
+  }
+
+  /** Whether a user's offline cache holds edits that haven't reached the server (reads no secrets). */
+  static async hasPendingEdits(storage: KeyValueStorage, userId: string): Promise<boolean> {
+    const raw = await storage.get(OFFLINE.vaults(userId));
+    for (const v of raw ? (JSON.parse(raw) as Vault[]) : []) {
+      if ((await storage.get(OFFLINE.pending(userId, v.id))) ?? (await storage.get(OFFLINE.olderPending(v.id)))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Locks the account and moves its session aside, for its user to come back to. The server isn't told
+   * and the offline cache stays. False when no session is open.
+   */
+  async parkSession(): Promise<boolean> {
+    const session = await this.tokens.load();
+    if (!session) return false;
+    this.lock();
+    this.cacheUser = undefined;
+    this._offline = false;
+    return this.tokens.setAside(Account.parkedKey(this.config.issuer, session.userId));
+  }
+
+  /** Makes a session set aside the active one. False when there's none to resume: it ended, and the user signs in. */
+  async resumeSession(userId: string): Promise<boolean> {
+    const active = await this.tokens.load();
+    if (active) {
+      if (active.userId === userId) return true;
+      throw new OpenVireoError("server_error", "another account is open");
+    }
+    if (!(await this.tokens.resume(Account.parkedKey(this.config.issuer, userId)))) return false;
+    this.cacheUser = userId;
+    return true;
+  }
+
+  /** A token manager for a session set aside, so refreshes rotate the token where it's kept. */
+  private parkedTokens(userId: string): TokenManager {
+    const base = new AuthClient({ ...this.opts, api: this.config.api });
+    return new TokenManager({
+      storage: new NamespacedStorage(this.storage, "ov:"),
+      storageKey: Account.parkedKey(this.config.issuer, userId),
+      refresh: (rt) => base.refresh(rt),
+    });
+  }
+
+  /**
+   * Asks the server about a session set aside: this keeps it within its 30 days, and a revoked device
+   * finds out. A refusal ends the session like any other (SPEC §9, §20). Run it when no switch is under
+   * way, so the session isn't moved while its token rotates.
+   */
+  async checkParkedSession(userId: string): Promise<"valid" | "ended" | "no_answer"> {
+    const tokens = this.parkedTokens(userId);
+    if (!(await tokens.load())) return "ended";
+    let ended = false;
+    tokens.onSignedOut(() => {
+      ended = true;
+    });
+    try {
+      await tokens.refreshNow();
+      return "valid";
+    } catch {
+      if (!ended) return "no_answer";
+      await this.clearOfflineData(userId);
+      return "ended";
+    }
+  }
+
+  /** Signs a session set aside out, as `logout` does for the open one. */
+  async logoutParked(userId: string): Promise<void> {
+    const tokens = this.parkedTokens(userId);
+    if (await tokens.load()) {
+      await new AuthClient({ ...this.opts, api: this.config.api }).withTokens(tokens).logout().catch(() => undefined);
+      await tokens.clear("logout");
+    }
+    await this.clearOfflineData(userId);
+  }
+
+  /**
+   * Removes what signing in again here would have reused, so the next sign-in needs the Emergency Kit.
+   * Works with no session; the account has to be signed out first.
+   */
+  async forgetDevice(email: string): Promise<void> {
+    const session = await this.tokens.load();
+    if (session && this.ids(session.email).idU === this.ids(email).idU) {
+      throw new OpenVireoError("server_error", "sign out of this account first");
+    }
+    for (const key of [this.skKey(email), this.devKey(email), this.olderSkKey(email), this.olderDevKey(email)]) await this.storage.delete(key);
+  }
+
+  /**
+   * For a tab closing on a shared session (SPEC §21): revokes the session with a request that outlives
+   * the page, and stops using it. Needs an access token already in hand, since a page closing can't
+   * refresh one. If it doesn't arrive, the refresh token was only in memory and nobody can use it.
+   */
+  logoutOnUnload(): void {
+    const token = this.tokens.accessTokenNow();
+    this.lock();
+    if (!token) return;
+    const url = `${this.config.api.replace(/\/+$/, "")}/auth/logout`;
+    void (this.opts.fetch ?? globalThis.fetch)(url, { method: "POST", keepalive: true, headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
   }
 
   private requireKeyset(): Keyset {
@@ -803,7 +955,7 @@ export class Account {
     }
     if (this.opts.offline) {
       // What this device kept for a vault it can no longer open goes with it
-      for (const id of dropped) await this.forgetVaultData(id);
+      for (const id of dropped) await this.forgetVaultData(this.tokens.current?.userId, id);
       if (this.tokens.current) await this.storage.set(OFFLINE.vaults(this.tokens.current.userId), JSON.stringify(vaults));
     }
     return { vaults: vaults.map((v) => this.ingest(v).info), dropped };
@@ -1123,14 +1275,22 @@ export class Account {
     return stream;
   }
 
+  /** The user whose cache a vault's state belongs to. */
+  private get stateUser(): string {
+    const user = this.tokens.current?.userId ?? this.cacheUser;
+    if (!user) throw new OpenVireoError("signed_out", "not signed in");
+    return user;
+  }
+
   /** @internal storage for vault sync state */
   async loadState(vaultId: string): Promise<SyncState | null> {
-    const raw = await this.storage.get(`sync:${vaultId}`);
+    const raw = (await this.storage.get(OFFLINE.state(this.stateUser, vaultId))) ?? (await this.storage.get(OFFLINE.olderState(vaultId)));
     return raw ? deserializeSyncState(raw) : null;
   }
   /** @internal */
   async saveState(vaultId: string, state: SyncState): Promise<void> {
-    await this.storage.set(`sync:${vaultId}`, serializeSyncState(state));
+    await this.storage.set(OFFLINE.state(this.stateUser, vaultId), serializeSyncState(state));
+    await this.storage.delete(OFFLINE.olderState(vaultId));
   }
 
   // ------------------------------------------------------------------------------ offline cache
@@ -1143,21 +1303,29 @@ export class Account {
   /** @internal local edits not yet uploaded: a .kdbx encrypted with the vault key */
   async loadPending(vaultId: string): Promise<Uint8Array | null> {
     if (!this.opts.offline) return null;
-    const raw = await this.storage.get(OFFLINE.pending(vaultId));
+    const raw = (await this.storage.get(OFFLINE.pending(this.stateUser, vaultId))) ?? (await this.storage.get(OFFLINE.olderPending(vaultId)));
     return raw ? fromB64u(raw) : null;
   }
   /** @internal */
   async savePending(vaultId: string, data: Uint8Array): Promise<void> {
-    if (this.opts.offline) await this.storage.set(OFFLINE.pending(vaultId), b64u(data));
+    if (!this.opts.offline) return;
+    await this.storage.set(OFFLINE.pending(this.stateUser, vaultId), b64u(data));
+    await this.storage.delete(OFFLINE.olderPending(vaultId));
   }
   /** @internal */
   async deletePending(vaultId: string): Promise<void> {
-    if (this.opts.offline) await this.storage.delete(OFFLINE.pending(vaultId));
+    if (!this.opts.offline) return;
+    await this.storage.delete(OFFLINE.pending(this.stateUser, vaultId));
+    await this.storage.delete(OFFLINE.olderPending(vaultId));
   }
 
-  private async forgetVaultData(vaultId: string): Promise<void> {
-    await this.storage.delete(`sync:${vaultId}`);
-    await this.storage.delete(OFFLINE.pending(vaultId));
+  private async forgetVaultData(userId: string | undefined, vaultId: string): Promise<void> {
+    if (userId) {
+      await this.storage.delete(OFFLINE.state(userId, vaultId));
+      await this.storage.delete(OFFLINE.pending(userId, vaultId));
+    }
+    await this.storage.delete(OFFLINE.olderState(vaultId));
+    await this.storage.delete(OFFLINE.olderPending(vaultId));
   }
 
   private async cacheProfile(userId: string, profile: Profile): Promise<void> {
@@ -1187,7 +1355,7 @@ export class Account {
     if (!this.opts.offline) return;
     const raw = await this.storage.get(OFFLINE.vaults(userId));
     const ids = new Set([...known, ...(raw ? (JSON.parse(raw) as Vault[]) : []).map((v) => v.id)]);
-    for (const id of ids) await this.forgetVaultData(id);
+    for (const id of ids) await this.forgetVaultData(userId, id);
     await this.storage.delete(OFFLINE.vaults(userId));
     await this.storage.delete(OFFLINE.profile(userId));
   }

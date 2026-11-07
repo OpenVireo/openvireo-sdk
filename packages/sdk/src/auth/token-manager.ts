@@ -85,6 +85,11 @@ export class TokenManager {
     return this.refreshNow();
   }
 
+  /** The access token held now, if it hasn't expired, without refreshing. */
+  accessTokenNow(): string | null {
+    return this.access && this.access.expiresAt > this.now() ? this.access.token : null;
+  }
+
   /** Single-flight refresh: concurrent callers share one request. */
   refreshNow(): Promise<string> {
     this.inflight ??= (async () => {
@@ -119,6 +124,37 @@ export class TokenManager {
     this.access = null;
     await this.opts.storage.delete(this.key);
     for (const l of this.listeners) l(reason);
+  }
+
+  /**
+   * Moves the session to `key` without ending it (SPEC §21). A refresh under way finishes first, so the
+   * token that moves is the newest. Written before it is deleted: a crash between the two leaves both,
+   * and the active key wins. False when there is no session to move.
+   */
+  async setAside(key: string): Promise<boolean> {
+    let waited: Promise<string> | null = null;
+    while (this.inflight && this.inflight !== waited) {
+      waited = this.inflight;
+      await waited.catch(() => undefined);
+    }
+    const raw = await this.opts.storage.get(this.key);
+    if (!raw) return false;
+    await this.opts.storage.set(key, raw);
+    await this.opts.storage.delete(this.key);
+    this.session = null;
+    this.access = null;
+    return true;
+  }
+
+  /** Moves a session set aside back. False when `key` holds none. */
+  async resume(key: string): Promise<boolean> {
+    const raw = await this.opts.storage.get(key);
+    if (!raw) return false;
+    await this.opts.storage.set(this.key, raw);
+    await this.opts.storage.delete(key);
+    this.session = JSON.parse(raw) as StoredSession;
+    this.access = null;
+    return true;
   }
 
   onSignedOut(listener: (reason: SignedOutReason) => void): () => void {

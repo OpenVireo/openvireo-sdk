@@ -150,10 +150,10 @@ describe("Offline account vaults", () => {
     // An offline edit fails to upload but is kept on this device, encrypted with the vault key
     edit(vault.db!, "GitHub", { Password: "changed offline" }, 3000);
     await expect(vault.sync()).rejects.toMatchObject({ code: "network_error" });
-    const pending = await alice.storage.get(`sync:${vaultId}:pending`);
+    const pending = await alice.storage.get(`sync:${acct.userId}:${vaultId}:pending`);
     expect(pending).toBeTruthy();
     // Nothing in the cache is in clear
-    const everything = JSON.stringify(await Promise.all([`sync:${vaultId}`, `sync:${vaultId}:pending`, `offline:vaults:${acct.userId}`, `offline:profile:${acct.userId}`].map((k) => alice.storage.get(k))));
+    const everything = JSON.stringify(await Promise.all([`sync:${acct.userId}:${vaultId}`, `sync:${acct.userId}:${vaultId}:pending`, `offline:vaults:${acct.userId}`, `offline:profile:${acct.userId}`].map((k) => alice.storage.get(k))));
     expect(everything).not.toContain("s3cret");
     expect(everything).not.toContain("changed offline");
     expect(everything).not.toContain("Infra");
@@ -170,7 +170,7 @@ describe("Offline account vaults", () => {
     expect([vaults.map((v) => v.id), dropped, later.offline]).toEqual([[vaultId], [], false]);
     expect((await reopened.sync()).outcome).toBe("uploaded");
     expect(reopened.offline).toBe(false);
-    expect(await alice.storage.get(`sync:${vaultId}:pending`)).toBeNull();
+    expect(await alice.storage.get(`sync:${acct.userId}:${vaultId}:pending`)).toBeNull();
     expect(sync.blobs.get(`vaults/${vaultId}`)!.length).toBe(3);
 
     const other = await Account.connect({ issuer: ISSUER, fetch: route, device: { name: "cli", platform: "cli" } });
@@ -203,9 +203,9 @@ describe("Offline account vaults", () => {
     const { vaults, dropped } = await offlineBob.reconnect();
     expect(vaults.map((v) => v.id)).toEqual([mine.id]);
     expect(dropped).toEqual([vaultId]);
-    expect(await bobDevice.storage.get(`sync:${vaultId}`)).toBeNull();
-    expect(await bobDevice.storage.get(`sync:${vaultId}:pending`)).toBeNull();
-    expect(await bobDevice.storage.get(`sync:${mine.id}`)).not.toBeNull();
+    expect(await bobDevice.storage.get(`sync:${offlineBob.userId}:${vaultId}`)).toBeNull();
+    expect(await bobDevice.storage.get(`sync:${offlineBob.userId}:${vaultId}:pending`)).toBeNull();
+    expect(await bobDevice.storage.get(`sync:${offlineBob.userId}:${mine.id}`)).not.toBeNull();
 
     // Offline again: the revoked vault is gone from the cache too
     bobDevice.net.up = false;
@@ -230,9 +230,9 @@ describe("Offline account vaults", () => {
     const { alice, vaultId } = await aliceWithVault();
     const acct = await alice.connect();
     const userId = acct.userId!;
-    expect(await alice.storage.get(`sync:${vaultId}`)).not.toBeNull();
+    expect(await alice.storage.get(`sync:${userId}:${vaultId}`)).not.toBeNull();
     await acct.logout();
-    for (const k of [`sync:${vaultId}`, `offline:vaults:${userId}`, `offline:profile:${userId}`]) expect(await alice.storage.get(k)).toBeNull();
+    for (const k of [`sync:${userId}:${vaultId}`, `offline:vaults:${userId}`, `offline:profile:${userId}`]) expect(await alice.storage.get(k)).toBeNull();
     alice.net.up = false;
     const next = await alice.connect();
     expect(next.signedIn).toBe(false);

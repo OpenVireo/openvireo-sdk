@@ -217,6 +217,8 @@ describe("ov vault / whoami / login", () => {
 
     expect((await openvireo(["logout"])).stderr).toBe("Signed out\n");
     expect((await openvireo(["read", "ov://a/b/c"], { env: { OPENVIREO_PASSWORD: w.password } })).stderr).toMatch(/not signed in/);
+    expect((await openvireo(["logout", "--nope"])).code).not.toBe(0);
+    expect((await openvireo(["logout", "--forget"])).stderr).toBe("Not signed in\n");
   });
 
   it("prints usage and versions", async () => {

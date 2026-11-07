@@ -78,14 +78,15 @@ export async function login(io: SessionIo, p: { issuer?: string; email?: string;
   return `Signed in to ${issuer} as ${email}`;
 }
 
-export async function logout(io: SessionIo): Promise<string> {
+/** Signs out; `forget` also removes the Secret Key from this machine, so the next sign-in needs the Emergency Kit. */
+export async function logout(io: SessionIo, opts: { forget?: boolean } = {}): Promise<string> {
   const storage = storageFor(io.env);
   const issuer = await storage.get("cli:issuer");
   if (!issuer) return "Not signed in";
   const account = await Account.connect({ issuer, device: device(), storage, ...http(io) });
-  await account.logout();
+  await account.logout({ forgetDevice: opts.forget });
   await storage.delete("cli:issuer");
-  return "Signed out";
+  return opts.forget ? "Signed out, and the Secret Key was removed from this machine" : "Signed out";
 }
 
 export async function whoami(io: SessionIo): Promise<Record<string, string>> {

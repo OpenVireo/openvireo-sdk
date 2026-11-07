@@ -36,7 +36,8 @@ Usage:
   ov rotate <ov://vault/[group/…]entry/field> (--generate [--length N] [--charset S] | --stdin) [--print]
   ov vault list [--json]
   ov login [--issuer URL] [--email E] [--secret-key K1-…]
-  ov logout | ov whoami
+  ov logout [--forget]                       --forget also removes the Secret Key from this machine
+  ov whoami
   ov connect [serve | token …]               the REST server (see ov connect --help)
   ov version
 
@@ -208,9 +209,12 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         err((await login(io, { issuer: values.issuer, email: values.email, secretKey: values["secret-key"] })) + "\n");
         return 0;
       }
-      case "logout":
-        err((await logout(io)) + "\n");
+      case "logout": {
+        const { values, positionals } = parse(rest, { forget: { type: "boolean" } });
+        if (positionals.length) throw new UsageError("usage: ov logout [--forget]");
+        err((await logout(io, { forget: values.forget })) + "\n");
         return 0;
+      }
       case "whoami":
         for (const [k, v] of Object.entries(await whoami(io))) out(`${k}: ${v}\n`);
         return 0;
