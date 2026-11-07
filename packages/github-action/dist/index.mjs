@@ -20507,7 +20507,7 @@ function serviceAccountSource(sa) {
 }
 
 // ../cli/src/session.ts
-var VERSION3 = "0.7.0";
+var VERSION3 = "0.8.0";
 
 // ../cli/src/template.ts
 var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
@@ -20541,7 +20541,8 @@ Usage:
   ov rotate <ov://vault/[group/\u2026]entry/field> (--generate [--length N] [--charset S] | --stdin) [--print]
   ov vault list [--json]
   ov login [--issuer URL] [--email E] [--secret-key K1-\u2026]
-  ov logout | ov whoami
+  ov logout [--forget]                       --forget also removes the Secret Key from this machine
+  ov whoami
   ov connect [serve | token \u2026]               the REST server (see ov connect --help)
   ov version
 
@@ -20619,7 +20620,7 @@ async function run(io, opts = {}) {
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.7.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.8.0" } });
     const src = serviceAccountSource(sa);
     const resolved = [];
     try {
