@@ -26,7 +26,8 @@ export interface TokenManagerOptions {
   now?: () => number;
 }
 
-export type SignedOutReason = "token_reused" | "session_expired" | "unauthorized" | "logout";
+/** `deletion_scheduled` / `account_deleted`: the account was deleted, from here or elsewhere (SPEC.md §23) */
+export type SignedOutReason = "token_reused" | "session_expired" | "unauthorized" | "logout" | "deletion_scheduled" | "account_deleted";
 
 export class TokenManager {
   private access: { token: string; expiresAt: number } | null = null;

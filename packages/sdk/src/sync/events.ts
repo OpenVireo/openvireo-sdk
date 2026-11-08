@@ -52,11 +52,12 @@ export class SseParser {
   }
 }
 
-export type AccessChange = "granted" | "revoked" | "rotating" | "rotated" | "org";
+export type AccessChange = "granted" | "revoked" | "rotating" | "rotated" | "org" | "deletion_scheduled" | "account_deleted";
 
 export type SyncEvent =
   | { type: "vault"; id: string; etag?: string; revision?: number; deleted?: boolean }
-  | { type: "access"; vault: string | null; change: AccessChange }
+  /** `at` is the erase date of `deletion_scheduled` (SPEC.md §23) */
+  | { type: "access"; vault: string | null; change: AccessChange; at?: string }
   | { type: "database"; id: string; etag?: string; revision?: number; deleted?: boolean }
   | { type: "unknown"; event: string; data: string };
 
@@ -77,7 +78,11 @@ export function toSyncEvent(e: RawSseEvent): SyncEvent | null {
       ...(j.deleted === true ? { deleted: true } : {}),
     };
   }
-  if (e.event === "access") return { type: "access", vault: typeof j.vault === "string" ? j.vault : null, change: j.change as AccessChange };
+  if (e.event === "access") {
+    const ev: SyncEvent = { type: "access", vault: typeof j.vault === "string" ? j.vault : null, change: j.change as AccessChange };
+    if (typeof j.at === "string") ev.at = j.at;
+    return ev;
+  }
   return { type: "unknown", event: e.event, data: e.data };
 }
 

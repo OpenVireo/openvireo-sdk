@@ -7,7 +7,7 @@ import { connectMain } from "@openvireo/connect";
 import { generatePassword, parseCharsets } from "./generate.js";
 import { Masker } from "./mask.js";
 import { STRIPPED_ENV, runCommand } from "./run.js";
-import { type Prompt, VERSION, login, logout, openSource, whoami } from "./session.js";
+import { type Prompt, VERSION, deleteAccount, login, logout, openSource, restoreAccount, whoami } from "./session.js";
 import { type VaultSource, pickVault } from "./source.js";
 import { parseEnvFile, readReference, resolveTemplate } from "./template.js";
 
@@ -42,6 +42,8 @@ Usage:
   ov login [--issuer URL] [--email E] [--secret-key K1-…]
   ov logout [--forget]                       --forget also removes the Secret Key from this machine
   ov whoami
+  ov account delete [--yes --email E]        lock the account and erase it after 30 days
+  ov account restore                         keep an account scheduled for deletion
   ov connect [serve | token …]               the REST server (see ov connect --help)
   ov version
 
@@ -296,6 +298,21 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         if (positionals.length) throw new UsageError("usage: ov logout [--forget]");
         err((await logout(io, { forget: values.forget })) + "\n");
         return 0;
+      }
+      case "account": {
+        const [sub, ...args] = rest;
+        if (sub === "delete") {
+          const { values, positionals } = parse(args, { yes: { type: "boolean" }, email: { type: "string" } });
+          if (positionals.length) throw new UsageError("usage: ov account delete [--yes --email E]");
+          err((await deleteAccount(io, { yes: values.yes, email: values.email }, (line) => err(line + "\n"))) + "\n");
+          return 0;
+        }
+        if (sub === "restore") {
+          if (args.length) throw new UsageError("usage: ov account restore");
+          err((await restoreAccount(io)) + "\n");
+          return 0;
+        }
+        throw new UsageError("usage: ov account delete|restore");
       }
       case "whoami":
         for (const [k, v] of Object.entries(await whoami(io))) out(`${k}: ${v}\n`);

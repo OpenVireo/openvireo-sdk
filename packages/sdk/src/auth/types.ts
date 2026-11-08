@@ -71,6 +71,19 @@ export interface Me {
   /** The user's personal plan (SPEC.md §19). */
   plan?: Plan;
   orgs?: { id: string; name: string; role: OrgRole; status: MemberStatus; plan?: Plan; item_share_links?: ShareLinkPolicy }[];
+  /** Set while the account is scheduled for deletion (SPEC.md §23) */
+  deletion_scheduled_for?: string | null;
+}
+
+/** What deleting the account will do (GET /me/deletion, SPEC.md §23). */
+export interface DeletionPreviewJson {
+  scheduled_for: string | null;
+  would_erase_on: string;
+  vaults: { id: string; encrypted_name: string; shared_with: { principal: Principal; display: string | null; role: VaultRole }[] }[];
+  orgs: { id: string; name: string; role: OrgRole; outcome: "leave" | "delete" | "blocked"; members: { id: string; email: string; role: OrgRole }[] }[];
+  subscription: { plan: string; period_end: string | null } | null;
+  share_links: number;
+  blocked: boolean;
 }
 
 /**

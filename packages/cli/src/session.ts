@@ -89,6 +89,57 @@ export async function logout(io: SessionIo, opts: { forget?: boolean } = {}): Pr
   return opts.forget ? "Signed out, and the Secret Key was removed from this machine" : "Signed out";
 }
 
+/** The saved, unlocked user session (not a service account). */
+async function unlockedUser(io: SessionIo): Promise<{ account: Account; password: string }> {
+  const storage = storageFor(io.env);
+  const issuer = await storage.get("cli:issuer");
+  if (!issuer) throw new OpenVireoError("signed_out", "not signed in: run `ov login`");
+  const account = await Account.connect({ issuer, device: device(), storage, ...http(io) });
+  if (!account.signedIn) throw new OpenVireoError("signed_out", "the saved session has ended: run `ov login` again");
+  const password = io.env.OPENVIREO_PASSWORD ?? (await ask(io, `Master password for ${account.tokens.current?.email}: `, true));
+  await account.unlock(password);
+  return { account, password };
+}
+
+const day = (iso: string) => new Date(iso).toISOString().slice(0, 10);
+
+/**
+ * Schedules the signed-in account's deletion (SPEC §23). Prints what happens first, and asks for the
+ * email as confirmation unless `yes` (then `email` must be given and match).
+ */
+export async function deleteAccount(io: SessionIo, opts: { yes?: boolean; email?: string }, print: (line: string) => void): Promise<string> {
+  const { account, password } = await unlockedUser(io);
+  const email = account.email!;
+  const preview = await account.deletionPreview();
+  if (preview.scheduledFor) return `${email} is already scheduled for deletion on ${day(preview.scheduledFor)}`;
+  print(`Deleting ${email} locks it now and erases it on ${day(preview.eraseOn)}. Until then, \`ov account restore\` keeps it.`);
+  for (const v of preview.vaults) {
+    const shared = v.sharedWith.map((s) => s.display ?? s.principal);
+    print(`  vault ${v.name ?? v.id} is deleted${shared.length ? ` (shared with ${shared.join(", ")}, who lose it)` : ""}`);
+  }
+  for (const o of preview.orgs) {
+    print(o.outcome === "leave" ? `  you leave ${o.name}` : o.outcome === "delete" ? `  ${o.name} is deleted with you` : `  ${o.name}: you are its only owner; make someone else an owner or delete it first`);
+  }
+  if (preview.subscription) print(`  your ${preview.subscription.plan} plan stops renewing`);
+  if (preview.shareLinks) print(`  ${preview.shareLinks} share link${preview.shareLinks === 1 ? "" : "s"} stop working now`);
+  if (preview.blocked) throw new OpenVireoError("deletion_blocked", "hand over or delete the organizations above first (in the web app or desktop app)");
+  let confirm = opts.email;
+  if (!opts.yes) confirm = (await ask(io, `Type ${email} to delete it: `, false)).trim();
+  else if (!confirm) throw new OpenVireoError("invalid_request", "--yes needs --email <the account email>");
+  if (confirm.toLowerCase() !== email.toLowerCase()) throw new OpenVireoError("confirm_mismatch", "that isn't this account's email; nothing was deleted");
+  const { scheduledFor } = await account.deleteAccount({ password, confirm });
+  return `${email} is locked and will be deleted on ${day(scheduledFor)}. To keep it, run \`ov login\` and \`ov account restore\` before then.`;
+}
+
+/** Restores the signed-in account while it is pending deletion. */
+export async function restoreAccount(io: SessionIo): Promise<string> {
+  const { account, password } = await unlockedUser(io);
+  if (!account.deletionScheduledFor) return `${account.email} isn't scheduled for deletion`;
+  await account.restoreAccount({ password });
+  account.lock();
+  return `${account.email} was restored`;
+}
+
 export async function whoami(io: SessionIo): Promise<Record<string, string>> {
   const token = serviceAccountToken(io.env);
   if (token) {

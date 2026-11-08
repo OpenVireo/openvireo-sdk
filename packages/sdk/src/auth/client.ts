@@ -4,6 +4,7 @@ import { type HttpOptions, joinUrl, requireSecureUrl, seg, sendJson } from "../h
 import type { Jwks } from "../crypto/jwt.js";
 import type {
   AuditEvent,
+  DeletionPreviewJson,
   Device,
   DeviceInfo,
   Grant,
@@ -161,6 +162,19 @@ export class AuthClient {
   passwordFinish(body: { session_id: string; record: string; kdf: KdfParams; keyset: WrappedKeysetJson }) {
     return this.authed<void>("POST", "me/password/finish", body);
   }
+  // ---------------------------------------------------------------- account deletion (SPEC.md §23)
+  /** What deleting the account will do; also allowed on a pending account. */
+  deletionPreview() {
+    return this.authed<DeletionPreviewJson>("GET", "me/deletion");
+  }
+  /** Schedules the deletion (needs a token from the last 5 minutes). 409 `deletion_blocked` lists `orgs`. */
+  scheduleDeletion(confirm: string) {
+    return this.authed<{ scheduled_for: string }>("DELETE", "me", { confirm });
+  }
+  /** Restores a pending account (needs a token from the last 5 minutes). */
+  cancelDeletion() {
+    return this.authed<void>("POST", "me/deletion/cancel");
+  }
   emailRequest(email: string) {
     return this.authed<{ expires_in: number }>("POST", "me/email", { email });
   }
@@ -272,6 +286,10 @@ export class AuthClient {
   }
   deleteVault(vault: string) {
     return this.authed<void>("DELETE", `vaults/${seg(vault)}`);
+  }
+  /** Gives a personal vault to a user who already holds its current key (SPEC.md §23) */
+  transferVault(vault: string, principal: Principal) {
+    return this.authed<Vault>("POST", `vaults/${seg(vault)}/owner`, { principal });
   }
   listAccess(vault: string) {
     return this.authed<{ access: VaultAccess[] }>("GET", `vaults/${seg(vault)}/access`);

@@ -23,6 +23,9 @@ live.close();   // when the app no longer needs it
 
 - `onVaultChanged` gets `{ id, etag, revision }`, or `{ id, deleted: true }`. Compare `etag` with
   `vault.etag` to skip your own uploads.
+- When the account is scheduled for deletion or erased elsewhere, `subscribe` closes the stream and signs this
+  device out (`onSignedOut` reports `deletion_scheduled` or `account_deleted`; the latter also forgets the
+  Secret Key).
 - On an access change (a grant, a revoke, a key rotation, an organisation change), `subscribe` refreshes the
   access token so it lists the new vaults, reloads the vault list, reconnects the stream, and then calls
   `onVaultsChanged`.

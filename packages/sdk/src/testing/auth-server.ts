@@ -64,6 +64,12 @@ export class FakeAuthServer extends MockServer {
   /** access token → when it was issued (ms); the restore routes want one from the last `recentTokenMs` */
   issuedAt = new Map<string, number>();
   recentTokenMs = 5 * 60_000;
+  /** user id → erase date, while the account is pending deletion (SPEC.md §23) */
+  deletions = new Map<string, string>();
+  /** grace period in days */
+  deletionDays = 30;
+  /** what the sync server should be told about (access events), for tests */
+  accessEvents: { subjects: string[]; data: Record<string, unknown> }[] = [];
   onToken: (t: string) => void = () => {};
   /** share links by id (SPEC.md §22) */
   shares = new Map<string, { owner: string; vault_id: string | null; ct: string | null; ref: string | null; kdf: any; authHash: string | null; failed: number; max_opens: number | null; opens: number; opened_at: string[]; created_at: string; expires_at: string; ended: string | null }>();
@@ -86,7 +92,11 @@ export class FakeAuthServer extends MockServer {
   }
 
   private issue(principal: string) {
-    const t = `at-${randomUuid()}`;
+    const pending = this.deletions.get(principal.split(":")[1] ?? "");
+    // A pending account's token is JWT-shaped so clients can read `del` (it is never verified here)
+    const t = pending
+      ? [{ alg: "none" }, { sub: principal, del: pending, vlt: [], exp: Math.floor(Date.now() / 1000) + 600 }, { n: randomUuid() }].map((p) => b64u(new TextEncoder().encode(JSON.stringify(p)))).join(".")
+      : `at-${randomUuid()}`;
     this.tokens.set(t, principal);
     this.issuedAt.set(t, Date.now());
     this.onToken(t);
@@ -127,10 +137,14 @@ export class FakeAuthServer extends MockServer {
   constructor() {
     super();
     const ids = (email: string) => opaqueIds(email, CONFIG.opaque.ids);
-    const A = (h: (req: any, p: any, principal: string) => any) => (req: any, p: any) => {
+    const A = (h: (req: any, p: any, principal: string) => any, pendingOk = false) => (req: any, p: any) => {
       const principal = this.tokens.get((req.headers.authorization ?? "").replace("Bearer ", ""));
-      return principal ? h(req, p, principal) : json(401, { error: "unauthorized", code: "unauthorized" }, { "WWW-Authenticate": "Bearer" });
+      if (!principal) return json(401, { error: "unauthorized", code: "unauthorized" }, { "WWW-Authenticate": "Bearer" });
+      const pending = this.deletions.get(principal.split(":")[1] ?? "");
+      if (pending && !pendingOk) return json(403, { error: "scheduled for deletion", code: "account_pending_deletion", scheduled_for: pending });
+      return h(req, p, principal);
     };
+    const recent = (req: any) => Date.now() - (this.issuedAt.get((req.headers.authorization ?? "").replace("Bearer ", "")) ?? 0) <= this.recentTokenMs;
     const P = "/api/v1/";
     this.on("GET", "/.well-known/openvireo-configuration", () => json(200, CONFIG));
     this.on("POST", P + "auth/register/start", async (req) => {
@@ -186,7 +200,7 @@ export class FakeAuthServer extends MockServer {
       this.refresh.set(rt, { principal: r.principal, used: false });
       return json(200, { access_token: this.issue(r.principal), refresh_token: rt, expires_in: 600 });
     });
-    this.on("POST", P + "auth/logout", A(() => new Response(null, { status: 204 })));
+    this.on("POST", P + "auth/logout", A(() => new Response(null, { status: 204 }), true));
     this.on("POST", P + "auth/service-account", (req) => {
       const sa = this.sas.get(req.json.sa_id);
       const w = sa?.secrets.get(toHex(sha256(fromB64u(req.json.secret))));
@@ -328,7 +342,59 @@ export class FakeAuthServer extends MockServer {
     this.on("GET", P + "me", A((_r, _p, pr) => {
       const u = this.userById(pr.split(":")[1]!);
       const orgs = [...this.orgs].filter(([, o]) => o.members.has(u.id)).map(([id, o]) => ({ id, name: o.name, ...o.members.get(u.id)! }));
-      return json(200, { id: u.id, email: u.email, kdf: u.kdf, keyset: u.keyset, mfa: { totp: false }, orgs });
+      return json(200, { id: u.id, email: u.email, kdf: u.kdf, keyset: u.keyset, mfa: { totp: false }, orgs, deletion_scheduled_for: this.deletions.get(u.id) ?? null });
+    }, true));
+    // Account deletion (SPEC.md §23); orgs: only "leave" and "blocked" (the only confirmed owner with others)
+    const outcomes = (uid: string) =>
+      [...this.orgs].filter(([, o]) => o.members.has(uid)).map(([id, o]) => {
+        const m = o.members.get(uid)!;
+        const others = [...o.members].filter(([u, x]) => u !== uid && x.status === "confirmed");
+        const owners = others.filter(([u, x]) => x.role === "owner" && !this.deletions.has(u));
+        const outcome = m.role !== "owner" || m.status !== "confirmed" || owners.length ? "leave" : others.length ? "blocked" : "delete";
+        return { id, name: o.name, role: m.role, outcome, members: outcome === "blocked" ? others.map(([u, x]) => ({ id: u, email: this.userById(u).email, role: x.role })) : [] };
+      });
+    this.on("GET", P + "me/deletion", A((_r, _p, pr) => {
+      const uid = pr.split(":")[1]!;
+      const orgs = outcomes(uid);
+      const vaults = [...this.vaults].filter(([, v]) => v.owner_id === uid && !v.archived).map(([id, v]) => ({ id, encrypted_name: v.encrypted_name, shared_with: [...v.access].filter(([p]) => p !== pr).map(([principal, a]) => ({ principal, display: this.pub(principal)?.email ?? null, role: a.role })) }));
+      const scheduled = this.deletions.get(uid) ?? null;
+      return json(200, { scheduled_for: scheduled, would_erase_on: scheduled ?? new Date(Date.now() + this.deletionDays * 86400_000).toISOString(), vaults, orgs, subscription: null, share_links: [...this.shares.values()].filter((s) => s.owner === pr && !s.ended).length, blocked: orgs.some((o) => o.outcome === "blocked") });
+    }, true));
+    this.on("DELETE", P + "me", A((req, _p, pr) => {
+      const uid = pr.split(":")[1]!;
+      const u = this.userById(uid);
+      if (!recent(req)) return json(403, { error: "Log in again to delete your account", code: "forbidden" });
+      if ((req.json?.confirm ?? "").toLowerCase() !== u.email.toLowerCase()) return json(400, { error: "Type your account email", code: "confirm_mismatch" });
+      const blocked = outcomes(uid).filter((o) => o.outcome === "blocked");
+      if (blocked.length) return json(409, { error: "blocked", code: "deletion_blocked", orgs: blocked.map((o) => ({ id: o.id, name: o.name })) });
+      const at = new Date(Date.now() + this.deletionDays * 86400_000).toISOString().replace(/\.\d+Z$/, "Z");
+      this.deletions.set(uid, at);
+      // Signed out everywhere
+      for (const [rt, r] of this.refresh) if (r.principal === pr) this.refresh.delete(rt);
+      for (const [t, p] of this.tokens) if (p === pr) this.tokens.delete(t);
+      for (const s of this.shares.values()) if (s.owner === pr && !s.ended) s.ended = new Date().toISOString();
+      this.accessEvents.push({ subjects: [pr], data: { vault: null, change: "deletion_scheduled", at } });
+      return json(202, { scheduled_for: at });
+    }));
+    this.on("POST", P + "me/deletion/cancel", A((req, _p, pr) => {
+      const uid = pr.split(":")[1]!;
+      if (!recent(req)) return json(403, { error: "Log in again", code: "forbidden" });
+      if (!this.deletions.delete(uid)) return json(409, { error: "not pending", code: "conflict" });
+      return new Response(null, { status: 204 });
+    }, true));
+    this.on("POST", P + "vaults/{v}/owner", A((req, p, pr) => {
+      const v = this.vaults.get(p.v);
+      if (!v || !v.access.has(pr)) return json(404, { error: "no such vault", code: "not_found" });
+      if (v.org_id) return json(400, { error: "org vault", code: "invalid_request" });
+      if (v.owner_id !== pr.split(":")[1]) return json(403, { error: "not the owner", code: "forbidden" });
+      const to = req.json.principal as string;
+      const a = v.access.get(to);
+      if (!a || !a.keys.has(v.current)) return json(409, { error: "They must already have access", code: "not_a_member" });
+      a.role = "manage";
+      v.owner_id = to.split(":")[1];
+      v.access.delete(pr);
+      v.rotationRequired = true;
+      return json(200, this.vaultJson(p.v, to));
     }));
     this.on("POST", P + "me/password/start", A(async (req, _p, pr) => {
       const { sec, response } = await OS.registrationResponse(fromB64u(req.json.request));

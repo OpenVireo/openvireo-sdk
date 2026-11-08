@@ -255,6 +255,30 @@ describe("ov vault / whoami / login", () => {
     await openvireo(["logout"]);
   });
 
+  it("schedules an account deletion and restores it", async () => {
+    const env = { OPENVIREO_ISSUER: "https://auth.example" };
+    const prompt = (answer: string) => (q: string) => (q.startsWith("Email") ? "alice@example.com" : q.startsWith("Master") ? w.password : q.startsWith("Type") ? answer : "");
+    expect((await openvireo(["login"], { env, prompt: prompt("") })).code).toBe(0);
+    const user = { OPENVIREO_PASSWORD: w.password };
+
+    const wrong = await openvireo(["account", "delete"], { env: user, prompt: prompt("bob@example.com") });
+    expect([wrong.code, wrong.stderr.split("\n").at(-2)]).toEqual([1, "ov: that isn't this account's email; nothing was deleted"]);
+    expect((await openvireo(["account", "delete", "--yes"], { env: user })).stderr).toMatch(/--yes needs --email/);
+
+    const r = await openvireo(["account", "delete"], { env: user, prompt: prompt("alice@example.com") });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toMatch(/^Deleting alice@example\.com locks it now and erases it on \d{4}-\d{2}-\d{2}\./);
+    expect(r.stderr).toMatch(/is locked and will be deleted on \d{4}-\d{2}-\d{2}\. To keep it/);
+    expect((await openvireo(["vault", "list"], { env: user })).code).toBe(1);
+
+    expect((await openvireo(["login"], { env, prompt: prompt("") })).code).toBe(0);
+    expect((await openvireo(["vault", "list"], { env: user })).stderr).toMatch(/scheduled for deletion/);
+    expect((await openvireo(["account", "restore"], { env: user })).stderr).toBe("alice@example.com was restored\n");
+    expect((await openvireo(["vault", "list"], { env: user })).stdout).toContain("Private");
+    expect((await openvireo(["account", "restore"], { env: user })).stderr).toBe("alice@example.com isn't scheduled for deletion\n");
+    await openvireo(["logout"]);
+  });
+
   it("prints usage and versions", async () => {
     expect((await openvireo(["help"])).stdout).toContain("ov run [--env-file .env.tpl]");
     expect((await openvireo([])).code).toBe(2);

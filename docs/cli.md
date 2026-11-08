@@ -140,7 +140,13 @@ ov login --email alice@example.com [--issuer https://accounts.openvireo.com]
 # Master password, then the Secret Key (K1-…) the first time on this machine, then a TOTP code if enabled
 ov read ov://Private/Bank/password                       # asks for the master password every time
 ov logout                                                 # add --forget to also remove the Secret Key from this machine
+ov account delete                                         # lock the account now, erase it after 30 days
+ov account restore                                        # after `ov login`, keep an account scheduled for deletion
 ```
+
+`ov account delete` prints what happens to each vault, organization, plan and share link, then asks you to type
+the account email (`--yes --email E` for scripts). It refuses while you are the only owner of an organization
+that has other members: make someone else an owner, or delete the organization, in the web or desktop app.
 
 The session (refresh token, device id, trusted Secret Key and the encrypted vault base copies) lives in
 `$OPENVIREO_CONFIG_DIR`, else `$XDG_CONFIG_HOME/openvireo`, else `~/.config/openvireo`, in `session.json` with mode 0600.

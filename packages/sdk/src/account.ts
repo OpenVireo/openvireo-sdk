@@ -9,6 +9,7 @@ import { TokenManager, type SignedOutReason, type StoredSession } from "./auth/t
 import { type DeviceInfo, type Grant, type OpenVireoConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type ShareJson, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
 import type { HttpOptions } from "./http/request.js";
 import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
+import { decodeJwt } from "./crypto/jwt.js";
 import { sealSaMaster, sealVaultKey, unsealSaMaster, unsealVaultKey } from "./crypto/envelope.js";
 import { type Keyset, fingerprint, generateKeyset, keysetFromSecrets, trustedPublicKeys, unwrapKeyset, wipeKeyset, wrapKeyset } from "./crypto/keyset.js";
 import { formatSecretKey, generateSecretKey, parseSecretKey } from "./crypto/secret-key.js";
@@ -165,6 +166,27 @@ export interface RecoveryStatus {
   locked?: boolean;
 }
 
+/** What deleting the account will do (SPEC.md §23), with vault names decrypted where this device can. */
+export interface DeletionPreview {
+  /** set when the account is already pending */
+  scheduledFor: string | null;
+  /** when the account would be (or will be) erased */
+  eraseOn: string;
+  vaults: { id: string; name: string | null; sharedWith: { principal: Principal; display: string | null; role: VaultRole }[] }[];
+  /** `blocked`: the user is the only confirmed owner and others are in it; `members` are the candidates for owner, admins first */
+  orgs: { id: string; name: string; role: OrgRole; outcome: "leave" | "delete" | "blocked"; members: { id: string; email: string; role: OrgRole }[] }[];
+  subscription: { plan: string; periodEnd: string | null } | null;
+  shareLinks: number;
+  blocked: boolean;
+}
+
+/** A remembered account whose stored erase date (SPEC.md §23) is more than a day past: remove it and its Secret Key. */
+export function deletionExpired(scheduledFor: string | null | undefined, now: number = Date.now()): boolean {
+  if (!scheduledFor) return false;
+  const at = Date.parse(scheduledFor);
+  return Number.isFinite(at) && now > at + 24 * 3600_000;
+}
+
 const ROLE_ORDER: Record<VaultRole, number> = { read: 0, write: 1, manage: 2 };
 
 export class Account {
@@ -177,6 +199,7 @@ export class Account {
   private _offline = false;
   // The user whose offline cache to drop when the session ends (the session is gone by then)
   private cacheUser: string | undefined;
+  private _deletion: string | null = null;
 
   private constructor(
     readonly config: OpenVireoConfiguration,
@@ -229,6 +252,13 @@ export class Account {
 
   get signedIn(): boolean {
     return this.tokens.current !== null;
+  }
+  /**
+   * The erase date while the signed-in account is scheduled for deletion (SPEC.md §23), else null.
+   * Such a session opens no vaults: offer `restoreAccount` or sign out.
+   */
+  get deletionScheduledFor(): string | null {
+    return this._deletion;
   }
   get unlocked(): boolean {
     return this.keyset !== null;
@@ -366,6 +396,7 @@ export class Account {
       await this.begin(p.email, res, sk, p.trustDevice ?? true);
       await this.cacheProfile(res.user.id, { kdf: res.kdf, keyset: res.keyset });
       this._offline = false;
+      this._deletion = pendingUntil(res.access_token);
     } finally {
       wipe(sk);
     }
@@ -409,6 +440,7 @@ export class Account {
       try {
         const me = await this.auth.me();
         profile = { kdf: me.kdf, keyset: me.keyset };
+        this._deletion = me.deletion_scheduled_for ?? null;
         await this.followEmail(me.email);
       } catch (e) {
         const cached = isUnreachable(e) ? await this.cachedProfile(session.userId) : null;
@@ -794,6 +826,84 @@ export class Account {
     if (opts.forgetDevice && email) {
       await this.forgetDevice(email);
     }
+  }
+
+  // ------------------------------------------------------------------ account deletion (SPEC §23)
+
+  /** What deleting this account will do. Vault names are decrypted when the vault list can be read. */
+  async deletionPreview(): Promise<DeletionPreview> {
+    const p = await this.auth.deletionPreview();
+    const names = new Map<string, string>();
+    if (!p.scheduled_for && this.keyset) {
+      for (const v of await this.listVaults()) names.set(v.id, v.name);
+    }
+    return {
+      scheduledFor: p.scheduled_for,
+      eraseOn: p.would_erase_on,
+      vaults: p.vaults.map((v) => ({ id: v.id, name: names.get(v.id) ?? null, sharedWith: v.shared_with })),
+      orgs: p.orgs,
+      subscription: p.subscription && { plan: p.subscription.plan, periodEnd: p.subscription.period_end },
+      shareLinks: p.share_links,
+      blocked: p.blocked,
+    };
+  }
+
+  /**
+   * Schedules this account's deletion (SPEC.md §23): checks the master password, then the server locks
+   * the account and erases it on the returned date. `confirm` is the account email as the user typed
+   * it. This device is signed out and its offline cache deleted; the Secret Key stays, so the user can
+   * still sign in and restore until then. 409 `deletion_blocked` lists the orgs to hand over first.
+   */
+  async deleteAccount(p: { password: string; confirm: string }): Promise<{ scheduledFor: string }> {
+    const { session, sk } = await this.storedSecretKey();
+    try {
+      wipeKeyset(await this.checkPassword(p.password, sk));
+    } finally {
+      wipe(sk);
+    }
+    // DELETE /me needs an access token issued in the last 5 minutes
+    await this.tokens.getAccessToken({ force: true });
+    const { scheduled_for } = await this.auth.scheduleDeletion(p.confirm.trim());
+    await this.endSession(session.userId, "deletion_scheduled");
+    return { scheduledFor: scheduled_for };
+  }
+
+  /** Restores this account while it is pending deletion, after signing in to it (SPEC.md §23). */
+  async restoreAccount(p: { password: string }): Promise<void> {
+    const { sk } = await this.storedSecretKey();
+    try {
+      wipeKeyset(await this.checkPassword(p.password, sk));
+    } finally {
+      wipe(sk);
+    }
+    await this.tokens.getAccessToken({ force: true });
+    await this.auth.cancelDeletion();
+    // A token without `del`, which opens vaults again
+    await this.tokens.getAccessToken({ force: true });
+    this._deletion = null;
+  }
+
+  /**
+   * Gives a personal vault to someone who already has access to it (SPEC.md §23). They become its
+   * owner with manage, this account loses access, and the vault needs a key rotation by its new owner.
+   */
+  async transferVault(vaultId: string, to: Principal): Promise<void> {
+    await this.auth.transferVault(vaultId, to);
+    await this.tokens.refreshNow();
+    await this.loadVaultList();
+  }
+
+  /** Ends the session here after the account was deleted (here or elsewhere). */
+  private async endSession(userId: string, reason: "deletion_scheduled" | "account_deleted"): Promise<void> {
+    const email = this.tokens.current?.email;
+    const known = [...this.vaults.keys()];
+    this.lock();
+    this.cacheUser = undefined;
+    await this.clearOfflineData(userId, known);
+    this._offline = false;
+    this._deletion = null;
+    await this.tokens.clear(reason);
+    if (reason === "account_deleted" && email) await this.forgetDevice(email);
   }
 
   // ------------------------------------------------------- several accounts on a device (SPEC §21)
@@ -1370,7 +1480,11 @@ export class Account {
     const stream: EventStream = subscribeEvents(this.sync, {
       onEvent: (ev) => {
         if (ev.type === "vault") handlers.onVaultChanged?.(ev);
-        else if (ev.type === "access") {
+        else if (ev.type === "access" && (ev.change === "deletion_scheduled" || ev.change === "account_deleted")) {
+          const user = this.tokens.current?.userId;
+          stream.close();
+          if (user) void this.endSession(user, ev.change).catch((e) => handlers.onError?.(e));
+        } else if (ev.type === "access") {
           void (async () => {
             try {
               await this.tokens.refreshNow();
@@ -1589,5 +1703,15 @@ export class AccountVault {
     if (!this.db) throw new OpenVireoError("kdbx_error", "vault not opened");
     writeField(this.db, typeof ref === "string" ? parseReference(ref) : ref, value, opts);
     return this.sync();
+  }
+}
+
+/** The `del` claim of an access token: the erase date of a pending account (SPEC.md §23). */
+function pendingUntil(accessToken: string): string | null {
+  try {
+    const del = decodeJwt(accessToken).claims.del;
+    return typeof del === "string" ? del : null;
+  } catch {
+    return null;
   }
 }

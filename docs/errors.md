@@ -43,6 +43,15 @@ as opposed to refusing the request.
 | `weak_kdf` | | The account's password hashing settings are below the minimum the client accepts | Report it; don't continue |
 | `opaque_failed` | | The OPAQUE module couldn't load or a protocol step failed | Check that the WASM module is bundled |
 
+## Account deletion
+
+| Code | Status | Meaning | What to do |
+|---|---|---|---|
+| `account_pending_deletion` | 403 | The account is scheduled for deletion; `err.details.scheduledFor` is the erase date | Offer `restoreAccount`, or sign out |
+| `deletion_blocked` | 409 | The user is the only owner of organizations with other members; `err.details.orgs` lists them | Make someone else an owner, or delete the org, then try again |
+| `confirm_mismatch` | 400 | The typed email isn't the account's | Ask again |
+| `not_a_member` | 409 | `transferVault` to someone without access to the vault | Share it with them first |
+
 ## Account recovery
 
 See [Account recovery](guides/recovery.md#errors) for `recovery_not_ready`, `recovery_cancelled`,

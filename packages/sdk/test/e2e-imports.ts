@@ -1,2 +1,2 @@
-export { Account, MemoryStorage, SelfHostedSync, ServiceAccount, openKdbx, vaultCredentials } from "../src/index.js";
+export { Account, MemoryStorage, SelfHostedSync, ServiceAccount, deletionExpired, openKdbx, vaultCredentials } from "../src/index.js";
 export { get } from "./helpers/dbs.js";

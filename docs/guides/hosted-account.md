@@ -155,6 +155,38 @@ const url = await account.webSessionUrl("/settings");   // a one-time link into 
 
 Changing the password keeps the same Secret Key and keyset, so vaults and shares keep working.
 
+### Deleting the account
+
+Deleting is scheduled (SPEC §23): the account is locked at once and erased after a grace period (30 days on
+the hosted service), when its personal vaults, keys and billing go too. Until then the user can sign in and
+restore it.
+
+<!-- prelude
+import type { Account } from "@openvireo/sdk";
+declare const account: Account, password: string, typedEmail: string, bobPrincipal: `user:${string}`;
+-->
+```ts
+const preview = await account.deletionPreview();
+preview.eraseOn;     // when it would be erased
+preview.vaults;      // { id, name, sharedWith }: shared vaults can be given away first
+preview.orgs;        // outcome "leave", "delete" (deleted with the account) or "blocked"
+if (preview.vaults[0]?.sharedWith.length) await account.transferVault(preview.vaults[0].id, bobPrincipal);
+
+const { scheduledFor } = await account.deleteAccount({ password, confirm: typedEmail });
+// This device is signed out (onSignedOut reports "deletion_scheduled") and its offline cache is gone.
+// The Secret Key stays so the user can sign in again and restore:
+if (account.deletionScheduledFor) await account.restoreAccount({ password });
+```
+
+- A `blocked` org is one where the user is the only confirmed owner and others are in it. `deleteAccount`
+  fails with `deletion_blocked` until the user makes one of `members` an owner (`setMemberRole`; admins
+  need no new keys) or deletes the org.
+- Signed in to a pending account, `deletionScheduledFor` is the erase date and every vault call fails with
+  `account_pending_deletion`. Show a screen with Restore and Sign out.
+- Other signed-in devices hear `deletion_scheduled` on the event stream and are signed out the same way.
+- Keep the date with your remembered-accounts list (SPEC §21) and remove the account, with
+  `forgetDevice`, once `deletionExpired(date)` is true.
+
 The lower-level `account.auth` (an `AuthClient`) covers every account server route, for things `Account` has no
 helper for, such as the device list and two-factor setup:
 
