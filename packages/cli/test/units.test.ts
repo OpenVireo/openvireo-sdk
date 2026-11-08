@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseReference } from "@openvireo/sdk";
 import { CHARSETS, MASK, Masker, findReferences, generatePassword, maskPatterns, parseCharsets, parseEnvFile } from "../src/index.js";
+import { describePlan } from "../src/session.js";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -120,5 +121,23 @@ describe("generatePassword", () => {
     expect(new Set(Array.from({ length: 20 }, () => generatePassword())).size).toBe(20);
     expect(() => parseCharsets("emoji")).toThrow(/unknown charset/);
     expect(() => generatePassword({ length: 3 })).toThrow(/length/);
+  });
+});
+
+describe("describePlan", () => {
+  const issuer = "https://accounts.example.com/";
+  it("shows a free trial and when it ends", () => {
+    expect(
+      describePlan(
+        { id: "premium", limits: {}, billing: { source: "apple", interval: "year", status: "trialing", renews_at: "2026-11-22T12:00:00Z", ends_at: null, manage: "app_store" } },
+        issuer,
+      ),
+    ).toMatch(/^Premium, free trial until .*2026, then billed yearly by Apple\. Manage it on your iPhone/);
+    expect(
+      describePlan(
+        { id: "premium", limits: {}, billing: { source: "stripe", interval: "month", status: "trialing", renews_at: null, ends_at: "2026-11-22T12:00:00Z", manage: "website" } },
+        issuer,
+      ),
+    ).toMatch(/^Premium, free trial, ends .*2026\. Manage it at https:\/\/accounts\.example\.com\/subscription\/pricing\.$/);
   });
 });

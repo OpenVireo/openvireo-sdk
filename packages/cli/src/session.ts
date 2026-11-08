@@ -119,10 +119,21 @@ export function describePlan(plan: Plan | undefined, issuer: string): string | n
   const name = PLAN_NAMES[plan.id] ?? plan.id;
   const b = plan.billing;
   if (!b) return name;
-  const when = b.ends_at ? `, ends ${longDay(b.ends_at)}` : b.renews_at ? `, renews ${longDay(b.renews_at)}` : "";
+  const trial = b.status === "trialing";
+  const every = b.interval === "year" ? "yearly" : "monthly";
+  const when = b.ends_at
+    ? `, ${trial ? "free trial, ends" : "ends"} ${longDay(b.ends_at)}`
+    : b.renews_at
+      ? trial
+        ? `, free trial until ${longDay(b.renews_at)}, then billed ${every}`
+        : `, renews ${longDay(b.renews_at)}`
+      : trial
+        ? ", free trial"
+        : "";
   const late = b.status === "past_due" ? " (payment being retried)" : "";
   if (b.manage === "app_store") {
-    return `${name}${when}${late}, billed by Apple. Manage it on your iPhone or in your Apple ID settings (${APPLE_SUBSCRIPTIONS_URL}).`;
+    const by = trial && !b.ends_at && b.renews_at ? " by Apple" : ", billed by Apple";
+    return `${name}${when}${late}${by}. Manage it on your iPhone or in your Apple ID settings (${APPLE_SUBSCRIPTIONS_URL}).`;
   }
   return `${name}${when}${late}. Manage it at ${issuer.replace(/\/$/, "")}/subscription/pricing.`;
 }
