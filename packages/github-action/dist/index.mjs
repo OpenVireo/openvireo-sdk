@@ -19012,6 +19012,19 @@ var AuthClient = class _AuthClient {
   passwordFinish(body) {
     return this.authed("POST", "me/password/finish", body);
   }
+  // ---------------------------------------------------------------- account deletion (SPEC.md §23)
+  /** What deleting the account will do; also allowed on a pending account. */
+  deletionPreview() {
+    return this.authed("GET", "me/deletion");
+  }
+  /** Schedules the deletion (needs a token from the last 5 minutes). 409 `deletion_blocked` lists `orgs`. */
+  scheduleDeletion(confirm) {
+    return this.authed("DELETE", "me", { confirm });
+  }
+  /** Restores a pending account (needs a token from the last 5 minutes). */
+  cancelDeletion() {
+    return this.authed("POST", "me/deletion/cancel");
+  }
   emailRequest(email) {
     return this.authed("POST", "me/email", { email });
   }
@@ -19121,6 +19134,10 @@ var AuthClient = class _AuthClient {
   }
   deleteVault(vault) {
     return this.authed("DELETE", `vaults/${seg(vault)}`);
+  }
+  /** Gives a personal vault to a user who already holds its current key (SPEC.md §23) */
+  transferVault(vault, principal) {
+    return this.authed("POST", `vaults/${seg(vault)}/owner`, { principal });
   }
   listAccess(vault) {
     return this.authed("GET", `vaults/${seg(vault)}/access`);
@@ -20528,7 +20545,7 @@ function serviceAccountSource(sa) {
 }
 
 // ../cli/src/session.ts
-var VERSION3 = "0.9.0";
+var VERSION3 = "0.10.0";
 
 // ../cli/src/template.ts
 var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
@@ -20568,6 +20585,8 @@ Usage:
   ov login [--issuer URL] [--email E] [--secret-key K1-\u2026]
   ov logout [--forget]                       --forget also removes the Secret Key from this machine
   ov whoami
+  ov account delete [--yes --email E]        lock the account and erase it after 30 days
+  ov account restore                         keep an account scheduled for deletion
   ov connect [serve | token \u2026]               the REST server (see ov connect --help)
   ov version
 
@@ -20645,7 +20664,7 @@ async function run(io, opts = {}) {
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.9.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/0.10.0" } });
     const src = serviceAccountSource(sa);
     const resolved = [];
     try {
