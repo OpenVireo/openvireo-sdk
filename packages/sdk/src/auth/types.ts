@@ -81,7 +81,8 @@ export interface DeletionPreviewJson {
   would_erase_on: string;
   vaults: { id: string; encrypted_name: string; shared_with: { principal: Principal; display: string | null; role: VaultRole }[] }[];
   orgs: { id: string; name: string; role: OrgRole; outcome: "leave" | "delete" | "blocked"; members: { id: string; email: string; role: OrgRole }[] }[];
-  subscription: { plan: string; period_end: string | null } | null;
+  /** `source` and `manage` are missing on servers older than In-App Purchase (read them as stripe / website) */
+  subscription: { plan: string; period_end: string | null; source?: BillingSource; manage?: BillingManage } | null;
   share_links: number;
   blocked: boolean;
 }
@@ -94,7 +95,34 @@ export interface DeletionPreviewJson {
 export interface Plan {
   id: "free" | "premium" | "org_free" | "families" | "teams" | "business" | (string & {}) | null;
   limits: Record<string, number | null>;
+  /** Who bills a paid plan; null on a free plan or when billing is off, missing on older servers. */
+  billing?: Billing | null;
 }
+
+/** `stripe`: bought on the website; `apple`: In-App Purchase in the iOS app (SPEC.md §19). */
+export type BillingSource = "stripe" | "apple" | (string & {});
+/**
+ * Where the plan is changed or cancelled: `website` (the account site's pricing or org billing page) or
+ * `app_store` (the subscription belongs to an Apple ID; only its owner can manage it, on their device or at
+ * https://apps.apple.com/account/subscriptions). Follow this, not `source`.
+ */
+export type BillingManage = "website" | "app_store" | (string & {});
+
+/** How a paid plan is billed (SPEC.md §19). */
+export interface Billing {
+  source: BillingSource;
+  interval: "month" | "year" | (string & {});
+  /** `past_due` while a payment is being retried (Apple's billing grace period); the plan still applies */
+  status: "active" | "trialing" | "past_due" | (string & {});
+  /** when it renews, or null when it is set not to */
+  renews_at: string | null;
+  /** when it ends because it was set not to renew, else null */
+  ends_at: string | null;
+  manage: BillingManage;
+}
+
+/** Where Apple subscriptions are managed outside the iPhone (SPEC.md §19). */
+export const APPLE_SUBSCRIPTIONS_URL = "https://apps.apple.com/account/subscriptions";
 
 export interface PublicPrincipal extends PublicKeysJson {
   principal: Principal;

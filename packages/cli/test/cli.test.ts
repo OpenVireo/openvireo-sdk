@@ -212,6 +212,18 @@ describe("ov vault / whoami / login", () => {
     expect(rot.code).toBe(0);
     expect((await openvireo(["read", "ov://Private/Bank/password"], { env: { OPENVIREO_PASSWORD: w.password } })).stdout).toBe("by-human\n");
     expect((await openvireo(["whoami"])).stdout).toMatch(/^kind: user\nprincipal: user:.+\nemail: alice@example.com\n/);
+    // the plan and who bills it (SPEC §19)
+    const aliceId = w.auth.users.get("alice@example.com").id;
+    const billing = { source: "apple", interval: "year", status: "active", renews_at: "2027-11-08T12:00:00Z", ends_at: null, manage: "app_store" };
+    w.auth.plans.set(aliceId, { id: "premium", limits: {}, billing });
+    expect((await openvireo(["whoami"])).stdout).toContain(
+      "plan: Premium, renews 8 November 2027, billed by Apple. Manage it on your iPhone or in your Apple ID settings (https://apps.apple.com/account/subscriptions).\n",
+    );
+    w.auth.plans.set(aliceId, { id: "premium", limits: {}, billing: { ...billing, source: "stripe", manage: "website", renews_at: null, ends_at: "2027-01-31T00:00:00Z" } });
+    expect((await openvireo(["whoami"])).stdout).toMatch(/plan: Premium, ends 31 January 2027\. Manage it at https:\/\/.+\/subscription\/pricing\.\n/);
+    w.auth.plans.set(aliceId, { id: "free", limits: {}, billing: null });
+    expect((await openvireo(["whoami"])).stdout).toContain("plan: Free\n");
+    w.auth.plans.delete(aliceId);
     // the SA token takes precedence over the saved session
     expect((await openvireo(["vault", "list"], { env: asReader() })).stdout).not.toContain("Private");
 
@@ -260,8 +272,13 @@ describe("ov vault / whoami / login", () => {
     const prompt = (answer: string) => (q: string) => (q.startsWith("Email") ? "alice@example.com" : q.startsWith("Master") ? w.password : q.startsWith("Type") ? answer : "");
     expect((await openvireo(["login"], { env, prompt: prompt("") })).code).toBe(0);
     const user = { OPENVIREO_PASSWORD: w.password };
+    // An Apple-billed plan can't be stopped by the server: the user is told to cancel it at Apple (SPEC §23)
+    const aliceId = w.auth.users.get("alice@example.com").id;
+    w.auth.plans.set(aliceId, { id: "premium", limits: {}, billing: { source: "apple", interval: "year", status: "active", renews_at: "2027-11-08T12:00:00Z", ends_at: null, manage: "app_store" } });
 
     const wrong = await openvireo(["account", "delete"], { env: user, prompt: prompt("bob@example.com") });
+    expect(wrong.stderr).toContain("your premium plan is billed by Apple and keeps renewing: cancel it on your iPhone or in your Apple ID settings");
+    w.auth.plans.delete(aliceId);
     expect([wrong.code, wrong.stderr.split("\n").at(-2)]).toEqual([1, "ov: that isn't this account's email; nothing was deleted"]);
     expect((await openvireo(["account", "delete", "--yes"], { env: user })).stderr).toMatch(/--yes needs --email/);
 

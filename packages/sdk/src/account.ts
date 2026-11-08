@@ -6,7 +6,7 @@ import { OpenVireoError, isUnreachable } from "./errors.js";
 import { AuthClient, discover } from "./auth/client.js";
 import { MemoryStorage, NamespacedStorage, type KeyValueStorage } from "./auth/storage.js";
 import { TokenManager, type SignedOutReason, type StoredSession } from "./auth/token-manager.js";
-import { type DeviceInfo, type Grant, type OpenVireoConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type ShareJson, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
+import { type BillingManage, type BillingSource, type DeviceInfo, type Grant, type OpenVireoConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type ShareJson, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
 import type { HttpOptions } from "./http/request.js";
 import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
 import { decodeJwt } from "./crypto/jwt.js";
@@ -175,7 +175,8 @@ export interface DeletionPreview {
   vaults: { id: string; name: string | null; sharedWith: { principal: Principal; display: string | null; role: VaultRole }[] }[];
   /** `blocked`: the user is the only confirmed owner and others are in it; `members` are the candidates for owner, admins first */
   orgs: { id: string; name: string; role: OrgRole; outcome: "leave" | "delete" | "blocked"; members: { id: string; email: string; role: OrgRole }[] }[];
-  subscription: { plan: string; periodEnd: string | null } | null;
+  /** `manage: "app_store"`: billed by Apple, which only the user can cancel (in their Apple ID settings) before deleting */
+  subscription: { plan: string; periodEnd: string | null; source: BillingSource; manage: BillingManage } | null;
   shareLinks: number;
   blocked: boolean;
 }
@@ -842,7 +843,12 @@ export class Account {
       eraseOn: p.would_erase_on,
       vaults: p.vaults.map((v) => ({ id: v.id, name: names.get(v.id) ?? null, sharedWith: v.shared_with })),
       orgs: p.orgs,
-      subscription: p.subscription && { plan: p.subscription.plan, periodEnd: p.subscription.period_end },
+      subscription: p.subscription && {
+        plan: p.subscription.plan,
+        periodEnd: p.subscription.period_end,
+        source: p.subscription.source ?? "stripe",
+        manage: p.subscription.manage ?? "website",
+      },
       shareLinks: p.share_links,
       blocked: p.blocked,
     };

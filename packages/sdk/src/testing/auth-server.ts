@@ -4,6 +4,7 @@ import { b64u, fromB64u, randomBytes, randomUuid, toHex } from "../util/bytes.js
 import { sha256 } from "../crypto/primitives.js";
 import { verifyRestoreProof } from "../crypto/restore.js";
 import { MockServer, json } from "./mock-fetch.js";
+import type { Plan } from "../auth/types.js";
 
 export const ISSUER = "https://auth.example";
 export const CONFIG = {
@@ -68,6 +69,8 @@ export class FakeAuthServer extends MockServer {
   deletions = new Map<string, string>();
   /** grace period in days */
   deletionDays = 30;
+  /** user id → their personal plan in GET /me and the deletion preview's subscription (SPEC.md §19); none = free */
+  plans = new Map<string, Plan>();
   /** what the sync server should be told about (access events), for tests */
   accessEvents: { subjects: string[]; data: Record<string, unknown> }[] = [];
   onToken: (t: string) => void = () => {};
@@ -118,6 +121,12 @@ export class FakeAuthServer extends MockServer {
     for (const k of keys) this.sas.get(k.sa_id).master.set(k.principal, k.sealed_key);
   }
   private userById = (id: string) => [...this.users.values()].find((u) => u.id === id);
+  private previewSubscription(pr: string) {
+    const b = this.plans.get(pr.split(":")[1]!)?.billing;
+    const plan = this.plans.get(pr.split(":")[1]!)?.id;
+    if (!b || !plan) return null;
+    return { plan, period_end: b.renews_at ?? b.ends_at, source: b.source, manage: b.manage };
+  }
   private pub(principal: string) {
     const [kind, id] = principal.split(":");
     if (kind === "user") {
@@ -342,7 +351,8 @@ export class FakeAuthServer extends MockServer {
     this.on("GET", P + "me", A((_r, _p, pr) => {
       const u = this.userById(pr.split(":")[1]!);
       const orgs = [...this.orgs].filter(([, o]) => o.members.has(u.id)).map(([id, o]) => ({ id, name: o.name, ...o.members.get(u.id)! }));
-      return json(200, { id: u.id, email: u.email, kdf: u.kdf, keyset: u.keyset, mfa: { totp: false }, orgs, deletion_scheduled_for: this.deletions.get(u.id) ?? null });
+      const plan = this.plans.get(u.id);
+      return json(200, { id: u.id, email: u.email, kdf: u.kdf, keyset: u.keyset, mfa: { totp: false }, orgs, deletion_scheduled_for: this.deletions.get(u.id) ?? null, ...(plan ? { plan } : {}) });
     }, true));
     // Account deletion (SPEC.md §23); orgs: only "leave" and "blocked" (the only confirmed owner with others)
     const outcomes = (uid: string) =>
@@ -358,7 +368,7 @@ export class FakeAuthServer extends MockServer {
       const orgs = outcomes(uid);
       const vaults = [...this.vaults].filter(([, v]) => v.owner_id === uid && !v.archived).map(([id, v]) => ({ id, encrypted_name: v.encrypted_name, shared_with: [...v.access].filter(([p]) => p !== pr).map(([principal, a]) => ({ principal, display: this.pub(principal)?.email ?? null, role: a.role })) }));
       const scheduled = this.deletions.get(uid) ?? null;
-      return json(200, { scheduled_for: scheduled, would_erase_on: scheduled ?? new Date(Date.now() + this.deletionDays * 86400_000).toISOString(), vaults, orgs, subscription: null, share_links: [...this.shares.values()].filter((s) => s.owner === pr && !s.ended).length, blocked: orgs.some((o) => o.outcome === "blocked") });
+      return json(200, { scheduled_for: scheduled, would_erase_on: scheduled ?? new Date(Date.now() + this.deletionDays * 86400_000).toISOString(), vaults, orgs, subscription: this.previewSubscription(pr), share_links: [...this.shares.values()].filter((s) => s.owner === pr && !s.ended).length, blocked: orgs.some((o) => o.outcome === "blocked") });
     }, true));
     this.on("DELETE", P + "me", A((req, _p, pr) => {
       const uid = pr.split(":")[1]!;

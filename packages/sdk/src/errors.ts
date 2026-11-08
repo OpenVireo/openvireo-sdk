@@ -37,6 +37,10 @@ export type OpenVireoErrorCode =
   // plans (SPEC.md §19)
   | "plan_limit"
   | "quota_exceeded"
+  // In-App Purchase (SPEC.md §19)
+  | "billed_by_stripe"
+  | "apple_subscription_bound"
+  | "apple_verification_failed"
   // vault / sync
   | "vault_key_mismatch"
   | "no_vault_key"

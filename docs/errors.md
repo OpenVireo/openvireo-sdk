@@ -67,6 +67,18 @@ limits. Nothing is locked when a limit is reached: existing vaults keep opening 
 | `plan_limit` | 402 | Creating this (a vault, a share, a member, a service account) would go over the plan. `err.details` has `limit` (which one, e.g. `personal_vaults`), `max`, `current`, `plan` and `upgradeUrl` | Offer `err.details.upgradeUrl`, or remove something first |
 | `quota_exceeded` | 413 | The vault is larger than the plan's storage per vault; `err.details.max` is the limit in bytes | Make the database smaller (attachments, history), or upgrade |
 
+A paid plan's `billing` (`plan.billing` in `auth.me()`, SPEC §19) says who bills it. Follow `manage`:
+`website` means the account site's pricing page; `app_store` means the plan was bought in the iOS app and
+belongs to an Apple ID, so only its owner can change or cancel it (on their iPhone, or at
+`APPLE_SUBSCRIPTIONS_URL`). The SDK never sells or cancels In-App Purchase. These codes come from the In-App
+Purchase routes the iOS app uses:
+
+| Code | Status | Meaning | What to do |
+|---|---|---|---|
+| `billed_by_stripe` | 409 | The Apple purchase was recorded, but a plan bought on the website is still in force | Tell the user to cancel one of them |
+| `apple_subscription_bound` | 409 | This Apple subscription already belongs to another account or organization; it never moves | Sign in to that account, or cancel it at Apple |
+| `apple_verification_failed` | 400 | The signed transaction didn't verify | Retry; report it if it persists |
+
 ## Vaults and sync
 
 | Code | Status | Meaning | What to do |

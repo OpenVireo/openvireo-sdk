@@ -147,6 +147,12 @@ ov account restore                                        # after `ov login`, ke
 `ov account delete` prints what happens to each vault, organization, plan and share link, then asks you to type
 the account email (`--yes --email E` for scripts). It refuses while you are the only owner of an organization
 that has other members: make someone else an owner, or delete the organization, in the web or desktop app.
+A plan bought in the iOS app is billed by Apple and only you can cancel it: `ov account delete` says so, and
+it keeps renewing until you cancel it on your iPhone or in your Apple ID settings.
+
+Signed in as a user, `ov whoami` also prints the plan and who bills it, e.g.
+`plan: Premium, renews 8 November 2027, billed by Apple. Manage it on your iPhone or in your Apple ID settings (…)`,
+or `… Manage it at https://accounts.openvireo.com/subscription/pricing.` for a plan bought on the website.
 
 The session (refresh token, device id, trusted Secret Key and the encrypted vault base copies) lives in
 `$OPENVIREO_CONFIG_DIR`, else `$XDG_CONFIG_HOME/openvireo`, else `~/.config/openvireo`, in `session.json` with mode 0600.

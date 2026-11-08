@@ -109,4 +109,23 @@ describe("account deletion (SPEC §23)", () => {
     expect(deletionExpired(at, Date.parse(at) + 3600_000)).toBe(false);
     expect(deletionExpired(at, Date.parse(at) + 25 * 3600_000)).toBe(true);
   });
+
+  it("says when the plan is billed by Apple (SPEC §19, §23)", async () => {
+    const { auth, connect } = world();
+    const { acct: alice } = await signedUp(connect, "alice@example.com");
+    expect((await alice.deletionPreview()).subscription).toBeNull();
+    const id = auth.users.get("alice@example.com").id;
+    const billing = { source: "apple", interval: "year", status: "active", renews_at: "2027-11-08T12:00:00Z", ends_at: null, manage: "app_store" } as const;
+    auth.plans.set(id, { id: "premium", limits: {}, billing });
+    expect((await alice.deletionPreview()).subscription).toEqual({ plan: "premium", periodEnd: "2027-11-08T12:00:00Z", source: "apple", manage: "app_store" });
+    expect((await alice.auth.me()).plan?.billing).toEqual(billing);
+  });
+
+  it("reads an older server's subscription as billed on the website", async () => {
+    const { auth, connect } = world();
+    const { acct: alice } = await signedUp(connect, "alice@example.com");
+    const preview = (auth as unknown as { previewSubscription: (pr: string) => unknown });
+    preview.previewSubscription = () => ({ plan: "premium", period_end: null });
+    expect((await alice.deletionPreview()).subscription).toEqual({ plan: "premium", periodEnd: null, source: "stripe", manage: "website" });
+  });
 });
