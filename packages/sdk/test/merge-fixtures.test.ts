@@ -8,6 +8,7 @@ import { fieldText } from "../src/vault/entries.js";
 import { b64u, fromB64u, fromHex, toHex } from "../src/util/bytes.js";
 import { conflictingFields } from "../src/merge/fields.js";
 import { findEntryByUuid } from "../src/merge/merger.js";
+import { entriesUnder, groupsUnder } from "../src/merge/tree.js";
 
 const dir = process.env.OPENVIREO_MERGE_FIXTURES ?? fileURLToPath(new URL("./fixtures/merge-fixtures/", import.meta.url));
 const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
@@ -30,8 +31,28 @@ async function build(spec: any): Promise<Kdbx> {
   root.groups = [];
   root.uuid = uuidOf(ROOT);
   for (const k of ["creationTime", "lastModTime", "lastAccessTime", "locationChanged"] as const) root.times[k] = T0;
+  // Groups may be listed in any order; each goes under its parent once that exists
+  const groups = new Map<string, kdbxweb.KdbxGroup>([[ROOT, root]]);
+  let pending: any[] = [...(spec.groups ?? [])];
+  while (pending.length) {
+    const left = pending.filter((g) => {
+      const parent = groups.get(g.parent ?? ROOT);
+      if (!parent) return true;
+      const group = db.createGroup(parent, g.name);
+      group.uuid = uuidOf(g.uuid);
+      const modified = g.modified ? new Date(g.modified) : T0;
+      group.times.creationTime = T0;
+      group.times.lastModTime = modified;
+      group.times.lastAccessTime = modified;
+      group.times.locationChanged = g.location_changed ? new Date(g.location_changed) : T0;
+      groups.set(g.uuid, group);
+      return false;
+    });
+    if (left.length === pending.length) throw new Error("merge fixture: group parent missing");
+    pending = left;
+  }
   for (const e of spec.entries) {
-    const entry = db.createEntry(root);
+    const entry = db.createEntry(groups.get(e.group ?? ROOT) ?? root);
     entry.uuid = uuidOf(e.uuid);
     for (const [k, v] of Object.entries<string>(e.attributes)) {
       const protect = k === "Password" || (e.protected ?? []).includes(k);
@@ -42,7 +63,7 @@ async function build(spec: any): Promise<Kdbx> {
       entry.binaries.set(name, await db.createBinary(fromB64u(data).slice().buffer as ArrayBuffer));
     }
     entry.times.creationTime = T0;
-    entry.times.locationChanged = T0;
+    entry.times.locationChanged = e.location_changed ? new Date(e.location_changed) : T0;
     entry.times.lastModTime = new Date(e.modified);
     entry.times.lastAccessTime = new Date(e.modified);
   }
@@ -50,8 +71,12 @@ async function build(spec: any): Promise<Kdbx> {
   return db;
 }
 
+const sortKeys = <T,>(o: Record<string, T>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)));
+
 function project(db: Kdbx) {
-  const entries = [...db.getDefaultGroup().entries].map((e) => {
+  const root = db.getDefaultGroup();
+  const notT0 = (d?: Date) => iso(d) !== iso(T0);
+  const entries = [...entriesUnder(root)].map((e) => {
     const attributes: Record<string, string> = {};
     const prot: string[] = [];
     for (const [k, v] of e.fields) {
@@ -65,11 +90,13 @@ function project(db: Kdbx) {
       const v = kdbxweb.KdbxBinaries.isKdbxBinaryWithHash(b) ? b.value : b;
       attachments[k] = b64u(v instanceof kdbxweb.ProtectedValue ? v.getBinary() : new Uint8Array(v as ArrayBuffer));
     }
-    const sortKeys = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)));
     return {
       ...(Object.keys(attachments).length ? { attachments: sortKeys(attachments) } : {}),
       attributes: sortKeys(attributes),
+      // Where the entry is, only when not the default (directly in the root, never moved)
+      ...(e.parentGroup !== root ? { group: uuidStr(e.parentGroup!.uuid) } : {}),
       history_count: e.history.length,
+      ...(notT0(e.times.locationChanged) ? { location_changed: iso(e.times.locationChanged) } : {}),
       modified: iso(e.times.lastModTime),
       ...(prot.length ? { protected: prot.sort() } : {}),
       ...(e.tags.length ? { tags: [...e.tags].sort() } : {}),
@@ -77,10 +104,25 @@ function project(db: Kdbx) {
     };
   });
   entries.sort((a, b) => a.uuid.localeCompare(b.uuid));
-  return { deleted: db.deletedObjects.map((d) => uuidStr(d.uuid!)).sort(), entries };
+  const groups = [...groupsUnder(root)]
+    .map((g) => ({
+      ...(notT0(g.times.locationChanged) ? { location_changed: iso(g.times.locationChanged) } : {}),
+      ...(notT0(g.times.lastModTime) ? { modified: iso(g.times.lastModTime) } : {}),
+      name: g.name ?? "",
+      parent: uuidStr(g.parentGroup!.uuid),
+      uuid: uuidStr(g.uuid),
+    }))
+    .sort((a, b) => (a.uuid < b.uuid ? -1 : 1));
+  // Only when there are groups besides the root, so fixtures without groups keep their form
+  return { deleted: db.deletedObjects.map((d) => uuidStr(d.uuid!)).sort(), entries, ...(groups.length ? { groups } : {}) };
 }
 
 const normalize = (r: any) => ({
+  ...normalizeEntries(r),
+  ...(r.groups?.length ? { groups: r.groups.map((g: any) => sortKeys(g)).sort((a: any, b: any) => (a.uuid < b.uuid ? -1 : 1)) } : {}),
+});
+
+const normalizeEntries = (r: any) => ({
   deleted: [...r.deleted].sort(),
   entries: r.entries.map((e: any) => ({ ...e, ...(e.attachments ? { attachments: Object.fromEntries(Object.entries<string>(e.attachments).map(([k, v]) => [k, b64u(fromB64u(v))])) } : {}) })).map((e: any) =>
     Object.fromEntries(
@@ -110,8 +152,9 @@ describe.skipIf(files.length === 0)(`Qt merge fixtures (${dir})`, () => {
       await mergeDatabases(local, remote, base, { now: () => new Date(fx.now) });
       const want = normalize(fx.expected.result);
       const got = project(local);
-      // like TestMergeFixtures.cpp: both sides' entries end up equal (deleted objects are local's)
+      // like TestMergeFixtures.cpp: both sides' entries and groups end up equal (deleted objects are local's)
       expect(project(remote).entries).toEqual(got.entries);
+      expect(project(remote).groups).toEqual(got.groups);
       expect(JSON.stringify(got, null, 1)).toBe(JSON.stringify(want, null, 1));
     });
   }
