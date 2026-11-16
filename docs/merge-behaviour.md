@@ -149,10 +149,21 @@ list of deleted objects as it is. Sync applies deletions against the base instea
    - copies every source item whose value differs (`Adding custom data <key> [<value>]`), except the
      generated keys `_LAST_MODIFIED`, `KPXC_RANDOM_SLUG` and `KPXC_SYNC_GENERATION`.
 
-## 6. Sync: deletions and the Recycle Bin
+## 6. Sync: locations, deletions and the Recycle Bin
 
-`mergeDatabases(local, remote, base)` adds two steps around the structure merge, as the Qt client's
+`mergeDatabases(local, remote, base)` adds three steps around the structure merge, as the Qt client's
 `SyncEngine::mergeDatabases` does.
+
+**Locations.** Before anything is merged, note for every entry both sides have the group and location
+time of the copy with the later location time in whole seconds (local wins a tie); both root groups
+count as the same group whatever their UUIDs. Right after the structure merge, put both copies in that
+group with that location time, without changing any modification times, and record `moved` with
+details `Moved to where it was moved last` when a copy changed group (fixing only the location time
+isn't recorded). This keeps a move made on one device when another device edits the entry: replacing
+the older copy with the newer one would otherwise carry the newer copy's group along with its fields.
+The Recycle Bin is an ordinary group here (recycling is a move); deleting for good follows the rules
+below. Groups don't need this step, since the structure merge moves a group by its own location time
+and updates its name separately.
 
 **Deletions** (only with a base). Before the structure merge, find each side's pending deletions: a
 deletion record on one side for an entry or non-root group that is gone on that side and still on the
