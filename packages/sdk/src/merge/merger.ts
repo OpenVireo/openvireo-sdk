@@ -125,6 +125,8 @@ export async function mergeDatabases(local: Kdbx, remote: Kdbx, base?: Kdbx | nu
   const changes: MergeChange[] = [];
   const conflicts = new Map<string, string[]>();
   let combined = 0;
+  // Before combineEntries and the structure merge copy one entry's location over the other's
+  const locations = locationsOf(local, remote);
   if (base) {
     for (const localEntry of [...entriesUnder(local.getDefaultGroup())]) {
       const remoteEntry = findEntryByUuid(remote, localEntry.uuid.id);
@@ -152,6 +154,8 @@ export async function mergeDatabases(local: Kdbx, remote: Kdbx, base?: Kdbx | nu
   const toRemote = mergeInto(local, remote, mode);
   const toLocal = mergeInto(remote, local, mode);
   changes.push(...toRemote, ...toLocal);
+  const moved = applyLocations(local, remote, locations);
+  changes.push(...moved.changes);
   const after = [...(base && pending.size ? applyDeletions(local, remote, base, pending) : []), ...mergeRecycleBins(local, remote)];
   changes.push(...after);
   if (changes.length) {
@@ -162,9 +166,73 @@ export async function mergeDatabases(local: Kdbx, remote: Kdbx, base?: Kdbx | nu
   return {
     changes,
     conflicts,
-    remoteChanged: combined > 0 || after.length > 0 || toRemote.length > 0,
-    localChanged: combined > 0 || after.length > 0 || toLocal.length > 0,
+    remoteChanged: combined > 0 || after.length > 0 || toRemote.length > 0 || moved.remote,
+    localChanged: combined > 0 || after.length > 0 || toLocal.length > 0 || moved.local,
   };
+}
+
+// ------------------------------------------------------------------- locations (SyncEngine)
+
+interface Location {
+  /** null for the root group, which counts as the same group whatever its UUID */
+  group: string | null;
+  changed: Date | undefined;
+}
+
+const locationSeconds = (e: KdbxEntry) => Math.floor((e.times.locationChanged?.getTime() ?? 0) / 1000);
+
+/**
+ * Where each entry both sides have ends up: in the group of the copy moved last (newer location-changed
+ * time in whole seconds, as the files keep them; local wins a tie), whichever copy wins on its fields.
+ * The structure merge replaces the older-modified copy with the newer one, location and all, so a move
+ * made on one device and an edit made on the other would leave the copies in different groups with the
+ * same location-changed time, and no later sync would bring them together. Found before anything is
+ * merged, applied to both copies afterwards.
+ */
+function locationsOf(local: Kdbx, remote: Kdbx): Map<string, Location> {
+  const locations = new Map<string, Location>();
+  for (const localEntry of entriesUnder(local.getDefaultGroup())) {
+    const remoteEntry = findEntryByUuid(remote, localEntry.uuid.id);
+    if (!remoteEntry || !localEntry.parentGroup || !remoteEntry.parentGroup) continue;
+    const [winner, db] = locationSeconds(localEntry) >= locationSeconds(remoteEntry) ? [localEntry, local] : [remoteEntry, remote];
+    const group = winner.parentGroup!;
+    locations.set(localEntry.uuid.id, {
+      group: group === db.getDefaultGroup() ? null : group.uuid.id,
+      changed: winner.times.locationChanged,
+    });
+  }
+  return locations;
+}
+
+/**
+ * Puts each copy where `locations` says, without touching any modification times. A copy moved to
+ * another group is recorded as `moved` (once per entry); fixing only the location-changed time isn't.
+ */
+function applyLocations(local: Kdbx, remote: Kdbx, locations: Map<string, Location>) {
+  const changes: MergeChange[] = [];
+  const movedOn = { local: false, remote: false };
+  for (const [id, where] of locations) {
+    let moved = false;
+    let localEntry: KdbxEntry | undefined;
+    for (const db of [local, remote]) {
+      const entry = findEntryByUuid(db, id);
+      const group = where.group === null ? db.getDefaultGroup() : findGroup(db, where.group);
+      if (!entry || !group) continue;
+      if (db === local) localEntry = entry;
+      const previous = entry.parentGroup;
+      if (previous === group && entry.times.locationChanged?.getTime() === where.changed?.getTime()) continue;
+      if (previous !== group) {
+        detach(entry, (g) => g.entries);
+        group.entries.push(entry);
+        entry.parentGroup = group;
+        moved = true;
+        movedOn[db === local ? "local" : "remote"] = true;
+      }
+      entry.times.locationChanged = where.changed && new Date(where.changed.getTime());
+    }
+    if (moved && localEntry) changes.push(record("moved", localEntry, "Moved to where it was moved last"));
+  }
+  return { changes, ...movedOn };
 }
 
 // ------------------------------------------------------------------- deletions (SyncEngine)
