@@ -2,7 +2,7 @@
  * Port of the field model of openvireo/src/gui/remote/SyncEngine.cpp (fieldsOf, applyField,
  * resolveFields, combineEntries) on kdbxweb entries.
  */
-import { sha256 } from "@noble/hashes/sha2.js";
+import { sha256 } from "../crypto/primitives.js";
 import { kdbxweb, type Kdbx } from "../vault/kdbx.js";
 import { exactBuffer, toHex } from "../util/bytes.js";
 
