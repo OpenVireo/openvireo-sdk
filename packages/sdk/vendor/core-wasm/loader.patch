@@ -1,0 +1,13 @@
+--- a/index.js
++++ b/index.js
+@@ -62,7 +62,9 @@
+ async function instantiate(wasm, spec) {
+   let glue;
+   try {
+-    glue = await import(/* @vite-ignore */ spec);
++    // openvireo-sdk vendor patch (OWNER-REQUEST, see the SDK's vendor/core-wasm/SOURCE.md): a literal
++    // specifier for the default instance, so bundlers (Next/Turbopack, webpack, esbuild) include the glue.
++    glue = await (spec === "./gen/ov_wasm.js" ? import("./gen/ov_wasm.js") : import(/* @vite-ignore */ spec));
+     const module_or_path = wasm ?? (await embeddedWasm());
+     await glue.default({ module_or_path });
+   } catch (e) {

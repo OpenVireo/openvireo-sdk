@@ -84,9 +84,9 @@
     "smoke": "node scripts/smoke.mjs && bun scripts/smoke.mjs"
   },
   "dependencies": {
-    "@noble/ciphers": "2.4.0",
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
+    "@openvireo/core-wasm": "file:vendor/core-wasm/openvireo-core-wasm-0.0.0.tgz",
     "hash-wasm": "4.12.0",
     "kdbxweb": "2.1.1"
   },

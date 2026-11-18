@@ -1,5 +1,6 @@
 /**
- * OPAQUE (SPEC §8, RFC 9807) over opaque-ke, compiled to WASM from `opaque-wasm/` (see vendor/opaque/SOURCE.md).
+ * OPAQUE (SPEC §8, RFC 9807) over opaque-ke: the shared Rust core's ov-opaque crate, compiled to WASM
+ * (see vendor/opaque/SOURCE.md).
  * The module (~160 KB as base64) is loaded lazily on first use, through the package's own
  * "./vendor/opaque-wasm.js" export so the path works from src/, dist/, bundlers and Bun.
  *
@@ -25,7 +26,7 @@ export function opaqueIds(email: string, issuerOrHost: string): OpaqueIds {
   return { idU: email.trim().toLowerCase(), idS };
 }
 
-/* The module's exports (opaque-wasm/src/lib.rs). */
+/* The module's exports (openvireo-core crates/ov-opaque/src/legacy.rs). */
 interface OpaqueWasm {
   memory: WebAssembly.Memory;
   ov_alloc(len: number): number;
