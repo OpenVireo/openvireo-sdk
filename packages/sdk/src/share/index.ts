@@ -1,7 +1,7 @@
 /**
- * Share links (SPEC §22): opening one without an account, and turning an item into share fields. Opening
- * and the item fields run on the shared Rust core (ov-share through `@openvireo/core-wasm`), so a public
- * share page loads the core's WebAssembly module but none of the SDK's OPAQUE, kdbxweb or sync code.
+ * Share links (SPEC §22): opening one without an account, and turning an item into share fields. Runs on
+ * the shared Rust core's lite module (primitives, share links and TOTP, about 190 KB gzip), so a public
+ * share page loads nothing else: no full core, no OPAQUE, KDBX or sync code.
  *
  * @module @openvireo/sdk/share
  */

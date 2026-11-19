@@ -29,7 +29,7 @@ describe("several accounts on a device (SPEC §21)", () => {
     await acct.register({ email: "alice@example.com", password: "pw", kdf });
     const alice = acct.userId!;
     const vault = await acct.createVault("Hers");
-    addEntry(vault.db!, "Mail", { Password: "s3cret" }, 1000);
+    addEntry(vault.vault, "Mail", { Password: "s3cret" }, 1000);
     await vault.sync();
     expect(await Account.sessionState(b.storage, { issuer: ISSUER, userId: alice })).toBe("active");
 
@@ -58,7 +58,7 @@ describe("several accounts on a device (SPEC §21)", () => {
     await acct.register({ email: "alice@example.com", password: "pw", kdf });
     const alice = acct.userId!;
     const vault = await acct.createVault("Hers");
-    addEntry(vault.db!, "Mail", { Password: "s3cret" }, 1000);
+    addEntry(vault.vault, "Mail", { Password: "s3cret" }, 1000);
     await vault.sync();
     await acct.listVaults();
     await acct.parkSession();
@@ -105,7 +105,7 @@ describe("several accounts on a device (SPEC §21)", () => {
     await acct.register({ email: "alice@example.com", password: "pw", kdf });
     const alice = acct.userId!;
     const vault = await acct.createVault("Team");
-    addEntry(vault.db!, "Mail", { Password: "shared" }, 1000);
+    addEntry(vault.vault, "Mail", { Password: "shared" }, 1000);
     await vault.sync();
     await acct.share(vault.id, { email: "bob@example.com" }, "write");
     await acct.listVaults();

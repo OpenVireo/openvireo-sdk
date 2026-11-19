@@ -1,69 +1,97 @@
 /**
- * Self-hosted sync mode (no account): a device token from a pairing code, then whole-database sync
- * of password-protected .kdbx files against `databases/<id>` with the same ETag/merge/SSE logic.
+ * Self-hosted sync mode (no account): a device token from a pairing code, then whole-database sync of
+ * password-protected .kdbx files against `databases/<id>` with the same ETag/merge logic. A thin layer
+ * over the shared Rust core's `SelfHosted` (`sh.core`).
  */
-import type { KeyValueStorage } from "./auth/storage.js";
+import type { AccountEvent, BlobMeta, KdbxCredentials, SelfHosted as CoreSelfHosted, SyncReport, Vault, VaultVersion } from "@openvireo/core-wasm";
+import { core } from "./core/full.js";
+import { guard, guarded } from "./core/guard.js";
+import { makeHost, storageStore } from "./core/host.js";
+import { MemoryStorage, type KeyValueStorage } from "./auth/storage.js";
 import type { HttpOptions } from "./http/request.js";
-import { SyncClient, type BlobMeta } from "./sync/client.js";
-import { type EventStream, type EventStreamOptions, subscribeEvents } from "./sync/events.js";
-import { type SyncOptions, type SyncResult, type SyncState, deserializeSyncState, serializeSyncState, syncKdbx } from "./sync/engine.js";
+import { utf8 } from "./util/bytes.js";
+
+export type { BlobMeta, VaultVersion } from "@openvireo/core-wasm";
 
 export interface SelfHostedOptions extends HttpOptions {
-  /** where the device token and sync state are kept (optional) */
+  /** where the device token and sync state are kept (default: memory) */
   storage?: KeyValueStorage;
 }
 
-export class SelfHostedSync {
-  readonly client: SyncClient;
+function clientFor(opts: SelfHostedOptions) {
+  const storage = opts.storage ?? new MemoryStorage();
+  return guarded(() => new (core().OvClient)({ device: { name: "OpenVireo SDK", platform: "web" }, offline: true } as never, makeHost({ ...opts, storage, offline: true }, storageStore(storage))));
+}
 
-  constructor(
-    readonly serverUrl: string,
-    readonly deviceToken: string,
-    private readonly opts: SelfHostedOptions = {},
-  ) {
-    this.client = SyncClient.selfHosted(serverUrl, { ...opts, token: deviceToken });
+export class SelfHostedSync {
+  private constructor(readonly core: CoreSelfHosted) {}
+
+  /** Connects with a device token you already have. */
+  static connect(serverUrl: string, deviceToken: string, opts: SelfHostedOptions = {}): SelfHostedSync {
+    return new SelfHostedSync(guard(guarded(() => core().SelfHosted.connect(clientFor(opts), serverUrl, utf8(deviceToken)))));
   }
 
-  /** Claims a pairing code ("ABCD-EFGH") for a device token and stores it. */
+  /** Claims a pairing code ("ABCD-EFGH") for a device token and keeps it in storage. */
   static async pair(serverUrl: string, code: string, deviceName: string, opts: SelfHostedOptions = {}): Promise<SelfHostedSync> {
-    const claim = await SyncClient.selfHosted(serverUrl, opts).claimPairingCode(code, deviceName);
-    await opts.storage?.set(SelfHostedSync.tokenKey(serverUrl), JSON.stringify(claim));
-    return new SelfHostedSync(serverUrl, claim.token, opts);
+    return new SelfHostedSync(guard(await guarded(() => core().SelfHosted.pair(clientFor(opts), serverUrl, code, deviceName))));
   }
 
   /** Restores a paired server from storage, or null. */
   static async restore(serverUrl: string, opts: SelfHostedOptions & { storage: KeyValueStorage }): Promise<SelfHostedSync | null> {
-    const raw = await opts.storage.get(SelfHostedSync.tokenKey(serverUrl));
-    return raw ? new SelfHostedSync(serverUrl, (JSON.parse(raw) as { token: string }).token, opts) : null;
+    const sh = await guarded(() => core().SelfHosted.restore(clientFor(opts), serverUrl));
+    return sh ? new SelfHostedSync(guard(sh)) : null;
   }
 
-  private static tokenKey = (url: string) => `selfhosted:${url.trim().replace(/\/+$/, "")}`;
-
-  health(): Promise<unknown> {
-    return this.client.health();
+  get serverUrl(): string {
+    return this.core.serverUrl();
+  }
+  health(): Promise<string> {
+    return this.core.health();
   }
   listDatabases(): Promise<BlobMeta[]> {
-    return this.client.listDatabases();
+    return this.core.listDatabases();
   }
   createPairingCode() {
-    return this.client.createPairingCode();
+    return this.core.createPairingCode();
   }
 
-  /** Syncs a local database with `databases/<databaseId>`; keeps the sync state in storage when given. */
-  async syncDatabase(databaseId: string, p: Omit<SyncOptions, "blob">): Promise<SyncResult> {
-    const key = `sync:${this.serverUrl}:${databaseId}`;
-    let state: SyncState | null | undefined = p.state;
-    if (state === undefined && this.opts.storage) {
-      const raw = await this.opts.storage.get(key);
-      state = raw ? deserializeSyncState(raw) : null;
-    }
-    const r = await syncKdbx({ ...p, state, blob: this.client.database(databaseId) });
-    await this.opts.storage?.set(key, serializeSyncState(r.state));
-    return r;
+  /** Syncs a local database (its bytes and credentials) with `databases/<databaseId>`; returns the merged bytes. */
+  syncDatabase(databaseId: string, kdbx: Uint8Array, credentials: KdbxCredentials): Promise<{ kdbx: Uint8Array; report: SyncReport }> {
+    return this.core.syncDatabase(databaseId, kdbx, credentials);
   }
 
-  /** Legacy `event: database` stream. */
-  events(opts: EventStreamOptions): EventStream {
-    return subscribeEvents(this.client, opts);
+  /** Earlier versions of a database on the server. */
+  history(databaseId: string): Promise<VaultVersion[]> {
+    return this.core.history(databaseId);
+  }
+
+  /** Opens an earlier version of a database. */
+  openVersion(databaseId: string, revision: number, credentials: KdbxCredentials): Promise<Vault> {
+    return this.core.openVersion(databaseId, revision, credentials);
+  }
+
+  /** `event: database` changes until `close()`. */
+  events(onEvent: (e: AccountEvent) => void, onError?: (e: unknown) => void): { close(): void } {
+    let closed = false;
+    let stream: { close(): void; next(): Promise<AccountEvent | undefined> } | null = null;
+    void (async () => {
+      try {
+        stream = await this.core.events();
+        if (closed) return stream.close();
+        for (;;) {
+          const ev = await stream.next();
+          if (!ev || closed) break;
+          onEvent(ev);
+        }
+      } catch (e) {
+        if (!closed) onError?.(e);
+      }
+    })();
+    return {
+      close() {
+        closed = true;
+        stream?.close();
+      },
+    };
   }
 }

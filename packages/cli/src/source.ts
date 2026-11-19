@@ -2,7 +2,7 @@
  * Where secrets come from: a service account (OPENVIREO_SERVICE_ACCOUNT_TOKEN) or a signed-in user. Both
  * read the same ov:// references and write through the SDK's conditional PUT with merge/retry.
  */
-import { type Account, type AccountVault, OpenVireoError, type Kdbx, type ServiceAccount, type VaultRole } from "@openvireo/sdk";
+import { type Account, type AccountVault, OpenVireoError, type ServiceAccount, type Vault, type VaultRole } from "@openvireo/sdk";
 
 export interface VaultSummary {
   id: string;
@@ -17,9 +17,9 @@ export interface VaultSource {
   readonly account?: Account;
   listVaults(): Promise<VaultSummary[]>;
   /** the vault's current contents (downloaded once per process) */
-  open(idOrName: string): Promise<Kdbx>;
+  open(idOrName: string): Promise<Vault>;
   /** edits the vault and uploads it (needs `write`; a `read` grant fails before anything is sent) */
-  edit<T>(idOrName: string, fn: (db: Kdbx) => T | Promise<T>): Promise<T>;
+  edit<T>(idOrName: string, fn: (vault: Vault) => T | Promise<T>): Promise<T>;
   close(): void;
 }
 
@@ -58,12 +58,12 @@ export function userSource(account: Account): VaultSource {
     principal: account.principal,
     account,
     listVaults,
-    open: async (idOrName) => (await vault(idOrName)).av.db!,
+    open: async (idOrName) => (await vault(idOrName)).av.vault,
     edit: async (idOrName, fn) => {
       const v = pickVault(await listVaults(), idOrName, "this account");
       if (v.role === "read") throw new OpenVireoError("forbidden", `you can only read vault "${v.name || v.id}"`, 403);
       const { av } = await vault(v.id);
-      const out = await fn(av.db!);
+      const out = await fn(av.vault);
       await av.sync();
       return out;
     },

@@ -1,11 +1,10 @@
 /**
- * Entry and group helpers moved from openvireo-web/src/lib/keepass-crypto.ts, with the same names and
- * shapes so the web app can switch its imports. Behaviour is unchanged except where noted.
+ * Plain-data views of a `Vault` and simple edits by id, in the shapes the web app uses (`KeePassEntry`,
+ * `KeePassGroup`, `EntryData`). Ids are the core's: 32 lowercase hex digits.
  */
-import { kdbxweb, type CredentialsFactory, type Kdbx, openKdbx, passwordCredentials, saveKdbx, initKdbx } from "./kdbx.js";
-
-type KdbxEntry = kdbxweb.KdbxEntry;
-type KdbxGroup = kdbxweb.KdbxGroup;
+import type { EntryInput, EntryRecord, FieldInput, KdbxCredentials, KdbxKdf, Vault } from "@openvireo/core-wasm";
+import { fromUtf8, utf8 } from "../util/bytes.js";
+import { createLocalVault, openLocalVault, passwordCredentials, saveLocalVault } from "./kdbx.js";
 
 export interface KeePassEntry {
   uuid: string;
@@ -39,212 +38,109 @@ export interface EntryData {
   expiryTime?: Date;
 }
 
-/** The id string the web app uses (KdbxUuid.toString(), i.e. base64; hex for raw bytes). */
-export function getUuidString(uuid: unknown): string {
-  if (!uuid) return Math.random().toString(36).substring(2, 11);
-  if (typeof uuid === "string") return uuid;
-  let bytes: Uint8Array | null = null;
-  if (uuid instanceof ArrayBuffer) bytes = new Uint8Array(uuid);
-  else if (uuid instanceof Uint8Array) bytes = uuid;
-  if (bytes) return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  return String((uuid as { toString(): string }).toString());
+/** A field's text from an entry record ("" when missing). */
+export function fieldText(entry: Pick<EntryRecord, "fields">, name: string): string {
+  const f = entry.fields.find((x) => x.name === name);
+  return f ? fromUtf8(f.value) : "";
 }
 
-export function fieldText(val: unknown): string {
-  if (!val) return "";
-  if (typeof val === "string") return val;
-  if (val instanceof kdbxweb.ProtectedValue) return val.getText();
-  return String(val);
-}
-
-function collect(group: KdbxGroup, parentUuid: string | null, groups: KeePassGroup[], entries: KeePassEntry[], rb?: string): void {
-  const groupUuid = getUuidString(group.uuid);
-  const groupName = group.name || "Root";
-  groups.push({ uuid: groupUuid, name: groupName, parentUuid, icon: typeof group.icon === "number" ? group.icon : 4, isRecycleBin: !!rb && groupUuid === rb });
-  for (const entry of group.entries) {
-    const lm = entry.times.lastModTime;
-    entries.push({
-      uuid: getUuidString(entry.uuid),
-      title: fieldText(entry.fields.get("Title")) || "(Untitled Entry)",
-      username: fieldText(entry.fields.get("UserName")),
-      passwordValue: fieldText(entry.fields.get("Password")),
-      url: fieldText(entry.fields.get("URL")),
-      notes: fieldText(entry.fields.get("Notes")),
-      groupName,
-      groupUuid,
-      tags: entry.tags || [],
-      expiryTime: entry.times.expires && entry.times.expiryTime ? new Date(entry.times.expiryTime) : undefined,
-      lastModified: lm ? new Date(lm) : undefined,
-    });
-  }
-  for (const sub of group.groups) collect(sub, groupUuid, groups, entries, rb);
-}
-
-const recycleBinId = (db: Kdbx) => (db.meta.recycleBinUuid ? db.meta.recycleBinUuid.toString() : undefined);
-
-export function collectAllDbData(db: Kdbx): { entries: KeePassEntry[]; groups: KeePassGroup[] } {
-  const entries: KeePassEntry[] = [];
-  const groups: KeePassGroup[] = [];
-  collect(db.getDefaultGroup(), null, groups, entries, recycleBinId(db));
+/** Every group and entry (Recycle Bin included), as plain data. */
+export function collectAllDbData(vault: Vault): { entries: KeePassEntry[]; groups: KeePassGroup[] } {
+  const groupInfos = vault.groups();
+  const byId = new Map(groupInfos.map((g) => [g.id, g]));
+  const root = vault.rootGroupId();
+  const groups: KeePassGroup[] = groupInfos.map((g) => ({
+    uuid: g.id,
+    name: g.name || (g.id === root ? "Root" : ""),
+    parentUuid: g.parentId ?? null,
+    icon: g.iconId,
+    isRecycleBin: g.isRecycleBin,
+  }));
+  const entries: KeePassEntry[] = vault.entryRecords(true).map((e) => {
+    const g = byId.get(e.groupId);
+    return {
+      uuid: e.id,
+      title: fieldText(e, "Title") || "(Untitled Entry)",
+      username: fieldText(e, "UserName"),
+      passwordValue: fieldText(e, "Password"),
+      url: fieldText(e, "URL"),
+      notes: fieldText(e, "Notes"),
+      groupName: g?.name || "Root",
+      groupUuid: e.groupId,
+      tags: [...e.tags],
+      ...(e.expiresAt !== undefined ? { expiryTime: new Date(e.expiresAt * 1000) } : {}),
+      ...(e.modifiedAt ? { lastModified: new Date(e.modifiedAt * 1000) } : {}),
+    };
+  });
   return { entries, groups };
 }
 
-export function findGroupInKdbx(group: KdbxGroup | undefined, id: string): KdbxGroup | null {
-  if (!group) return null;
-  if (getUuidString(group.uuid) === id) return group;
-  for (const g of group.groups) {
-    const f = findGroupInKdbx(g, id);
-    if (f) return f;
-  }
-  return null;
+/** Opens a password-protected database (and lists it). */
+export async function decryptKdbx(fileBuffer: ArrayBuffer | Uint8Array, password: string | KdbxCredentials) {
+  const vault = await openLocalVault(fileBuffer, typeof password === "string" ? passwordCredentials(password) : password);
+  const { entries, groups } = collectAllDbData(vault);
+  return { entries, groups, dbName: vault.name() || "KeePass Database", vault };
 }
 
-export function findEntryInKdbx(group: KdbxGroup | undefined, id: string): KdbxEntry | null {
-  if (!group) return null;
-  for (const e of group.entries) if (getUuidString(e.uuid) === id) return e;
-  for (const g of group.groups) {
-    const f = findEntryInKdbx(g, id);
-    if (f) return f;
-  }
-  return null;
+/** Creates a new password-protected database. */
+export async function createNewKdbx(dbName: string, password: string | KdbxCredentials) {
+  const vault = await createLocalVault(dbName, typeof password === "string" ? passwordCredentials(password) : password);
+  const fileBuffer = await saveLocalVault(vault);
+  const { entries, groups } = collectAllDbData(vault);
+  return { entries, groups, dbName, fileBuffer, vault };
 }
 
-/** Opens a password-protected database (was `decryptKdbx`). */
-export async function decryptKdbx(fileBuffer: ArrayBuffer | Uint8Array, password: string | CredentialsFactory) {
-  const db = await openKdbx(fileBuffer, typeof password === "string" ? passwordCredentials(password) : password);
-  const { entries, groups } = collectAllDbData(db);
-  return { entries, groups, dbName: db.getDefaultGroup().name || "KeePass Database", dbInstance: db };
+const std = (name: string, value: string, prot = false): FieldInput => ({ name, value: utf8(value), protected: prot });
+
+/** Adds an entry under `groupUuid`; returns its id. */
+export function addEntryToDb(vault: Vault, groupUuid: string, data: EntryData): string {
+  const input: EntryInput = {
+    fields: [std("Title", data.title), std("UserName", data.username), std("Password", data.passwordValue, true), std("URL", data.url), std("Notes", data.notes)],
+    removeFields: [],
+    tags: data.tags,
+    expiry: data.expiryTime ? { kind: "at", at: Math.floor(data.expiryTime.getTime() / 1000) } : { kind: "never" },
+  };
+  return vault.addEntry(groupUuid, input);
 }
 
-export async function createNewKdbx(dbName: string, password: string | CredentialsFactory) {
-  initKdbx();
-  const creds = typeof password === "string" ? passwordCredentials(password)() : password();
-  const db = kdbxweb.Kdbx.create(creds, dbName);
-  const fileBuffer = (await saveKdbx(db)).buffer as ArrayBuffer;
-  const root = db.getDefaultGroup();
-  return { entries: [] as KeePassEntry[], groups: [{ uuid: getUuidString(root.uuid), name: dbName, parentUuid: null, icon: 4 }] as KeePassGroup[], dbName, fileBuffer, dbInstance: db };
-}
-
-export async function addEntryToDb(db: Kdbx, groupUuid: string, data: EntryData): Promise<KdbxEntry> {
-  const group = findGroupInKdbx(db.getDefaultGroup(), groupUuid);
-  if (!group) throw new Error("Target group not found");
-  const entry = db.createEntry(group);
-  entry.fields.set("Title", data.title);
-  entry.fields.set("UserName", data.username);
-  entry.fields.set("Password", kdbxweb.ProtectedValue.fromString(data.passwordValue));
-  entry.fields.set("URL", data.url);
-  entry.fields.set("Notes", data.notes);
-  entry.tags = data.tags;
-  entry.times.expires = !!data.expiryTime;
-  if (data.expiryTime) entry.times.expiryTime = data.expiryTime;
-  return entry;
-}
-
-/**
- * Updates an entry. Unlike the web app's original, it pushes the previous state to the entry's history
- * first (as KeePassXC does), so the three-way merge and history keep working.
- */
-export async function editEntryInDb(
-  db: Kdbx,
+/** Updates an entry; the previous state goes to its history first (as KeePassXC does). */
+export function editEntryInDb(
+  vault: Vault,
   entryUuid: string,
   data: Partial<Omit<EntryData, "expiryTime">> & { expiryTime?: Date | null; fields?: Record<string, string | { value: string; protected: boolean }> },
-): Promise<KdbxEntry> {
-  const entry = findEntryInKdbx(db.getDefaultGroup(), entryUuid);
-  if (!entry) throw new Error("Entry not found");
-  entry.pushHistory();
-  if (data.title !== undefined) entry.fields.set("Title", data.title);
-  if (data.username !== undefined) entry.fields.set("UserName", data.username);
-  if (data.passwordValue !== undefined) entry.fields.set("Password", kdbxweb.ProtectedValue.fromString(data.passwordValue));
-  if (data.url !== undefined) entry.fields.set("URL", data.url);
-  if (data.notes !== undefined) entry.fields.set("Notes", data.notes);
-  for (const [k, v] of Object.entries(data.fields ?? {})) {
-    entry.fields.set(k, typeof v === "string" ? v : v.protected ? kdbxweb.ProtectedValue.fromString(v.value) : v.value);
-  }
-  if (data.tags !== undefined) entry.tags = data.tags;
-  if (data.expiryTime !== undefined) {
-    entry.times.expires = data.expiryTime !== null;
-    if (data.expiryTime) entry.times.expiryTime = data.expiryTime;
-  }
-  entry.times.update();
-  db.cleanup({ historyRules: true });
-  return entry;
-}
-
-function isInsideRecycleBin(group: KdbxGroup | undefined, rb: string | undefined): boolean {
-  for (let g = group; rb && g; g = g.parentGroup) if (g.uuid.toString() === rb) return true;
-  return false;
-}
-
-export async function deleteEntryFromDb(db: Kdbx, entryUuid: string): Promise<void> {
-  const entry = findEntryInKdbx(db.getDefaultGroup(), entryUuid);
-  if (!entry) throw new Error("Entry not found");
-  // Already in the Recycle Bin: delete for good, recorded in DeletedObjects so syncing applies it elsewhere
-  if (isInsideRecycleBin(entry.parentGroup, recycleBinId(db))) db.move(entry, null);
-  else db.remove(entry);
-}
-
-export async function createGroupInDb(db: Kdbx, parentGroupUuid: string, groupName: string): Promise<KdbxGroup> {
-  const parent = findGroupInKdbx(db.getDefaultGroup(), parentGroupUuid);
-  if (!parent) throw new Error("Parent group not found");
-  return db.createGroup(parent, groupName);
-}
-
-export async function deleteGroupFromDb(db: Kdbx, groupUuid: string): Promise<void> {
-  const root = db.getDefaultGroup();
-  const group = findGroupInKdbx(root, groupUuid);
-  if (!group) throw new Error("Group not found");
-  if (group === root) throw new Error("Cannot delete root group");
-  // The Recycle Bin itself, or a group in it: delete for good
-  if (isInsideRecycleBin(group, recycleBinId(db))) db.move(group, null);
-  else db.remove(group);
-}
-
-export async function emptyRecycleBinInDb(db: Kdbx): Promise<void> {
-  const rb = recycleBinId(db);
-  if (!rb) throw new Error("No Recycle Bin configured in this database.");
-  const bin = findGroupInKdbx(db.getDefaultGroup(), rb);
-  if (!bin) throw new Error("Recycle Bin group not found.");
-  for (const item of [...bin.entries, ...bin.groups]) db.move(item, null);
-}
-
-export async function renameGroupInDb(db: Kdbx, groupUuid: string, newName: string): Promise<void> {
-  const g = findGroupInKdbx(db.getDefaultGroup(), groupUuid);
-  if (!g) throw new Error("Group not found");
-  g.name = newName;
-  g.times.update();
-}
-
-export async function setGroupIconInDb(db: Kdbx, groupUuid: string, icon: number): Promise<void> {
-  const g = findGroupInKdbx(db.getDefaultGroup(), groupUuid);
-  if (!g) throw new Error("Group not found");
-  g.icon = icon;
-  g.times.update();
-}
-
-/** Exports selected groups (and their entries) into a new password-protected database. */
-export async function exportSelectedGroupsToKdbx(original: Kdbx, selected: string[], password: string): Promise<ArrayBuffer> {
-  initKdbx();
-  const root = original.getDefaultGroup();
-  const out = kdbxweb.Kdbx.create(passwordCredentials(password)(), root.name || "Exported DB");
-  const hasSelected = (g: KdbxGroup): boolean => selected.includes(getUuidString(g.uuid)) || g.groups.some(hasSelected);
-  const copy = (src: KdbxGroup, dst: KdbxGroup) => {
-    if (selected.includes(getUuidString(src.uuid))) {
-      for (const e of src.entries) {
-        const d = out.createEntry(dst);
-        for (const [k, v] of e.fields) d.fields.set(k, v instanceof kdbxweb.ProtectedValue ? v.clone() : v);
-        d.tags = [...e.tags];
-        d.times.expires = e.times.expires;
-        d.times.expiryTime = e.times.expiryTime;
-      }
-    }
-    for (const sub of src.groups) {
-      if (hasSelected(sub)) {
-        const d = out.createGroup(dst, sub.name || "Folder");
-        d.icon = sub.icon;
-        copy(sub, d);
-      }
-    }
+): void {
+  const fields: FieldInput[] = [];
+  if (data.title !== undefined) fields.push(std("Title", data.title));
+  if (data.username !== undefined) fields.push(std("UserName", data.username));
+  if (data.passwordValue !== undefined) fields.push(std("Password", data.passwordValue, true));
+  if (data.url !== undefined) fields.push(std("URL", data.url));
+  if (data.notes !== undefined) fields.push(std("Notes", data.notes));
+  for (const [k, v] of Object.entries(data.fields ?? {})) fields.push(typeof v === "string" ? std(k, v) : std(k, v.value, v.protected));
+  const input: EntryInput = {
+    fields,
+    removeFields: [],
+    expiry: data.expiryTime === undefined ? { kind: "keep" } : data.expiryTime === null ? { kind: "never" } : { kind: "at", at: Math.floor(data.expiryTime.getTime() / 1000) },
   };
-  copy(root, out.getDefaultGroup());
-  return (await saveKdbx(out)).buffer as ArrayBuffer;
+  if (data.tags !== undefined) input.tags = data.tags;
+  vault.editEntry(entryUuid, input);
+}
+
+/** Moves an entry to the Recycle Bin, or deletes it for good when it's already there. */
+export const deleteEntryFromDb = (vault: Vault, entryUuid: string): void => void vault.deleteEntry(entryUuid);
+
+/** Adds a group; returns its id. */
+export const createGroupInDb = (vault: Vault, parentGroupUuid: string, groupName: string): string => vault.addGroup(parentGroupUuid, groupName);
+
+/** Moves a group to the Recycle Bin, or deletes it for good when it's in there. */
+export const deleteGroupFromDb = (vault: Vault, groupUuid: string): void => void vault.deleteGroup(groupUuid);
+
+export const emptyRecycleBinInDb = (vault: Vault): void => void vault.emptyRecycleBin();
+
+export const renameGroupInDb = (vault: Vault, groupUuid: string, newName: string): void => void vault.renameGroup(groupUuid, newName);
+
+export const setGroupIconInDb = (vault: Vault, groupUuid: string, icon: number): void => void vault.setGroupIcon(groupUuid, icon);
+
+/** Exports the selected groups (and their entries) into a new password-protected database. */
+export async function exportSelectedGroupsToKdbx(vault: Vault, selected: string[], password: string, kdf: KdbxKdf = { kind: "databaseDefault" }): Promise<Uint8Array> {
+  return vault.exportKdbxWith(passwordCredentials(password), selected, kdf);
 }

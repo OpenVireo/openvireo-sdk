@@ -12,7 +12,7 @@ declare function render(vaults: VaultInfo[]): void;
 const live = account.subscribe({
   onVaultChanged: (e) => {
     // another device uploaded (or deleted) a vault this account can open
-    if (e.id === vault.id && e.etag !== vault.etag) void vault.sync({ localChanged: false });
+    if (e.vaultId === vault.id && e.etag !== vault.etag) void vault.sync({ localChanged: false });
   },
   onVaultsChanged: (vaults) => render(vaults),   // access changed: vaults added, removed or re-keyed
   onError: (e) => console.warn("events", e),
@@ -21,7 +21,7 @@ const live = account.subscribe({
 live.close();   // when the app no longer needs it
 ```
 
-- `onVaultChanged` gets `{ id, etag, revision }`, or `{ id, deleted: true }`. Compare `etag` with
+- `onVaultChanged` gets `{ kind: "vaultChanged", vaultId, etag, revision, deleted }`. Compare `etag` with
   `vault.etag` to skip your own uploads.
 - When the account is scheduled for deletion or erased elsewhere, `subscribe` closes the stream and signs this
   device out (`onSignedOut` reports `deletion_scheduled` or `account_deleted`; the latter also forgets the

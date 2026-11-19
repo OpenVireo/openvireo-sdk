@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
-import { APPLE_SUBSCRIPTIONS_URL, Account, OpenVireoError, ServiceAccount, type FetchLike, type Plan } from "@openvireo/sdk";
+import { APPLE_SUBSCRIPTIONS_URL, Account, OpenVireoError, ServiceAccount, planOf, type FetchLike, type Plan } from "@openvireo/sdk";
 import { FileStorage } from "@openvireo/sdk/storage/node";
 import { type VaultSource, serviceAccountSource, userSource } from "./source.js";
 
@@ -53,7 +53,7 @@ export async function openSource(io: SessionIo): Promise<VaultSource> {
   if (!issuer) throw new OpenVireoError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `ov login`");
   const account = await Account.connect({ issuer, device: device(), storage, ...http(io) });
   if (!account.signedIn) throw new OpenVireoError("signed_out", "the saved session has ended: run `ov login` again");
-  const password = io.env.OPENVIREO_PASSWORD ?? (await ask(io, `Master password for ${account.tokens.current?.email}: `, true));
+  const password = io.env.OPENVIREO_PASSWORD ?? (await ask(io, `Master password for ${account.email}: `, true));
   await account.unlock(password);
   return userSource(account);
 }
@@ -96,7 +96,7 @@ async function unlockedUser(io: SessionIo): Promise<{ account: Account; password
   if (!issuer) throw new OpenVireoError("signed_out", "not signed in: run `ov login`");
   const account = await Account.connect({ issuer, device: device(), storage, ...http(io) });
   if (!account.signedIn) throw new OpenVireoError("signed_out", "the saved session has ended: run `ov login` again");
-  const password = io.env.OPENVIREO_PASSWORD ?? (await ask(io, `Master password for ${account.tokens.current?.email}: `, true));
+  const password = io.env.OPENVIREO_PASSWORD ?? (await ask(io, `Master password for ${account.email}: `, true));
   await account.unlock(password);
   return { account, password };
 }
@@ -182,17 +182,16 @@ export async function whoami(io: SessionIo): Promise<Record<string, string>> {
   if (token) {
     const sa = await ServiceAccount.fromToken(token, http(io));
     sa.close();
-    return { kind: "service-account", principal: sa.principal, issuer: sa.config.issuer };
+    return { kind: "service-account", principal: sa.principal, issuer: sa.issuer };
   }
   const storage = storageFor(io.env);
   const issuer = await storage.get("cli:issuer");
   if (!issuer) throw new OpenVireoError("signed_out", "not signed in: set OPENVIREO_SERVICE_ACCOUNT_TOKEN or run `ov login`");
   const account = await Account.connect({ issuer, device: device(), storage, ...http(io) });
-  const s = account.tokens.current;
-  if (!s) throw new OpenVireoError("signed_out", "the saved session has ended: run `ov login` again");
-  const who: Record<string, string> = { kind: "user", principal: `user:${s.userId}`, email: s.email, issuer };
+  if (!account.signedIn || !account.userId) throw new OpenVireoError("signed_out", "the saved session has ended: run `ov login` again");
+  const who: Record<string, string> = { kind: "user", principal: `user:${account.userId}`, email: account.email ?? "", issuer };
   try {
-    const plan = describePlan((await account.auth.me()).plan, issuer);
+    const plan = describePlan(planOf((await account.me()).plan), issuer);
     if (plan) who.plan = plan;
   } catch {
     // offline, or an older server: whoami still answers from the saved session

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { Account, MemoryStorage, VaultUploadError, kdbxweb, kdfSettings, openKdbx, passwordCredentials, saveKdbx, vaultCredentials } from "../src/index.js";
+import type { Vault } from "@openvireo/core-wasm";
+import { Account, MemoryStorage, VaultUploadError, kdfSettings, openKdbx, passwordCredentials, vaultCredentials } from "../src/index.js";
 import { FakeAuthServer, FakeSyncServer, ISSUER } from "../src/testing/index.js";
-import { addEntry, edit, get } from "./helpers/dbs.js";
+import { addEntry, edit, get, newLocal, openLocal } from "./helpers/dbs.js";
 
 const kdf = { m: 19456, t: 2 };
 const device = { name: "web", platform: "web" as const };
@@ -24,28 +25,41 @@ function deviceOn(route: (url: string, init?: RequestInit) => Promise<Response>)
 }
 
 /** A local password database as the web app or Qt would have it, with OpenVireo remote settings. */
-async function localDatabase(version: 3 | 4 = 4) {
-  const db = kdbxweb.Kdbx.create(new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString("local pw")), "Home");
-  if (version === 3) db.setVersion(3);
-  addEntry(db, "Wifi", { Password: "hunter2", UserName: "me" }, 1000);
-  db.meta.customData.set("KPXC_REMOTE_SYNC_SETTINGS", {
-    value: JSON.stringify([
+async function localDatabase(): Promise<Vault> {
+  const v = await newLocal("Home", passwordCredentials("local pw"));
+  addEntry(v, "Wifi", { Password: "hunter2", UserName: "me" }, 1000);
+  v.setMetaCustomData(
+    "KPXC_REMOTE_SYNC_SETTINGS",
+    JSON.stringify([
       { name: "home server", type: "syncServer", serverUrl: "https://sync.home", serverDatabaseId: "home", autoSync: true },
       { name: "scp", downloadCommand: "scp host:db.kdbx {TEMP_DATABASE}", uploadCommand: "scp {TEMP_DATABASE} host:db.kdbx" },
     ]),
-  });
+  );
   // Opened from its bytes, like a database the app decrypted with the password
-  return openKdbx(await saveKdbx(db), passwordCredentials("local pw"));
+  return openLocal(await v.saveLocal(), passwordCredentials("local pw"));
 }
 
-const remotes = (db: kdbxweb.Kdbx) => JSON.parse(db.meta.customData.get("KPXC_REMOTE_SYNC_SETTINGS")?.value ?? "[]") as { name: string }[];
+const remotes = (v: Vault) => JSON.parse(v.metaCustomData("KPXC_REMOTE_SYNC_SETTINGS") ?? "[]") as { name: string }[];
+const throwsCode = (fn: () => unknown) => {
+  try {
+    fn();
+    return "ok";
+  } catch (e) {
+    return (e as { code?: string }).code;
+  }
+};
+/** This device's cached state of a vault (the core's offline cache entry), or null. */
+const cached = async (storage: MemoryStorage, user: string, vault: string) => {
+  const raw = await storage.get(`sync:${user}:${vault}`);
+  return raw ? (JSON.parse(raw) as { state: string; base?: string; pending?: string }) : null;
+};
 
 describe("Account.importVault (Move to account)", () => {
   it("re-keys a copy to a fresh vault key and uploads it with If-None-Match: *, leaving the original as it was", async () => {
     const { sync, route } = servers();
     const alice = await deviceOn(route).connect();
     const { secretKey } = await alice.register({ email: "alice@example.com", password: "pw", kdf });
-    const source = await localDatabase(3);
+    const source = await localDatabase();
     edit(source, "Wifi", { Password: "unsaved change" }, 2000); // not saved yet: it moves too
 
     const vault = await alice.importVault(source, { name: "Home vault" });
@@ -58,22 +72,21 @@ describe("Account.importVault (Move to account)", () => {
     const other = await Account.connect({ issuer: ISSUER, fetch: route, device: { name: "cli", platform: "cli" } });
     await other.login({ email: "alice@example.com", password: "pw", secretKey });
     const opened = await other.openVault(vault.id);
-    expect(get(opened.db!, "Wifi", "Password")).toBe("unsaved change");
-    expect(opened.db!.getDefaultGroup().name).toBe("Home vault");
-    expect(opened.db!.header.versionMajor).toBe(4);
-    expect(kdfSettings(opened.db!)).toMatchObject({ kdf: "argon2id", m: 1024 * 1024, t: 2, p: 1 });
-    // The self-hosted server remote is gone (it would sync the vault back there); the command one stays
-    expect(remotes(opened.db!).map((r) => r.name)).toEqual(["scp"]);
+    expect(get(opened.vault, "Wifi", "Password")).toBe("unsaved change");
+    expect(opened.vault.name()).toBe("Home vault");
     const blob = sync.blobs.get(`vaults/${vault.id}`)!.at(-1)!.data;
-    await expect(openKdbx(blob, passwordCredentials("local pw"))).rejects.toMatchObject({ code: "vault_key_mismatch" });
+    expect(openKdbx(blob, await other.core.vaultKdbxCredentials(vault.id)).header().version).toMatch(/^4\./);
+    expect(kdfSettings(blob)).toMatchObject({ kdf: "argon2id", m: 1024 * 1024, t: 2, p: 1 });
+    // The self-hosted server remote is gone (it would sync the vault back there); the command one stays
+    expect(remotes(opened.vault).map((r) => r.name)).toEqual(["scp"]);
+    expect(throwsCode(() => openKdbx(blob, passwordCredentials("local pw")))).toBe("vault_key_mismatch");
 
-    // The original keeps its password, version, name and remotes, and still saves and reopens
-    expect(source.header.versionMajor).toBe(3);
-    expect(source.getDefaultGroup().name).toBe("Home");
+    // The original keeps its password, name and remotes, and still saves and reopens
+    expect(source.name()).toBe("Home");
     expect(remotes(source).map((r) => r.name)).toEqual(["home server", "scp"]);
-    const again = await openKdbx(await saveKdbx(source), passwordCredentials("local pw"));
-    expect(get(again, "Wifi", "Password")).toBe("unsaved change");
-    await expect(openKdbx(await saveKdbx(source), vaultCredentials(new Uint8Array(32)))).rejects.toMatchObject({ code: "vault_key_mismatch" });
+    const saved = await source.saveLocal();
+    expect(get(await openLocal(saved, passwordCredentials("local pw")), "Wifi", "Password")).toBe("unsaved change");
+    expect(throwsCode(() => openKdbx(saved, vaultCredentials(new Uint8Array(32))))).toBe("vault_key_mismatch");
   });
 
   it("creates an org vault sealed to every confirmed owner and admin, and names it after the root group by default", async () => {
@@ -84,16 +97,16 @@ describe("Account.importVault (Move to account)", () => {
     await carol.register({ email: "carol@example.com", password: "carol pw", kdf });
     const bob = await deviceOn(route).connect();
     await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
-    const org = await alice.auth.createOrg("Acme");
+    const org = await alice.core.createOrg("Acme");
     auth.addMember(org.id, "carol@example.com", "admin");
     auth.addMember(org.id, "bob@example.com");
-    for (const m of (await alice.auth.listMembers(org.id)).members.filter((x) => x.status === "accepted")) await alice.confirmMember(org.id, m);
+    for (const m of (await alice.core.orgMembers(org.id)).filter((x) => x.status === "accepted")) await alice.confirmMember(org.id, m as never);
 
     const vault = await alice.importVault(await localDatabase(), { orgId: org.id });
     expect(vault.name).toBe("Home");
     const access = auth.vaults.get(vault.id)!.access;
     expect([...access].map(([p, a]) => [p, a.role]).sort()).toEqual([[alice.principal, "manage"], [carol.principal, "manage"]].sort());
-    expect(get((await carol.openVault(vault.id)).db!, "Wifi", "Password")).toBe("hunter2");
+    expect(get((await carol.openVault(vault.id)).vault, "Wifi", "Password")).toBe("hunter2");
     expect(await bob.listVaults()).toEqual([]);
 
     // A member can't create org vaults; the server says so
@@ -116,7 +129,7 @@ describe("Account.importVault (Move to account)", () => {
     syncDown = false;
     expect((await vault.sync()).outcome).toBe("created");
     expect(vault.offline).toBe(false);
-    expect(get(vault.db!, "Wifi", "Password")).toBe("hunter2");
+    expect(get(vault.vault, "Wifi", "Password")).toBe("hunter2");
   });
 });
 
@@ -127,7 +140,7 @@ describe("Offline account vaults", () => {
     const acct = await alice.connect();
     const { secretKey } = await acct.register({ email: "alice@example.com", password: "pw", kdf });
     const vault = await acct.createVault("Infra");
-    addEntry(vault.db!, "GitHub", { Password: "s3cret" }, 1000);
+    addEntry(vault.vault, "GitHub", { Password: "s3cret" }, 1000);
     await vault.sync();
     return { ...w, alice, secretKey, vaultId: vault.id };
   }
@@ -148,12 +161,11 @@ describe("Offline account vaults", () => {
     expect(vault.read("ov://Infra/GitHub/password")).toBe("s3cret");
 
     // An offline edit fails to upload but is kept on this device, encrypted with the vault key
-    edit(vault.db!, "GitHub", { Password: "changed offline" }, 3000);
+    edit(vault.vault, "GitHub", { Password: "changed offline" }, 3000);
     await expect(vault.sync()).rejects.toMatchObject({ code: "network_error" });
-    const pending = await alice.storage.get(`sync:${acct.userId}:${vaultId}:pending`);
-    expect(pending).toBeTruthy();
+    expect((await cached(alice.storage, acct.userId!, vaultId))?.pending).toBeTruthy();
     // Nothing in the cache is in clear
-    const everything = JSON.stringify(await Promise.all([`sync:${acct.userId}:${vaultId}`, `sync:${acct.userId}:${vaultId}:pending`, `offline:vaults:${acct.userId}`, `offline:profile:${acct.userId}`].map((k) => alice.storage.get(k))));
+    const everything = JSON.stringify(await Promise.all([`sync:${acct.userId}:${vaultId}`, `core-cache:${acct.userId}:meta:vaults`, `core-cache:${acct.userId}:meta:profile`].map((k) => alice.storage.get(k))));
     expect(everything).not.toContain("s3cret");
     expect(everything).not.toContain("changed offline");
     expect(everything).not.toContain("Infra");
@@ -170,7 +182,7 @@ describe("Offline account vaults", () => {
     expect([vaults.map((v) => v.id), dropped, later.offline]).toEqual([[vaultId], [], false]);
     expect((await reopened.sync()).outcome).toBe("uploaded");
     expect(reopened.offline).toBe(false);
-    expect(await alice.storage.get(`sync:${acct.userId}:${vaultId}:pending`)).toBeNull();
+    expect((await cached(alice.storage, acct.userId!, vaultId))?.pending).toBeUndefined();
     expect(sync.blobs.get(`vaults/${vaultId}`)!.length).toBe(3);
 
     const other = await Account.connect({ issuer: ISSUER, fetch: route, device: { name: "cli", platform: "cli" } });
@@ -195,7 +207,7 @@ describe("Offline account vaults", () => {
     const offlineBob = await bobDevice.connect();
     await offlineBob.unlock("bob pw");
     const shared = await offlineBob.openVault(vaultId);
-    edit(shared.db!, "GitHub", { Password: "bob was here" }, 4000);
+    edit(shared.vault, "GitHub", { Password: "bob was here" }, 4000);
     await expect(shared.sync()).rejects.toMatchObject({ code: "network_error" });
     await acct.revoke(vaultId, [bob.principal]);
 
@@ -204,7 +216,6 @@ describe("Offline account vaults", () => {
     expect(vaults.map((v) => v.id)).toEqual([mine.id]);
     expect(dropped).toEqual([vaultId]);
     expect(await bobDevice.storage.get(`sync:${offlineBob.userId}:${vaultId}`)).toBeNull();
-    expect(await bobDevice.storage.get(`sync:${offlineBob.userId}:${vaultId}:pending`)).toBeNull();
     expect(await bobDevice.storage.get(`sync:${offlineBob.userId}:${mine.id}`)).not.toBeNull();
 
     // Offline again: the revoked vault is gone from the cache too
@@ -232,7 +243,7 @@ describe("Offline account vaults", () => {
     const userId = acct.userId!;
     expect(await alice.storage.get(`sync:${userId}:${vaultId}`)).not.toBeNull();
     await acct.logout();
-    for (const k of [`sync:${userId}:${vaultId}`, `offline:vaults:${userId}`, `offline:profile:${userId}`]) expect(await alice.storage.get(k)).toBeNull();
+    for (const k of [`sync:${userId}:${vaultId}`, `core-cache:${userId}:meta:vaults`, `core-cache:${userId}:meta:profile`]) expect(await alice.storage.get(k)).toBeNull();
     alice.net.up = false;
     const next = await alice.connect();
     expect(next.signedIn).toBe(false);
@@ -244,8 +255,9 @@ describe("Offline account vaults", () => {
     const acct = await Account.connect({ issuer: ISSUER, fetch: route, storage, device });
     await acct.register({ email: "alice@example.com", password: "pw", kdf });
     await acct.listVaults();
-    expect(await storage.get(`offline:profile:${acct.userId}`)).toBeNull();
-    expect(await storage.get(`offline:vaults:${acct.userId}`)).toBeNull();
+    expect(await storage.get(`core-cache:${acct.userId}:meta:profile`)).toBeNull();
+    expect(await storage.get(`core-cache:${acct.userId}:meta:vaults`)).toBeNull();
+    expect(await storage.get(`core-cache:${acct.userId}:index`)).toBeNull();
     expect(acct.offline).toBe(false);
   });
 });

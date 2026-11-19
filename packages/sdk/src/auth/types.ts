@@ -213,7 +213,7 @@ export interface NewSaSecret {
   expires_at?: string | null;
 }
 
-export interface Vault {
+export interface VaultJson {
   id: string;
   org_id?: string | null;
   owner_id?: string | null;

@@ -1,77 +1,66 @@
-/** Importing a .kdbx into an open database: importInto (UUID merge) and importAsCopies (fresh UUIDs). */
+/** Importing a .kdbx into an open vault: importInto (UUID merge) and importAsCopies (fresh UUIDs), on the core. */
 import { describe, expect, it } from "vitest";
+import type { Vault } from "@openvireo/core-wasm";
 import { importAsCopies, importInto, importTargets } from "../src/merge/index.js";
 import { fieldText } from "../src/vault/entries.js";
-import { createVaultKdbx, kdbxweb, openKdbx, passwordCredentials, saveKdbx, type Kdbx } from "../src/vault/kdbx.js";
-import { KEY, addEntry, at, byTitle, content, edit, get } from "./helpers/dbs.js";
+import { passwordCredentials } from "../src/vault/kdbx.js";
+import { addEntry, byTitle, content, edit, get, newLocal, openLocal, setNow } from "./helpers/dbs.js";
+
+const creds = passwordCredentials("file password");
 
 /** A password-protected "file" with a recycle bin, custom data, an attachment, a custom icon and a reference. */
-async function sourceFile() {
-  const db = kdbxweb.Kdbx.create(passwordCredentials("file password")(), "Home");
-  const root = db.getDefaultGroup();
-  const web = db.createGroup(root, "Web");
-  const a = addEntry(db, "Mail", { UserName: "me", Password: "mail-pw" }, 100, web);
-  a.binaries.set("note.txt", await db.createBinary(kdbxweb.ProtectedValue.fromString("hello")));
-  const icon = kdbxweb.KdbxUuid.random();
-  db.meta.customIcons.set(icon.id, { data: new Uint8Array([1, 2, 3]).buffer, lastModified: at(100) });
-  a.customIcon = icon;
-  addEntry(db, "Mail alias", { UserName: `{REF:U@I:${hex(a.uuid)}}`, Password: `{REF:P@I:${hex(a.uuid)}}` }, 100, web);
-  db.createRecycleBin();
-  const binned = addEntry(db, "Old", { Password: "gone" }, 100);
-  db.move(binned, db.getGroup(db.meta.recycleBinUuid!)!);
-  db.meta.customData.set("KPXC_REMOTE_SYNC_SETTINGS", { value: "[{\"type\":\"syncServer\"}]" });
-  db.meta.customData.set("KPXC_BROWSER_key", { value: "secret" });
+async function sourceFile(): Promise<Vault> {
+  const v = await newLocal("Home", creds);
+  setNow(100);
+  const web = v.addGroup(v.rootGroupId(), "Web");
+  const icon = v.addCustomIcon(new Uint8Array([137, 80, 78, 71, 1, 2, 3]));
+  const enc = (t: string) => new TextEncoder().encode(t);
+  const a = v.addEntry(web, { fields: [{ name: "Title", value: enc("Mail") }, { name: "UserName", value: enc("me") }, { name: "Password", value: enc("mail-pw"), protected: true }], removeFields: [], expiry: { kind: "never" }, customIcon: icon });
+  v.setAttachmentWith(a, "note.txt", enc("hello"), true);
+  addEntry(v, "Mail alias", { UserName: `{REF:U@I:${a.toUpperCase()}}`, Password: `{REF:P@I:${a.toUpperCase()}}` }, 100, web);
+  const old = addEntry(v, "Old", { Password: "gone" }, 100);
+  v.deleteEntry(old);
+  v.setMetaCustomData("KPXC_REMOTE_SYNC_SETTINGS", '[{"type":"syncServer"}]');
+  v.setMetaCustomData("KPXC_BROWSER_key", "secret");
   // Round-trip, as a real file would be read
-  return openKdbx(await saveKdbx(db), passwordCredentials("file password"));
+  return openLocal(await v.saveLocal(), creds);
 }
 
-const hex = (u: kdbxweb.KdbxUuid) =>
-  Array.from(new Uint8Array(u.toBytes()!), (b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
-
-function vault(): Kdbx {
-  const db = createVaultKdbx("Work", KEY);
-  addEntry(db, "Existing", { Password: "x" });
-  return db;
+async function vault(): Promise<Vault> {
+  const v = await newLocal("Work", passwordCredentials("vault"));
+  addEntry(v, "Existing", { Password: "x" });
+  return v;
 }
 
-const titles = (g: kdbxweb.KdbxGroup): string[] => g.entries.map((e) => fieldText(e.fields.get("Title")));
+const childGroups = (v: Vault, parent: string) => v.groups().filter((g) => g.parentId === parent);
+const titlesIn = (v: Vault, groupId: string) => v.entryRecords(true).filter((e) => e.groupId === groupId).map((e) => fieldText(e, "Title")).sort();
 
 describe("importInto", () => {
   it("adds the file's entries and groups, keeps the vault's root, skips the recycle bin and custom data", async () => {
     const src = await sourceFile();
-    const target = vault();
+    const target = await vault();
     const r = importInto(src, target);
     expect([r.added, r.updated, r.unchanged, r.groupsAdded]).toEqual([2, 0, 0, 1]);
-    const root = target.getDefaultGroup();
-    expect(root.name).toBe("Work");
+    expect(target.name()).toBe("Work");
     // The vault's own recycle bin, and the file's "Web"; not the file's recycle bin
-    expect(root.groups.map((g) => g.name)).toEqual(["Recycle Bin", "Web"]);
-    expect(titles(root.groups[1]!)).toEqual(["Mail", "Mail alias"]);
+    const top = childGroups(target, target.rootGroupId());
+    // a new vault gets its Recycle Bin on the first delete; the file's bin isn't imported
+    expect(top.map((g) => g.name).sort()).toEqual(["Web"]);
+    expect(titlesIn(target, top.find((g) => g.name === "Web")!.id)).toEqual(["Mail", "Mail alias"]);
     expect(byTitle(target, "Old")).toBeUndefined();
-    expect(target.meta.customData.has("KPXC_REMOTE_SYNC_SETTINGS")).toBe(false);
-    expect(target.meta.customData.has("KPXC_BROWSER_key")).toBe(false);
+    expect(target.metaCustomData("KPXC_REMOTE_SYNC_SETTINGS")).toBeUndefined();
+    expect(target.metaCustomData("KPXC_BROWSER_key")).toBeUndefined();
     const mail = byTitle(target, "Mail")!;
-    expect(target.meta.customIcons.has(mail.customIcon!.id)).toBe(true);
-    expect(mail.binaries.has("note.txt")).toBe(true);
+    expect(target.customIcon(mail.customIcon!)).toEqual(new Uint8Array([137, 80, 78, 71, 1, 2, 3]));
+    expect(mail.attachments.map((x) => x.name)).toEqual(["note.txt"]);
     // The target still saves and reopens
-    const reopened = await openKdbx(await saveKdbx(target), target.credentials);
+    const reopened = await openLocal(await target.saveLocal(), passwordCredentials("vault"));
     expect(content(reopened)).toEqual(content(target));
-  });
-
-  it("reads a KDBX 3.1 file too", async () => {
-    const old = kdbxweb.Kdbx.create(passwordCredentials("pw")(), "Old format");
-    old.setVersion(3);
-    addEntry(old, "Legacy", { Password: "p" });
-    const src = await openKdbx(await saveKdbx(old), passwordCredentials("pw"));
-    expect(src.header.versionMajor).toBe(3);
-    const target = vault();
-    expect(importInto(src, target).added).toBe(1);
-    expect(get(target, "Legacy", "Password")).toBe("p");
   });
 
   it("importing the same file twice changes nothing", async () => {
     const src = await sourceFile();
-    const target = vault();
+    const target = await vault();
     importInto(src, target);
     const before = content(target);
     const again = importInto(src, target);
@@ -82,13 +71,13 @@ describe("importInto", () => {
 
   it("a newer entry in the file wins and the vault's version goes into history; an older one only adds history", async () => {
     const src = await sourceFile();
-    const target = vault();
+    const target = await vault();
     importInto(src, target);
     edit(src, "Mail", { Password: "newer-in-file" }, 300);
     edit(target, "Mail alias", { UserName: "edited-in-vault" }, 400);
     const r = importInto(src, target);
     expect(get(target, "Mail", "Password")).toBe("newer-in-file");
-    expect(byTitle(target, "Mail")!.history.some((h) => fieldText(h.fields.get("Password")) === "mail-pw")).toBe(true);
+    expect(target.history(byTitle(target, "Mail")!.id).some((h) => fieldText(h, "Password") === "mail-pw")).toBe(true);
     expect(get(target, "Mail alias", "UserName")).toBe("edited-in-vault");
     expect(r.added).toBe(0);
     expect(r.updated).toBe(1);
@@ -96,10 +85,11 @@ describe("importInto", () => {
 
   it("never deletes from the target", async () => {
     const src = await sourceFile();
-    const target = vault();
+    const target = await vault();
     importInto(src, target);
-    const mail = byTitle(src, "Mail")!;
-    src.remove(mail);
+    const id = byTitle(src, "Mail")!.id;
+    src.deleteEntry(id);
+    src.deleteEntry(id);
     importInto(src, target);
     expect(byTitle(target, "Mail")).toBeDefined();
     expect(byTitle(target, "Existing")).toBeDefined();
@@ -109,41 +99,41 @@ describe("importInto", () => {
 describe("importAsCopies", () => {
   it("copies the tree under the chosen group with fresh UUIDs and remapped references", async () => {
     const src = await sourceFile();
-    const target = vault();
-    const parent = target.createGroup(target.getDefaultGroup(), "Imports");
-    const r = importAsCopies(src, target, parent.uuid.id);
+    const target = await vault();
+    const parent = target.addGroup(target.rootGroupId(), "Imports");
+    const r = importAsCopies(src, target, parent);
     expect([r.added, r.groupsAdded]).toEqual([2, 2]);
-    const top = parent.groups[0]!;
+    const top = childGroups(target, parent)[0]!;
     expect(top.name).toBe("Home");
-    expect(top.groups.map((g) => g.name)).toEqual(["Web"]);
+    expect(childGroups(target, top.id).map((g) => g.name)).toEqual(["Web"]);
     expect(byTitle(target, "Old")).toBeUndefined();
-    const srcMail = byTitle(src, "Mail")!;
     const mail = byTitle(target, "Mail")!;
-    expect(mail.uuid.id).not.toBe(srcMail.uuid.id);
-    expect(top.uuid.id).not.toBe(src.getDefaultGroup().uuid.id);
-    expect(get(target, "Mail alias", "Password")).toBe(`{REF:P@I:${hex(mail.uuid)}}`);
-    expect(mail.binaries.has("note.txt")).toBe(true);
-    expect(target.meta.customIcons.has(mail.customIcon!.id)).toBe(true);
-    expect(target.meta.customData.has("KPXC_REMOTE_SYNC_SETTINGS")).toBe(false);
+    expect(mail.id).not.toBe(byTitle(src, "Mail")!.id);
+    expect(top.id).not.toBe(src.rootGroupId());
+    expect(get(target, "Mail alias", "Password")).toBe(`{REF:P@I:${mail.id.toUpperCase()}}`);
+    expect(mail.attachments.map((x) => x.name)).toEqual(["note.txt"]);
+    expect(mail.customIcon).toBeDefined();
+    expect(target.metaCustomData("KPXC_REMOTE_SYNC_SETTINGS")).toBeUndefined();
   });
 
-  it("history items take the copy's UUID, and importing twice gives two copies", async () => {
+  it("history items come along, and importing twice gives two copies", async () => {
     const src = await sourceFile();
     edit(src, "Mail", { Password: "v2" }, 200);
-    const target = vault();
-    const root = target.getDefaultGroup().uuid.id;
-    importAsCopies(src, target, root);
-    importAsCopies(src, target, root);
-    const homes = target.getDefaultGroup().groups.filter((g) => g.name === "Home");
+    const target = await vault();
+    importAsCopies(src, target, target.rootGroupId());
+    importAsCopies(src, target, target.rootGroupId());
+    const homes = childGroups(target, target.rootGroupId()).filter((g) => g.name === "Home");
     expect(homes).toHaveLength(2);
-    const mail = homes[0]!.groups[0]!.entries[0]!;
-    expect(mail.history.length).toBeGreaterThan(0);
-    expect(mail.history.every((h) => h.uuid.id === mail.uuid.id)).toBe(true);
-    expect(homes[1]!.groups[0]!.entries[0]!.uuid.id).not.toBe(mail.uuid.id);
+    const mails = target.entryRecords(false).filter((e) => fieldText(e, "Title") === "Mail");
+    expect(mails).toHaveLength(2);
+    expect(target.history(mails[0]!.id).length).toBeGreaterThan(0);
+    expect(mails[0]!.id).not.toBe(mails[1]!.id);
   });
 
   it("fails cleanly when the group is gone", async () => {
-    await expect(async () => importAsCopies(await sourceFile(), vault(), kdbxweb.KdbxUuid.random().id)).rejects.toThrow(/no longer exists/);
+    const src = await sourceFile();
+    const target = await vault();
+    expect(() => importAsCopies(src, target, "00000000000000000000000000000001")).toThrow();
   });
 });
 

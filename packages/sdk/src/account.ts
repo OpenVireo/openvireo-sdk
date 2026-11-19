@@ -1,88 +1,60 @@
 /**
- * High-level API for a OpenVireo account (hosted mode): register, log in, unlock/lock, list and open
- * vaults, share, revoke (with key rotation), and create service accounts.
+ * High-level API for an OpenVireo account (hosted mode): register, log in, unlock/lock, list and open
+ * vaults, share, revoke (with key rotation), share links and service accounts. Since 1.0 this is a thin
+ * layer over the shared Rust core's `Account` (`account.core`), which owns the session, the tokens, the
+ * keyring and the sync engine; this class turns strings into bytes and back, asks for TOTP codes and maps
+ * the core's errors to `OpenVireoError`.
  */
-import { OpenVireoError, isUnreachable } from "./errors.js";
-import { AuthClient, discover } from "./auth/client.js";
-import { MemoryStorage, NamespacedStorage, type KeyValueStorage } from "./auth/storage.js";
-import { TokenManager, type SignedOutReason, type StoredSession } from "./auth/token-manager.js";
-import { type BillingManage, type BillingSource, type DeviceInfo, type Grant, type OpenVireoConfiguration, type Member, type OrgRole, type Principal, type SaMasterGrant, type Session, type ShareJson, type Vault, type VaultGrant, type VaultRole, type WrappedKeysetJson, isMfaChallenge } from "./auth/types.js";
-import type { HttpOptions } from "./http/request.js";
-import { checkKdfParams, deriveAuk, newKdfParams } from "./crypto/auk.js";
-import { decodeJwt } from "./crypto/jwt.js";
-import { sealSaMaster, sealVaultKey, unsealSaMaster, unsealVaultKey } from "./crypto/envelope.js";
-import { type Keyset, fingerprint, generateKeyset, keysetFromSecrets, trustedPublicKeys, unwrapKeyset, wipeKeyset, wrapKeyset } from "./crypto/keyset.js";
-import { formatSecretKey, generateSecretKey, parseSecretKey } from "./crypto/secret-key.js";
-import { newSaSecret } from "./crypto/tokens.js";
-import { decryptVaultName, encryptVaultName } from "./crypto/vault-name.js";
-import { resealVaultKey, restoreProof } from "./crypto/restore.js";
-import { type ShareRef, type SharePayload, decryptShareRef, encryptSharePayload, encryptShareRef, shareAuth, shareLink, sharePasscodeKey } from "./crypto/share.js";
-import { b64u, concat, ctEqual, exactBuffer, fromB64u, randomBytes, randomUuid, utf8, wipe } from "./util/bytes.js";
-import { finishLogin, finishRegistration, opaqueIds, startLogin, startRegistration } from "./opaque/index.js";
-import { SyncClient } from "./sync/client.js";
-import { type EventStream, type SyncEvent, subscribeEvents } from "./sync/events.js";
-import { type SyncResult, type SyncState, deserializeSyncState, serializeSyncState, syncKdbx } from "./sync/engine.js";
-import { type Kdbx, type KeyVersion, copyKdbx, createVaultKdbx, dropServerRemotes, openWithKeyVersions, rekeyToVaultKey, saveKdbx, vaultCredentials } from "./vault/kdbx.js";
-import { parseReference, readField, writeField, type SecretReference } from "./vault/reference.js";
+import type {
+  Account as CoreAccount,
+  AccountEvent,
+  CreatedServiceAccount,
+  DeletionPreview,
+  ImportOutcome,
+  KdfOverrides,
+  LoginStep,
+  OvClient,
+  Plan as CorePlan,
+  Profile,
+  PublicKeys,
+  RecoveryReset,
+  RecoveryStatus,
+  RotationReport,
+  ServerConfig,
+  ShareListing,
+  SyncOptions,
+  SyncReport,
+  Vault,
+  VaultInfo as CoreVaultInfo,
+} from "@openvireo/core-wasm";
+import { core } from "./core/full.js";
+import { guard, guarded } from "./core/guard.js";
+import { makeHost, storageStore, type HostOptions } from "./core/host.js";
+import { OpenVireoError } from "./errors.js";
+import { MemoryStorage, type KeyValueStorage } from "./auth/storage.js";
+import { AuthClient } from "./auth/client.js";
+import type { SignedOutReason } from "./auth/token-manager.js";
+import type { DeviceInfo, Member, OpenVireoConfiguration, OrgRole, Plan, Principal, ShareJson, VaultRole } from "./auth/types.js";
+import { payloadToCore } from "./crypto/share-convert.js";
+import type { SharePayload, ShareRef } from "./crypto/share.js";
+import { b64u, fromB64u, fromUtf8, randomBytes, utf8, wipe } from "./util/bytes.js";
+import { parseReference, type SecretReference } from "./vault/reference.js";
 
-// Format of sealUnlocked: "<version>.<b64u iv>.<b64u AES-GCM(enc_sk ‖ sign_seed)>"
-const SEAL_VERSION = "s1";
+export type {
+  AccountEvent,
+  CreatedServiceAccount,
+  DeletionPreview,
+  ImportOutcome,
+  Profile,
+  RecoveryReset,
+  RecoveryStatus,
+  RotationReport,
+  ServerConfig,
+  ShareListing,
+  SyncReport,
+} from "@openvireo/core-wasm";
 
-const isManager = (role: OrgRole) => role === "owner" || role === "admin";
-
-/** Asks for a TOTP code; asked again with the previous `invalid_mfa` error after a wrong code. */
-export type TotpPrompt = (ctx: { attempt: number; error?: OpenVireoError }) => Promise<string>;
-
-export interface AccountOptions extends HttpOptions {
-  /** the hosted issuer, e.g. https://accounts.openvireo.com */
-  issuer: string;
-  device: DeviceInfo;
-  /** sessions, trusted-device Secret Keys and sync state (default: memory) */
-  storage?: KeyValueStorage;
-  /** skip discovery (tests) */
-  config?: OpenVireoConfiguration;
-  /**
-   * Keep what this device needs to unlock and open vaults without the network, all of it in
-   * `storage` and none of it in clear: the discovery document, the wrapped keyset and KDF params, the
-   * vault list as GET /vaults returned it (encrypted names, sealed keys), and per vault the sync
-   * state (whose base copy is the server's encrypted .kdbx) plus local edits not yet uploaded, as a
-   * .kdbx encrypted with the vault key. When a server can't be reached, `connect`, `unlock`,
-   * `listVaults` and `openVault` fall back to it and `offline` turns true; `reconnect` goes back
-   * online. Vaults no longer listed once online, and everything on sign-out, are dropped.
-   */
-  offline?: boolean;
-}
-
-/** The parts of a user's account record that unlocking needs (cached for offline unlock). */
-interface Profile {
-  kdf: Session["kdf"];
-  keyset: WrappedKeysetJson;
-}
-
-/**
- * Storage keys of the offline cache. Sync state and pending edits are per user, since two accounts on a
- * device can share a vault (SPEC §21); the `sync:<vault id>` keys from before that are still read.
- */
-const OFFLINE = {
-  config: (issuer: string) => `offline:config:${issuer.replace(/\/+$/, "")}`,
-  profile: (userId: string) => `offline:profile:${userId}`,
-  vaults: (userId: string) => `offline:vaults:${userId}`,
-  state: (userId: string, vaultId: string) => `sync:${userId}:${vaultId}`,
-  pending: (userId: string, vaultId: string) => `sync:${userId}:${vaultId}:pending`,
-  olderState: (vaultId: string) => `sync:${vaultId}`,
-  olderPending: (vaultId: string) => `sync:${vaultId}:pending`,
-};
-
-/** Thrown by `importVault` when the vault was created but its first upload failed; `vault.sync()` retries it. */
-export class VaultUploadError extends OpenVireoError {
-  constructor(
-    readonly vault: AccountVault,
-    cause: unknown,
-  ) {
-    super("vault_upload_failed", `the vault was created, but its first upload failed: ${(cause as Error)?.message ?? cause}`, (cause as OpenVireoError)?.status, { cause });
-  }
-}
-
+/** A vault this account can open, with its name decrypted. */
 export interface VaultInfo {
   id: string;
   name: string;
@@ -93,31 +65,39 @@ export interface VaultInfo {
   rotationRequired: boolean;
 }
 
-/** Each listed vault plus the keys this account holds for it (current and pending, newest first). */
-interface VaultEntry {
-  info: VaultInfo;
-  keys: KeyVersion[];
+/** The core's `VaultInfo` (optional fields) in the SDK's shape (nulls). */
+export const vaultInfoOf = (v: CoreVaultInfo): VaultInfo => ({
+  id: v.id,
+  name: v.name,
+  role: v.role,
+  orgId: v.orgId ?? null,
+  currentKeyVersion: v.currentKeyVersion,
+  pendingKeyVersion: v.pendingKeyVersion ?? null,
+  rotationRequired: v.rotationRequired,
+});
+
+// Format of sealUnlocked: "<version>.<b64u iv>.<b64u AES-GCM(keyset secret)>"
+const SEAL_VERSION = "s2";
+
+/** Asks for a TOTP code; asked again with the previous `invalid_mfa` error after a wrong code. */
+export type TotpPrompt = (ctx: { attempt: number; error?: OpenVireoError }) => Promise<string>;
+
+export interface AccountOptions extends HostOptions {
+  /** the hosted issuer, e.g. https://accounts.openvireo.com */
+  issuer: string;
+  device: DeviceInfo;
+  /** the session, trusted-device Secret Keys and (with `offline`) the offline cache (default: memory) */
+  storage?: KeyValueStorage;
+  /** skip discovery (tests) */
+  config?: OpenVireoConfiguration;
+  /**
+   * Keep what this device needs to unlock and open vaults without the network in `storage`, none of it
+   * in clear (the core's offline cache, SPEC §20). When a server can't be reached, `connect`, `unlock`,
+   * `listVaults` and `openVault` fall back to it and `offline` turns true; `reconnect` goes back online.
+   */
+  offline?: boolean;
 }
 
-/** GET /auth/recover/{token}, camelCased: what an approved reset will do (SPEC.md §18). */
-export interface RecoveryReset {
-  email: string;
-  /** RFC 3339; the reset link works from then on (before that the routes answer `recovery_not_ready`) */
-  notBefore: string;
-  /** RFC 3339; the link stops working then (72 hours after approval) */
-  expiresAt: string;
-  /** how long the old keys and vaults are kept for a restore (30) */
-  archiveDays: number;
-  archives: {
-    personalVaults: number;
-    /** grants on vaults the user doesn't own, including org vaults */
-    sharedGrants: number;
-    /** names of orgs whose only confirmed owner/admin is this user */
-    soleAdminOrgs: string[];
-  };
-}
-
-/** GET /me/recovery, camelCased: whether a recovery archive from a reset exists (SPEC.md §18). */
 /** Options of a new share link (SPEC.md §22). */
 export interface ShareOptions {
   /** seconds, 3600 to 30 days (and the plan's share_link_days) */
@@ -131,15 +111,41 @@ export interface ShareOptions {
   entryId?: string;
 }
 
-export interface CreatedShare {
-  id: string;
-  /** the link to send; the key is after `#` and is never sent to the server */
-  url: string;
+/** GET /auth/recover/{token}, camelCased: what an approved reset will do (SPEC.md §18). */
+export interface RecoveryResetInfo {
+  email: string;
+  /** RFC 3339; the reset link works from then on (before that the routes answer `recovery_not_ready`) */
+  notBefore: string;
+  /** RFC 3339; the link stops working then (72 hours after approval) */
   expiresAt: string;
+  /** how long the old keys and vaults are kept for a restore (30) */
+  archiveDays: number;
+  archives: { personalVaults: number; sharedGrants: number; soleAdminOrgs: string[] };
+}
+
+/** GET /me/recovery, camelCased: whether a recovery archive from a reset exists (SPEC.md §18). */
+export interface RecoveryStatusInfo {
+  archived: boolean;
+  email?: string;
+  expiresAt?: string;
+  vaults?: number;
+  /** too many failed restore attempts; an admin unlocks it */
+  locked?: boolean;
+}
+
+/** What deleting the account will do (SPEC.md §23), with vault names decrypted where this device can. */
+export interface DeletionPreviewInfo {
+  scheduledFor: string | null;
+  eraseOn: string;
+  vaults: { id: string; name: string | null; sharedWith: { principal: Principal; display: string | null; role: VaultRole }[] }[];
+  orgs: { id: string; name: string; role: OrgRole; outcome: "leave" | "delete" | "blocked"; members: { id: string; email: string; role: OrgRole }[] }[];
+  subscription: { plan: string; periodEnd: string | null; source: string; manage: string } | null;
+  shareLinks: number;
+  blocked: boolean;
 }
 
 /** A share link in its owner's list, with where it came from when this account can read that. */
-export interface ShareListing {
+export interface ShareListingInfo {
   id: string;
   vaultId: string | null;
   /** null when the reference can't be read (made with keys this account no longer has) */
@@ -155,30 +161,21 @@ export interface ShareListing {
   endReason: ShareJson["end_reason"];
 }
 
-export interface RecoveryStatus {
-  archived: boolean;
-  /** the email before the reset, which the restore signs in with */
-  email?: string;
-  expiresAt?: string;
-  /** archived personal vaults plus archived grants */
-  vaults?: number;
-  /** too many failed restore attempts; an admin unlocks it */
-  locked?: boolean;
+export interface CreatedShare {
+  id: string;
+  /** the link to send; the key is after `#` and is never sent to the server */
+  url: string;
+  expiresAt: string;
 }
 
-/** What deleting the account will do (SPEC.md §23), with vault names decrypted where this device can. */
-export interface DeletionPreview {
-  /** set when the account is already pending */
-  scheduledFor: string | null;
-  /** when the account would be (or will be) erased */
-  eraseOn: string;
-  vaults: { id: string; name: string | null; sharedWith: { principal: Principal; display: string | null; role: VaultRole }[] }[];
-  /** `blocked`: the user is the only confirmed owner and others are in it; `members` are the candidates for owner, admins first */
-  orgs: { id: string; name: string; role: OrgRole; outcome: "leave" | "delete" | "blocked"; members: { id: string; email: string; role: OrgRole }[] }[];
-  /** `manage: "app_store"`: billed by Apple, which only the user can cancel (in their Apple ID settings) before deleting */
-  subscription: { plan: string; periodEnd: string | null; source: BillingSource; manage: BillingManage } | null;
-  shareLinks: number;
-  blocked: boolean;
+/** Thrown by `importVault` when the vault was created but its first upload failed; `vault.sync()` retries it. */
+export class VaultUploadError extends OpenVireoError {
+  constructor(
+    readonly vault: AccountVault,
+    cause: unknown,
+  ) {
+    super("vault_upload_failed", `the vault was created, but its first upload failed: ${(cause as Error)?.message ?? cause}`, (cause as OpenVireoError)?.status, { cause });
+  }
 }
 
 /** A remembered account whose stored erase date (SPEC.md §23) is more than a day past: remove it and its Secret Key. */
@@ -188,1536 +185,575 @@ export function deletionExpired(scheduledFor: string | null | undefined, now: nu
   return Number.isFinite(at) && now > at + 24 * 3600_000;
 }
 
-const ROLE_ORDER: Record<VaultRole, number> = { read: 0, write: 1, manage: 2 };
+/** The discovery document (snake_case, as served) as the core's `ServerConfig`, and back. */
+export function serverConfigOf(c: OpenVireoConfiguration): ServerConfig {
+  const s: ServerConfig = { issuer: c.issuer, api: c.api, sync: c.sync, jwksUri: c.jwks_uri, opaque: { ...c.opaque } };
+  if (c.kdf_min) s.kdfMin = { ...c.kdf_min };
+  if (c.web) s.web = c.web;
+  if (c.share) s.share = c.share;
+  return s;
+}
+export function configOf(s: ServerConfig): OpenVireoConfiguration {
+  const c: OpenVireoConfiguration = { issuer: s.issuer, api: s.api, sync: s.sync, jwks_uri: s.jwksUri, opaque: { ...s.opaque } };
+  if (s.kdfMin) c.kdf_min = { ...s.kdfMin };
+  if (s.web) c.web = s.web;
+  if (s.share) c.share = s.share;
+  return c;
+}
+
+/** The core client for these options (one per `Account.connect`). */
+function clientFor(opts: Omit<AccountOptions, "issuer" | "device"> & { device?: DeviceInfo }): OvClient {
+  const storage = opts.storage ?? new MemoryStorage();
+  const config: { device: DeviceInfo; offline: boolean; server?: ServerConfig } = { device: opts.device ?? { name: "OpenVireo SDK", platform: "web" }, offline: !!opts.offline };
+  if (opts.config) config.server = serverConfigOf(opts.config);
+  return guarded(() => new (core().OvClient)(config as never, makeHost({ ...opts, storage }, storageStore(storage))));
+}
+
+/** A core `Plan` (camelCase) in the SDK's `Plan` shape (as the server sends it). */
+export function planOf(p: CorePlan | undefined): Plan | undefined {
+  if (!p) return undefined;
+  const limits: Record<string, number | null> = {};
+  for (const l of p.limits) limits[l.name] = l.value ?? null;
+  const out: Plan = { id: p.id ?? null, limits };
+  if (p.billing) {
+    const b = p.billing;
+    out.billing = { source: b.source, interval: b.interval, status: b.status, renews_at: b.renewsAt ?? null, ends_at: b.endsAt ?? null, manage: b.manage as Plan["billing"] extends infer B ? (B extends { manage: infer M } ? M : never) : never };
+  }
+  return out;
+}
+
+const kdfOf = (k?: { m?: number; t?: number; p?: number }): KdfOverrides | undefined => (k ? { ...k } : undefined);
+const nul = <T>(v: T | undefined): T | null => (v === undefined ? null : v);
 
 export class Account {
-  readonly auth: AuthClient;
-  readonly sync: SyncClient;
-  readonly tokens: TokenManager;
-  private keyset: Keyset | null = null;
-  private vaults = new Map<string, VaultEntry>();
-  private readonly storage: KeyValueStorage;
-  private _offline = false;
-  // The user whose offline cache to drop when the session ends (the session is gone by then)
-  private cacheUser: string | undefined;
-  private _deletion: string | null = null;
+  /** The core's account handle, for everything this class doesn't wrap (orgs, devices, audit, billing…). */
+  readonly core: CoreAccount;
+  private readonly listeners = new Set<(r: SignedOutReason) => void>();
+  private watching = false;
 
   private constructor(
-    readonly config: OpenVireoConfiguration,
+    private readonly client: OvClient,
+    coreAccount: CoreAccount,
     private readonly opts: AccountOptions,
   ) {
-    this.storage = opts.storage ?? new MemoryStorage();
-    const base = new AuthClient({ ...opts, api: config.api });
-    this.tokens = new TokenManager({ storage: new NamespacedStorage(this.storage, "ov:"), refresh: (rt) => base.refresh(rt) });
-    this.auth = base.withTokens(this.tokens);
-    this.sync = new SyncClient({ ...opts, baseUrl: config.sync, token: this.tokens });
-    this.tokens.onSignedOut(() => {
-      const user = this.cacheUser;
-      this.cacheUser = undefined;
-      if (user) void this.clearOfflineData(user, [...this.vaults.keys()]).catch(() => undefined);
-    });
+    this.core = coreAccount;
   }
 
   /**
-   * Discovers the server and loads a stored session, if any (signed in but locked). With `offline`,
-   * an unreachable server falls back to the discovery document from the last successful connect.
+   * Discovers the server and loads a stored session, if any (signed in but locked). With `offline`, an
+   * unreachable server falls back to the discovery document from the last successful connect.
    */
   static async connect(opts: AccountOptions): Promise<Account> {
-    let config = opts.config;
-    let offline = false;
-    if (!config) {
-      const key = OFFLINE.config(opts.issuer);
-      try {
-        config = await discover(opts.issuer, opts);
-        if (opts.offline && opts.storage) await opts.storage.set(key, JSON.stringify(config));
-      } catch (e) {
-        const cached = opts.offline && isUnreachable(e) ? await opts.storage?.get(key) : null;
-        if (!cached) throw e;
-        config = JSON.parse(cached) as OpenVireoConfiguration;
-        offline = true;
-      }
-    }
-    const acct = new Account(config, opts);
-    acct._offline = offline;
-    acct.cacheUser = (await acct.tokens.load())?.userId;
-    return acct;
+    const client = clientFor(opts);
+    const acct = await client.connect(opts.issuer);
+    return new Account(client, guard(acct), opts);
   }
 
-  /**
-   * True while the servers can't be reached and this account works from the offline cache (only with
-   * the `offline` option). Edits are kept and upload once a sync succeeds again.
-   */
+  /** The discovery document of the server this account is on. */
+  get config(): OpenVireoConfiguration {
+    return configOf(this.core.serverConfig());
+  }
+  /** True while the servers can't be reached and this account works from the offline cache. */
   get offline(): boolean {
-    return this._offline;
+    return this.core.isOffline();
   }
-
   get signedIn(): boolean {
-    return this.tokens.current !== null;
+    return this.core.isSignedIn();
   }
-  /**
-   * The erase date while the signed-in account is scheduled for deletion (SPEC.md §23), else null.
-   * Such a session opens no vaults: offer `restoreAccount` or sign out.
-   */
+  /** The erase date while the account is scheduled for deletion (SPEC.md §23), else null. */
   get deletionScheduledFor(): string | null {
-    return this._deletion;
+    return nul(this.core.deletionScheduledFor());
   }
   get unlocked(): boolean {
-    return this.keyset !== null;
+    return this.core.isUnlocked();
   }
   get userId(): string | undefined {
-    return this.tokens.current?.userId;
+    return this.core.userId();
   }
   get email(): string | undefined {
-    return this.tokens.current?.email;
+    return this.core.email();
   }
   get principal(): Principal {
-    if (!this.tokens.current) throw new OpenVireoError("signed_out", "not signed in");
-    return `user:${this.tokens.current.userId}`;
+    return this.core.principal() as Principal;
   }
+  /**
+   * The typed client of the account server's routes (openapi.yaml), signed in with this session: it
+   * borrows the core's access token (and has the core refresh it on a 401). For the routes the core
+   * doesn't wrap; JSON is the server's (snake_case).
+   */
+  get auth(): AuthClient {
+    this._auth ??= new AuthClient({ ...this.opts, api: this.config.api }).withTokens({
+      getAccessToken: async (o) => fromUtf8(await this.core.accessToken(!!o?.force)),
+    });
+    return this._auth;
+  }
+  private _auth: AuthClient | undefined;
+
   /** this account's public key fingerprint (to compare out of band) */
   get fingerprint(): string {
-    return fingerprint(this.requireKeyset());
+    return this.core.fingerprint();
   }
+
+  /** Called when the server ends this session (token reused, expired, signed out elsewhere, deletion). */
   onSignedOut(listener: (reason: SignedOutReason) => void): () => void {
-    return this.tokens.onSignedOut((r) => {
-      this.lock();
-      listener(r);
-    });
-  }
-
-  private ids(email: string) {
-    return opaqueIds(email, this.config.opaque.ids);
-  }
-  private skKey = (email: string) => `secret_key:${this.ids(email).idS}:${this.ids(email).idU}`;
-  private devKey = (email: string) => `device:${this.ids(email).idS}:${this.ids(email).idU}`;
-  // From before these keys named the server. Whichever server it came from, it's only moved once it has worked.
-  private olderSkKey = (email: string) => `secret_key:${this.ids(email).idU}`;
-  private olderDevKey = (email: string) => `device:${this.ids(email).idU}`;
-
-  private async storedSk(email: string): Promise<string | null> {
-    return (await this.storage.get(this.skKey(email))) ?? (await this.storage.get(this.olderSkKey(email)));
-  }
-
-  private async storedDevice(email: string): Promise<string | null> {
-    return (await this.storage.get(this.devKey(email))) ?? (await this.storage.get(this.olderDevKey(email)));
-  }
-
-  /** `text` opened this account: it's kept under the key naming this server, and an older copy of the same key goes. */
-  private async keepSk(text: string, email: string): Promise<void> {
-    await this.storage.set(this.skKey(email), text);
-    if ((await this.storage.get(this.olderSkKey(email))) !== text) return;
-    const device = await this.storage.get(this.olderDevKey(email));
-    if (device && !(await this.storage.get(this.devKey(email)))) await this.storage.set(this.devKey(email), device);
-    await this.storage.delete(this.olderSkKey(email));
-    await this.storage.delete(this.olderDevKey(email));
+    this.listeners.add(listener);
+    if (!this.watching) {
+      this.watching = true;
+      const loop = async () => {
+        while (this.listeners.size > 0) {
+          let reason: SignedOutReason;
+          try {
+            reason = (await this.core.signedOut()) as SignedOutReason;
+          } catch {
+            break;
+          }
+          for (const l of [...this.listeners]) l(reason);
+        }
+        this.watching = false;
+      };
+      void loop();
+    }
+    return () => void this.listeners.delete(listener);
   }
 
   /** Whether this device can sign in to `email` without being given the Secret Key. */
-  async hasSecretKey(email: string): Promise<boolean> {
-    return (await this.storedSk(email)) !== null;
+  hasSecretKey(email: string): Promise<boolean> {
+    return this.core.hasSecretKey(email);
   }
 
   /** Creates an account. Returns the Secret Key to show once (Emergency Kit). Signs in and unlocks. */
-  async register(p: { email: string; password: string; kdf?: Parameters<typeof newKdfParams>[0]; trustDevice?: boolean }): Promise<{ secretKey: string; userId: string }> {
-    const sk = generateSecretKey();
-    const kdf = newKdfParams(p.kdf);
-    checkKdfParams(kdf, this.config.kdf_min);
-    const reg = await startRegistration(p.password);
-    const started = await this.auth.registerStart({ email: p.email.trim(), request: b64u(reg.request) });
-    const { record } = await finishRegistration(reg.state, fromB64u(started.response), this.ids(p.email));
-    const auk = await deriveAuk(p.password, kdf, sk, { kdfMin: this.config.kdf_min });
-    const keyset = generateKeyset();
+  async register(p: { email: string; password: string; kdf?: { m?: number; t?: number; p?: number }; trustDevice?: boolean }): Promise<{ secretKey: string; userId: string }> {
+    const input: { email: string; password: Uint8Array; trustDevice: boolean; kdf?: KdfOverrides } = { email: p.email, password: utf8(p.password), trustDevice: p.trustDevice ?? true };
+    const kdf = kdfOf(p.kdf);
+    if (kdf) input.kdf = kdf;
+    const r = await this.core.register(input);
     try {
-      const wrapped = wrapKeyset(auk, keyset);
-      const session = await this.auth.registerFinish({
-        session_id: started.session_id,
-        record: b64u(record),
-        kdf,
-        keyset: wrapped,
-        device: this.opts.device,
-      });
-      await this.begin(p.email, session, sk, p.trustDevice ?? true);
-      await this.cacheProfile(session.user.id, { kdf, keyset: wrapped });
-      this.keyset = keyset;
-      return { secretKey: formatSecretKey(sk), userId: session.user.id };
-    } catch (e) {
-      wipeKeyset(keyset);
-      throw e;
+      return { secretKey: fromUtf8(r.secretKey), userId: r.userId };
     } finally {
-      wipe(auk, sk);
+      wipe(r.secretKey, r.auk);
     }
   }
 
-  /**
-   * OPAQUE login (+ TOTP when the account has it), then unlock. The Secret Key is needed the first time
-   * on a device; with `trustDevice` (default) it is kept in storage for next time.
-   */
+  /** Signs in (OPAQUE) and unlocks. `totp` is a code or a prompt asked again after a wrong code. */
   async login(p: { email: string; password: string; secretKey?: string; totp?: string | TotpPrompt; trustDevice?: boolean }): Promise<void> {
-    const skText = p.secretKey ?? (await this.storedSk(p.email));
-    if (!skText) throw new OpenVireoError("invalid_secret_key", "this device needs the account's Secret Key");
-    const sk = parseSecretKey(skText);
-    const deviceId = await this.storedDevice(p.email);
-    const ids = this.ids(p.email);
-    const login = await startLogin(p.password);
-    const started = await this.auth.loginStart({ email: p.email.trim(), ke1: b64u(login.ke1) });
-    let authU: Uint8Array;
-    try {
-      ({ authU } = await finishLogin(login.state, fromB64u(started.ke2), ids, this.config.opaque.context));
-    } catch (e) {
-      // Same message as the server's 401 for a wrong password or unknown email
-      throw new OpenVireoError("unauthorized", "wrong email or password", 401, { cause: e });
-    }
-    const device = { ...this.opts.device, ...(deviceId ? { id: deviceId } : {}) };
-    let res = await this.auth.loginFinish({ session_id: started.session_id, auth_u: b64u(authU), device });
-    if (isMfaChallenge(res)) {
+    const input: { email: string; password: Uint8Array; trustDevice: boolean; secretKey?: Uint8Array; totp?: string } = { email: p.email, password: utf8(p.password), trustDevice: p.trustDevice ?? true };
+    if (p.secretKey) input.secretKey = utf8(p.secretKey);
+    if (typeof p.totp === "string") input.totp = p.totp;
+    let step: LoginStep = await this.core.login(input);
+    if (step.kind === "needsTotp") {
       if (!p.totp) throw new OpenVireoError("mfa_required", "a TOTP code is required");
-      const mfaToken = res.mfa_token;
-      // SPEC.md §8: a wrong code (invalid_mfa) keeps the token, so a prompt is asked again; once the
-      // token is gone (the 5th wrong code, or it expired) the login fails with mfa_expired
-      for (let attempt = 1, error: OpenVireoError | undefined; ; attempt++) {
-        const code = typeof p.totp === "string" ? p.totp : await p.totp({ attempt, error });
-        try {
-          res = await this.auth.loginMfa({ mfa_token: mfaToken, totp: code });
-          break;
-        } catch (e) {
-          if (e instanceof OpenVireoError && e.code === "invalid_mfa" && typeof p.totp !== "string") {
-            error = e;
-            continue;
+      const challenge = step.challenge;
+      if (typeof p.totp === "string") step = await this.core.submitTotp(challenge, p.totp);
+      else {
+        // SPEC §8: a wrong code (invalid_mfa) keeps the challenge, so the prompt is asked again; once the
+        // server drops the MFA token (5th wrong code, or it expired) it is mfa_expired
+        for (let attempt = 1, error: OpenVireoError | undefined; ; attempt++) {
+          const code = await p.totp(error ? { attempt, error } : { attempt });
+          try {
+            step = await this.core.submitTotp(challenge, code);
+            break;
+          } catch (e) {
+            if (e instanceof OpenVireoError && e.code === "invalid_mfa") {
+              error = e;
+              continue;
+            }
+            throw e;
           }
-          // The server dropped the MFA token (5th wrong code, or it expired): sign-in starts over
-          if (e instanceof OpenVireoError && e.code !== "invalid_mfa" && (e.status === 401 || e.status === 410)) {
-            throw new OpenVireoError("mfa_expired", "the sign-in expired or the code was wrong too often; sign in again", e.status, { cause: e });
-          }
-          throw e;
         }
       }
     }
-    try {
-      await this.unlockWith(p.password, res.kdf, res.keyset, sk);
-      await this.begin(p.email, res, sk, p.trustDevice ?? true);
-      await this.cacheProfile(res.user.id, { kdf: res.kdf, keyset: res.keyset });
-      this._offline = false;
-      this._deletion = pendingUntil(res.access_token);
-    } finally {
-      wipe(sk);
-    }
-  }
-
-  private async begin(email: string, s: Session, sk: Uint8Array, trust: boolean) {
-    await this.tokens.start({ issuer: this.config.issuer, userId: s.user.id, email: s.user.email ?? email, deviceId: s.device_id, refreshToken: s.refresh_token }, s.access_token, s.expires_in);
-    this.cacheUser = s.user.id;
-    if (trust) await this.keepSk(formatSecretKey(sk), email);
-    await this.storage.set(this.devKey(email), s.device_id);
-  }
-
-  private async unlockWith(password: string, kdf: Session["kdf"], wrapped: Session["keyset"], sk: Uint8Array) {
-    checkKdfParams(kdf, this.config.kdf_min);
-    const auk = await deriveAuk(password, kdf, sk, { kdfMin: this.config.kdf_min });
-    try {
-      this.lock();
-      this.keyset = unwrapKeyset(auk, wrapped);
-    } catch (e) {
-      throw (e as OpenVireoError).code === "decryption_failed" ? new OpenVireoError("unauthorized", "wrong password or Secret Key", 401, { cause: e }) : e;
-    } finally {
-      wipe(auk);
-    }
+    if (step.kind === "unlocked") wipe(step.unlocked.auk);
   }
 
   /**
-   * Unlocks a signed-in (resumed) session with the master password; no OPAQUE round trip needed. With
-   * `offline`, an unreachable server falls back to the wrapped keyset cached at the last sign-in or
-   * unlock, so the password and Secret Key still have to be right.
+   * Unlocks a signed-in (resumed) session with the master password. With `offline`, an unreachable server
+   * falls back to the wrapped keyset cached at the last sign-in or unlock.
    */
   async unlock(password: string, secretKey?: string): Promise<void> {
-    const session = await this.tokens.load();
-    if (!session) throw new OpenVireoError("signed_out", "not signed in");
-    this.cacheUser = session.userId;
-    const skText = secretKey ?? (await this.storedSk(session.email));
-    if (!skText) throw new OpenVireoError("invalid_secret_key", "this device needs the account's Secret Key");
-    const sk = parseSecretKey(skText);
-    try {
-      let profile: Profile;
-      let offline = false;
-      try {
-        const me = await this.auth.me();
-        profile = { kdf: me.kdf, keyset: me.keyset };
-        this._deletion = me.deletion_scheduled_for ?? null;
-        await this.followEmail(me.email);
-      } catch (e) {
-        const cached = isUnreachable(e) ? await this.cachedProfile(session.userId) : null;
-        if (!cached) throw e;
-        profile = cached;
-        offline = true;
-      }
-      await this.unlockWith(password, profile.kdf, profile.keyset, sk);
-      if (!offline) await this.cacheProfile(session.userId, profile);
-      this._offline = offline;
-    } finally {
-      wipe(sk);
-    }
+    const r = await this.core.unlock(utf8(password), secretKey ? utf8(secretKey) : undefined);
+    wipe(r.auk);
   }
 
   /**
-   * Seals the unlocked keyset under `key` (AES-GCM, random IV, bound to this issuer and user), so a
-   * page can unlock again after a reload with `resumeUnlocked` instead of the master password. Pass a
-   * non-extractable AES-GCM key and keep the result apart from it; `lock()` doesn't revoke a seal, so
-   * delete both when the app locks.
+   * Seals the unlocked keyset under `key` (AES-GCM, random IV, bound to this issuer and user), so a page
+   * can unlock again after a reload with `resumeUnlocked` instead of the master password. Pass a
+   * non-extractable AES-GCM key and keep the result apart from it.
    */
   async sealUnlocked(key: CryptoKey): Promise<string> {
-    const ks = this.requireKeyset();
     const userId = this.userId;
     if (!userId) throw new OpenVireoError("signed_out", "not signed in");
+    const secret = this.core.unlockedKeysetSecret();
     const iv = randomBytes(12);
-    const joined = concat(ks.encSk, ks.signSeed);
-    const plain = exactBuffer(joined);
-    wipe(joined);
     try {
-      const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: exactBuffer(iv), additionalData: exactBuffer(this.sealAad(userId)) }, key, plain));
-      return `${SEAL_VERSION}.${b64u(iv)}.${b64u(sealed)}`;
+      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource, additionalData: utf8(`ov-unlock-v2|${this.config.issuer}|${userId}`) as BufferSource }, key, secret as BufferSource));
+      return `${SEAL_VERSION}.${b64u(iv)}.${b64u(ct)}`;
     } finally {
-      wipe(new Uint8Array(plain));
+      wipe(secret);
     }
   }
 
-  /**
-   * Unlocks from a `sealUnlocked` string. The unsealed keys must match the account's public keys (from
-   * /me, or offline the cached profile), so a seal never unlocks another account or a reset one.
-   * Fails with `signed_out` without a session and `decryption_failed` for a seal this key can't open.
-   */
+  /** Unlocks from `sealUnlocked`'s output. Throws `decryption_failed` for another key, user or server. */
   async resumeUnlocked(sealed: string, key: CryptoKey): Promise<void> {
-    const session = await this.tokens.load();
-    if (!session) throw new OpenVireoError("signed_out", "not signed in");
-    const [version, iv, data, ...rest] = sealed.split(".");
-    if (version !== SEAL_VERSION || !iv || !data || rest.length > 0) throw new OpenVireoError("unsupported_version", "not a sealed keyset");
-    let plain: Uint8Array;
+    const userId = this.userId;
+    if (!userId) throw new OpenVireoError("signed_out", "not signed in");
+    const [v, iv, ct] = sealed.split(".");
+    if (v !== SEAL_VERSION || !iv || !ct) throw new OpenVireoError("unsupported_version", "unknown unlock seal");
+    let secret: Uint8Array;
     try {
-      plain = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: exactBuffer(fromB64u(iv)), additionalData: exactBuffer(this.sealAad(session.userId)) }, key, exactBuffer(fromB64u(data))));
+      secret = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64u(iv) as BufferSource, additionalData: utf8(`ov-unlock-v2|${this.config.issuer}|${userId}`) as BufferSource }, key, fromB64u(ct) as BufferSource));
     } catch (e) {
-      throw new OpenVireoError("decryption_failed", "the sealed keyset can't be opened with this key", undefined, { cause: e });
+      throw new OpenVireoError("decryption_failed", "the unlock seal doesn't open with this key", undefined, { cause: e });
     }
-    if (plain.length !== 64) {
-      wipe(plain);
-      throw new OpenVireoError("decryption_failed", "the sealed keyset has the wrong length");
-    }
-    const ks = keysetFromSecrets(plain.subarray(0, 32), plain.subarray(32, 64));
-    wipe(plain);
     try {
-      let profile: Profile;
-      let offline = false;
-      try {
-        const me = await this.auth.me();
-        profile = { kdf: me.kdf, keyset: me.keyset };
-        await this.followEmail(me.email);
-      } catch (e) {
-        const cached = isUnreachable(e) ? await this.cachedProfile(session.userId) : null;
-        if (!cached) throw e;
-        profile = cached;
-        offline = true;
-      }
-      const pub = trustedPublicKeys(profile.keyset);
-      if (!ctEqual(ks.encPk, pub.encPk) || !ctEqual(ks.signPk, pub.signPk)) {
-        throw new OpenVireoError("invalid_public_keys", "the sealed keyset isn't this account's");
-      }
-      ks.sig = pub.sig;
-      if (!offline) await this.cacheProfile(session.userId, profile);
-      this.lock();
-      this.keyset = ks;
-      this.cacheUser = session.userId;
-      this._offline = offline;
-    } catch (e) {
-      wipeKeyset(ks);
-      throw e;
-    }
-  }
-
-  private sealAad(userId: string): Uint8Array {
-    return utf8(`ov-unlock-seal-v1|${this.config.issuer.replace(/\/+$/, "")}|${userId}`);
-  }
-
-  /**
-   * Changes the master password (SPEC.md §16). The current one is checked by unwrapping the keyset; then
-   * OPAQUE is registered again and the same keyset is wrapped with the new AUK, so sealed vault keys keep
-   * working. The Secret Key stays the same. The server signs out the other devices.
-   */
-  async changePassword(p: { current: string; next: string; kdf?: Parameters<typeof newKdfParams>[0] }): Promise<void> {
-    const { session, sk } = await this.storedSecretKey();
-    let keyset: Keyset | null = null;
-    let auk: Uint8Array | null = null;
-    try {
-      keyset = await this.checkPassword(p.current, sk);
-      const kdf = newKdfParams(p.kdf);
-      checkKdfParams(kdf, this.config.kdf_min);
-      auk = await deriveAuk(p.next, kdf, sk, { kdfMin: this.config.kdf_min });
-      const wrapped = wrapKeyset(auk, keyset);
-      // password/start needs an access token issued in the last 5 minutes
-      await this.tokens.getAccessToken({ force: true });
-      const reg = await startRegistration(p.next);
-      const started = await this.auth.passwordStart({ request: b64u(reg.request) });
-      const { record } = await finishRegistration(reg.state, fromB64u(started.response), this.ids(session.email));
-      await this.auth.passwordFinish({ session_id: started.session_id, record: b64u(record), kdf, keyset: wrapped });
-      await this.cacheProfile(session.userId, { kdf, keyset: wrapped });
+      await this.core.resumeUnlocked(secret);
     } finally {
-      if (keyset) wipeKeyset(keyset);
-      if (auk) wipe(auk);
-      wipe(sk);
+      wipe(secret);
     }
   }
 
-  /** Unwraps the keyset from /me with this password, which proves it is the master password. */
-  private async checkPassword(password: string, sk: Uint8Array): Promise<Keyset> {
-    const me = await this.auth.me();
-    checkKdfParams(me.kdf, this.config.kdf_min);
-    const auk = await deriveAuk(password, me.kdf, sk, { kdfMin: this.config.kdf_min });
-    try {
-      return unwrapKeyset(auk, me.keyset);
-    } catch (e) {
-      throw (e as OpenVireoError).code === "decryption_failed" ? new OpenVireoError("unauthorized", "the master password is wrong", 401, { cause: e }) : e;
-    } finally {
-      wipe(auk);
-    }
+  async changePassword(p: { current: string; next: string; kdf?: { m?: number; t?: number; p?: number } }): Promise<void> {
+    wipe(await this.core.changePassword(utf8(p.current), utf8(p.next), kdfOf(p.kdf)));
   }
 
-  private async storedSecretKey(): Promise<{ session: NonNullable<TokenManager["current"]>; sk: Uint8Array }> {
-    const session = await this.tokens.load();
-    if (!session) throw new OpenVireoError("signed_out", "not signed in");
-    const skText = await this.storedSk(session.email);
-    if (!skText) throw new OpenVireoError("invalid_secret_key", "this device needs the account's Secret Key");
-    return { session, sk: parseSecretKey(skText) };
+  requestEmailChange(email: string): Promise<void> {
+    return this.core.requestEmailChange(email);
   }
 
-  /** Email change, step 1 (SPEC.md §16): the server mails an 8-digit code to the new address. */
-  async requestEmailChange(email: string): Promise<void> {
-    // /me/email needs an access token issued in the last 5 minutes
-    await this.tokens.getAccessToken({ force: true });
-    await this.auth.emailRequest(email.trim());
+  changeEmail(p: { email: string; code: string; password: string }): Promise<void> {
+    return this.core.changeEmail(p.email, p.code, utf8(p.password));
   }
 
-  /**
-   * Email change, step 2: with the mailed code and the master password, registers OPAQUE again under
-   * the new email. The password is checked first by unwrapping the keyset, so a typo can't become the
-   * new login. Keys, Secret Key and vaults stay as they are.
-   */
-  async changeEmail(p: { email: string; code: string; password: string }): Promise<void> {
-    const { sk } = await this.storedSecretKey();
-    const email = p.email.trim();
-    try {
-      wipeKeyset(await this.checkPassword(p.password, sk));
-      await this.tokens.getAccessToken({ force: true });
-      const reg = await startRegistration(p.password);
-      const started = await this.auth.emailStart({ email, code: p.code.trim(), request: b64u(reg.request) });
-      const { record } = await finishRegistration(reg.state, fromB64u(started.response), this.ids(email));
-      await this.auth.emailFinish({ session_id: started.session_id, record: b64u(record) });
-      await this.followEmail(email);
-    } finally {
-      wipe(sk);
-    }
-  }
-
-  /**
-   * Moves what this device keeps under the email (Secret Key, device id, session) to the account's
-   * current email, after it changed here or on another device (SPEC.md §16).
-   */
-  private async followEmail(email: string): Promise<void> {
-    const session = await this.tokens.load();
-    if (!session || !email) return;
-    const [from, to] = [this.ids(session.email).idU, this.ids(email).idU];
-    if (from === to) return;
-    const [sk, device] = [await this.storedSk(session.email), await this.storedDevice(session.email)];
-    if (sk) await this.storage.set(this.skKey(email), sk);
-    if (device) await this.storage.set(this.devKey(email), device);
-    for (const key of [this.skKey, this.devKey, this.olderSkKey, this.olderDevKey]) await this.storage.delete(key(session.email));
-    await this.tokens.update({ email });
-  }
-
-  /** The Secret Key kept on this device, to download the Emergency Kit again. Needs the account unlocked. */
+  /** The Secret Key this device keeps for the signed-in account, to show again; null when it keeps none. */
   async secretKey(): Promise<string | null> {
-    this.requireKeyset();
-    const session = await this.tokens.load();
-    return session ? this.storedSk(session.email) : null;
-  }
-
-  /**
-   * A one-time link (valid 60 seconds) that signs the browser in to the auth website and opens `next`,
-   * a path there such as `/settings` (SPEC.md §16).
-   */
-  async webSessionUrl(next?: string): Promise<string> {
-    const { code } = await this.auth.createWebSession();
-    const url = new URL("session/claim", this.config.issuer.replace(/\/?$/, "/"));
-    url.searchParams.set("code", code);
-    if (next) url.searchParams.set("next", next);
-    return url.toString();
-  }
-
-  // ------------------------------------------------------------------------- account recovery
-
-  /**
-   * What an approved reset will do (SPEC.md §18), for the `{web}/?view=recover#token=` page. Works
-   * signed out. Throws `recovery_not_ready` (409, `err.details.notBefore`) before the link starts
-   * working, `recovery_cancelled` (410) after a cancel, and `session_expired` (410) once used or expired.
-   */
-  async recoverInfo(token: string): Promise<RecoveryReset> {
-    const r = await this.auth.recoverInfo(token);
-    return {
-      email: r.email,
-      notBefore: r.not_before,
-      expiresAt: r.expires_at,
-      archiveDays: r.archive_days ?? 30,
-      archives: {
-        personalVaults: r.archives?.personal_vaults ?? 0,
-        sharedGrants: r.archives?.shared_grants ?? 0,
-        soleAdminOrgs: r.archives?.sole_admin_orgs ?? [],
-      },
-    };
-  }
-
-  /**
-   * Resets the account with an approved `ov_rc_` token (SPEC.md §18): a new Secret Key, KDF salt and
-   * keyset exactly as `register` makes them, a new OPAQUE record under the account email, and the old
-   * keys and vaults archived for 30 days on the server. Afterwards this device is signed in and
-   * unlocked and keeps the new Secret Key like after `register`; every other device is signed out.
-   * Returns the new Secret Key to show once (Emergency Kit). Errors as `recoverInfo`.
-   */
-  async recover(p: { token: string; password: string; kdf?: Parameters<typeof newKdfParams>[0]; trustDevice?: boolean }): Promise<{ secretKey: string; userId: string }> {
-    // The email (idU) comes from the reset; this also fails early before not_before or after a cancel
-    const { email } = await this.recoverInfo(p.token);
-    const sk = generateSecretKey();
-    const kdf = newKdfParams(p.kdf);
-    checkKdfParams(kdf, this.config.kdf_min);
-    const reg = await startRegistration(p.password);
-    const started = await this.auth.recoverStart({ token: p.token, request: b64u(reg.request) });
-    const { record } = await finishRegistration(reg.state, fromB64u(started.response), this.ids(email));
-    const auk = await deriveAuk(p.password, kdf, sk, { kdfMin: this.config.kdf_min });
-    const keyset = generateKeyset();
+    const raw = await this.core.secretKey();
+    if (!raw) return null;
     try {
-      const wrapped = wrapKeyset(auk, keyset);
-      const session = await this.auth.recoverFinish({
-        session_id: started.session_id,
-        record: b64u(record),
-        kdf,
-        keyset: wrapped,
-        device: this.opts.device,
-      });
-      // Whatever this device held for the account belongs to the old keys
-      const known = [...this.vaults.keys()];
-      this.lock();
-      await this.clearOfflineData(session.user.id, known);
-      await this.storage.delete(this.olderSkKey(email));
-      await this.begin(email, session, sk, p.trustDevice ?? true);
-      await this.cacheProfile(session.user.id, { kdf, keyset: wrapped });
-      this.keyset = keyset;
-      return { secretKey: formatSecretKey(sk), userId: session.user.id };
-    } catch (e) {
-      wipeKeyset(keyset);
-      throw e;
+      return fromUtf8(raw);
     } finally {
-      wipe(auk, sk);
+      wipe(raw);
     }
   }
 
-  /** Whether a recovery archive from a reset exists, until when, and whether it is locked (SPEC.md §18). */
-  async recoveryStatus(): Promise<RecoveryStatus> {
-    const r = await this.auth.recoveryStatus();
-    const out: RecoveryStatus = { archived: !!r.archived };
+  /** A one-time link that signs the web app in as this account (SPEC.md §16). */
+  async webSessionUrl(next?: string): Promise<string> {
+    return fromUtf8(await this.core.webSessionUrl(next));
+  }
+
+  async recoverInfo(token: string): Promise<RecoveryResetInfo> {
+    const r: RecoveryReset = await this.core.recoverInfo(utf8(token));
+    return { email: r.email, notBefore: r.notBefore, expiresAt: r.expiresAt, archiveDays: r.archiveDays, archives: { personalVaults: r.personalVaults, sharedGrants: r.sharedGrants, soleAdminOrgs: r.soleAdminOrgs } };
+  }
+
+  /** Completes an approved account reset (SPEC.md §18): new password and Secret Key; signs in. */
+  async recover(p: { token: string; password: string; kdf?: { m?: number; t?: number; p?: number }; trustDevice?: boolean }): Promise<{ secretKey: string; userId: string }> {
+    const r = await this.core.recover(utf8(p.token), utf8(p.password), kdfOf(p.kdf), p.trustDevice ?? true);
+    try {
+      return { secretKey: fromUtf8(r.secretKey), userId: r.userId };
+    } finally {
+      wipe(r.secretKey, r.auk);
+    }
+  }
+
+  async recoveryStatus(): Promise<RecoveryStatusInfo> {
+    const r: RecoveryStatus = await this.core.recoveryStatus();
+    const out: RecoveryStatusInfo = { archived: r.archived };
     if (r.email !== undefined) out.email = r.email;
-    if (r.expires_at !== undefined) out.expiresAt = r.expires_at;
+    if (r.expiresAt !== undefined) out.expiresAt = r.expiresAt;
     if (r.vaults !== undefined) out.vaults = r.vaults;
-    if (r.locked !== undefined) out.locked = r.locked;
+    if (r.locked) out.locked = true;
     return out;
   }
 
-  /**
-   * Restores the vaults archived by a reset into the current keys (SPEC.md §18), with the old master
-   * password and the old Secret Key (the old Emergency Kit). Needs the account unlocked. OPAQUE login
-   * against the archived record (idU = the archived email the server returns), then the old keyset
-   * is unwrapped locally, each archived vault key re-sealed to the current enc_pk, and the proof signed
-   * with the old signing key. The old keys are wiped afterwards and the vault list reloaded.
-   *
-   * Errors: 401 `unauthorized` for a wrong old password; `invalid_secret_key` (local, before anything is
-   * restored) when the old Secret Key doesn't open the archived keyset; `restore_locked` (403);
-   * `invalid_proof` (400); `session_expired` (410); `not_found` (404) when there is no archive;
-   * `forbidden` (403) when the server wants a fresh sign-in.
-   */
+  /** Restores the vaults archived by a reset with the old password and Secret Key. */
   async restoreFromArchive(p: { oldPassword: string; oldSecretKey: string }): Promise<{ restored: number }> {
-    const current = this.requireKeyset();
-    const session = await this.tokens.load();
-    if (!session) throw new OpenVireoError("signed_out", "not signed in");
-    const oldSk = parseSecretKey(p.oldSecretKey);
-    let old: Keyset | null = null;
-    let auk: Uint8Array | null = null;
-    let restored: number;
-    try {
-      // The restore routes need an access token issued in the last 5 minutes
-      await this.tokens.getAccessToken({ force: true });
-      const login = await startLogin(p.oldPassword);
-      const started = await this.auth.restoreStart({ ke1: b64u(login.ke1) });
-      let authU: Uint8Array;
-      try {
-        ({ authU } = await finishLogin(login.state, fromB64u(started.ke2), this.ids(started.email ?? session.email), this.config.opaque.context));
-      } catch (e) {
-        throw new OpenVireoError("unauthorized", "the old master password is wrong", 401, { cause: e });
-      }
-      const verified = await this.auth.restoreVerify({ session_id: started.session_id, auth_u: b64u(authU) });
-      checkKdfParams(verified.kdf, this.config.kdf_min);
-      auk = await deriveAuk(p.oldPassword, verified.kdf, oldSk, { kdfMin: this.config.kdf_min });
-      try {
-        old = unwrapKeyset(auk, verified.keyset);
-      } catch (e) {
-        // The password was right (OPAQUE), so the Secret Key is the wrong one
-        throw (e as OpenVireoError).code === "decryption_failed" ? new OpenVireoError("invalid_secret_key", "the old Secret Key doesn't open the archived keys", undefined, { cause: e }) : e;
-      }
-      const grants: VaultGrant[] = verified.grants.map((g) => ({
-        vault_id: g.vault_id,
-        principal: this.principal,
-        role: g.role,
-        key_version: g.key_version,
-        sealed_key: b64u(resealVaultKey(old!.encSk, current.encPk, g.vault_id, fromB64u(g.sealed_key))),
-      }));
-      const proof = restoreProof(old.signSeed, session.userId, current);
-      await this.auth.restoreFinish({ session_id: verified.session_id, grants, proof: b64u(proof) });
-      restored = grants.length;
-    } finally {
-      wipeKeyset(old);
-      wipe(auk, oldSk);
-    }
-    // As on an `access` event: new vlt claims, then the vault list
-    await this.tokens.refreshNow();
-    await this.listVaults();
-    return { restored };
+    return { restored: await this.core.restoreFromArchive(utf8(p.oldPassword), utf8(p.oldSecretKey)) };
   }
 
-  /**
-   * Goes back online after working from the offline cache: re-reads the account record and the vault
-   * list. Vaults that are no longer listed (access revoked or the vault deleted meanwhile) are
-   * forgotten with their local copies and returned in `dropped`. Throws while still unreachable.
-   */
+  /** Back online after working offline: syncs and returns the vault list and the vaults no longer listed. */
   async reconnect(): Promise<{ vaults: VaultInfo[]; dropped: string[] }> {
-    const session = await this.tokens.load();
-    if (!session) throw new OpenVireoError("signed_out", "not signed in");
-    const me = await this.auth.me();
-    await this.followEmail(me.email);
-    await this.cacheProfile(session.userId, { kdf: me.kdf, keyset: me.keyset });
-    return this.loadVaultList();
+    const r = await this.core.reconnect();
+    return { vaults: r.vaults.map(vaultInfoOf), dropped: r.dropped };
   }
 
-  /** Clears private keys and vault keys from memory (best effort). */
   lock(): void {
-    wipeKeyset(this.keyset);
-    this.keyset = null;
-    for (const v of this.vaults.values()) for (const k of v.keys) wipe(k.key);
-    this.vaults.clear();
+    this.core.lock();
   }
 
-  /** Revokes this device's session on the server and forgets it locally (the trusted Secret Key stays unless `forgetDevice`; `forgetDevice()` works signed out too). */
+  /** Signs out (and with `forgetDevice` drops the kept Secret Key and device id). */
   async logout(opts: { forgetDevice?: boolean } = {}): Promise<void> {
-    const email = this.tokens.current?.email;
-    const user = this.tokens.current?.userId;
-    try {
-      await this.auth.logout();
-    } catch {
-      /* best effort */
-    }
-    const known = [...this.vaults.keys()];
-    this.lock();
-    // The offline cache goes with the session (vault copies, wrapped keyset, vault list)
-    this.cacheUser = undefined;
-    if (user) await this.clearOfflineData(user, known);
-    this.vaults.clear();
-    this._offline = false;
-    await this.tokens.clear("logout");
-    if (opts.forgetDevice && email) {
-      await this.forgetDevice(email);
-    }
+    await this.core.signOut(!!opts.forgetDevice);
   }
 
-  // ------------------------------------------------------------------ account deletion (SPEC §23)
-
-  /** What deleting this account will do. Vault names are decrypted when the vault list can be read. */
-  async deletionPreview(): Promise<DeletionPreview> {
-    const p = await this.auth.deletionPreview();
-    const names = new Map<string, string>();
-    if (!p.scheduled_for && this.keyset) {
-      for (const v of await this.listVaults()) names.set(v.id, v.name);
-    }
+  async deletionPreview(): Promise<DeletionPreviewInfo> {
+    const p: DeletionPreview = await this.core.deletionPreview();
     return {
-      scheduledFor: p.scheduled_for,
-      eraseOn: p.would_erase_on,
-      vaults: p.vaults.map((v) => ({ id: v.id, name: names.get(v.id) ?? null, sharedWith: v.shared_with })),
-      orgs: p.orgs,
-      subscription: p.subscription && {
-        plan: p.subscription.plan,
-        periodEnd: p.subscription.period_end,
-        source: p.subscription.source ?? "stripe",
-        manage: p.subscription.manage ?? "website",
-      },
-      shareLinks: p.share_links,
+      scheduledFor: p.scheduledFor ?? null,
+      eraseOn: p.eraseOn,
+      vaults: p.vaults.map((v) => ({ id: v.id, name: v.name ?? null, sharedWith: v.sharedWith.map((x) => ({ principal: x.principal as Principal, display: x.display ?? null, role: x.role })) })),
+      orgs: p.orgs.map((o) => ({ id: o.id, name: o.name, role: o.role, outcome: o.outcome, members: o.members.map((m) => ({ id: m.id, email: m.email, role: m.role })) })),
+      subscription: p.subscription ? { plan: p.subscription.plan, periodEnd: p.subscription.periodEnd ?? null, source: p.subscription.source, manage: p.subscription.manage } : null,
+      shareLinks: p.shareLinks,
       blocked: p.blocked,
     };
   }
 
-  /**
-   * Schedules this account's deletion (SPEC.md §23): checks the master password, then the server locks
-   * the account and erases it on the returned date. `confirm` is the account email as the user typed
-   * it. This device is signed out and its offline cache deleted; the Secret Key stays, so the user can
-   * still sign in and restore until then. 409 `deletion_blocked` lists the orgs to hand over first.
-   */
   async deleteAccount(p: { password: string; confirm: string }): Promise<{ scheduledFor: string }> {
-    const { session, sk } = await this.storedSecretKey();
-    try {
-      wipeKeyset(await this.checkPassword(p.password, sk));
-    } finally {
-      wipe(sk);
-    }
-    // DELETE /me needs an access token issued in the last 5 minutes
-    await this.tokens.getAccessToken({ force: true });
-    const { scheduled_for } = await this.auth.scheduleDeletion(p.confirm.trim());
-    await this.endSession(session.userId, "deletion_scheduled");
-    return { scheduledFor: scheduled_for };
+    return { scheduledFor: await this.core.deleteAccount(utf8(p.password), p.confirm) };
   }
 
-  /** Restores this account while it is pending deletion, after signing in to it (SPEC.md §23). */
-  async restoreAccount(p: { password: string }): Promise<void> {
-    const { sk } = await this.storedSecretKey();
-    try {
-      wipeKeyset(await this.checkPassword(p.password, sk));
-    } finally {
-      wipe(sk);
-    }
-    await this.tokens.getAccessToken({ force: true });
-    await this.auth.cancelDeletion();
-    // A token without `del`, which opens vaults again
-    await this.tokens.getAccessToken({ force: true });
-    this._deletion = null;
+  restoreAccount(p: { password: string }): Promise<void> {
+    return this.core.restoreAccount(utf8(p.password));
   }
 
-  /**
-   * Gives a personal vault to someone who already has access to it (SPEC.md §23). They become its
-   * owner with manage, this account loses access, and the vault needs a key rotation by its new owner.
-   */
-  async transferVault(vaultId: string, to: Principal): Promise<void> {
-    await this.auth.transferVault(vaultId, to);
-    await this.tokens.refreshNow();
-    await this.loadVaultList();
+  transferVault(vaultId: string, to: Principal): Promise<void> {
+    return this.core.transferVault(vaultId, to);
   }
 
-  /** Ends the session here after the account was deleted (here or elsewhere). */
-  private async endSession(userId: string, reason: "deletion_scheduled" | "account_deleted"): Promise<void> {
-    const email = this.tokens.current?.email;
-    const known = [...this.vaults.keys()];
-    this.lock();
-    this.cacheUser = undefined;
-    await this.clearOfflineData(userId, known);
-    this._offline = false;
-    this._deletion = null;
-    await this.tokens.clear(reason);
-    if (reason === "account_deleted" && email) await this.forgetDevice(email);
-  }
-
-  // ------------------------------------------------------- several accounts on a device (SPEC §21)
-
-  /** The key a session set aside lives under, unnamespaced. */
-  private static parkedKey(issuer: string, userId: string): string {
-    return `parked_session:${opaqueIds("", issuer).idS}:${userId}`;
-  }
-
-  /**
-   * Whether a user has a session in `storage`, with no network. A crash while moving a session can
-   * leave it under both keys: the active one wins (its token may be newer, and presenting the other
-   * would end the session).
-   */
+  /** Whether `storage` holds an active, parked or no session for this user (without connecting). */
   static async sessionState(storage: KeyValueStorage, account: { issuer: string; userId: string }): Promise<"active" | "parked" | "signed_out"> {
-    const ns = new NamespacedStorage(storage, "ov:");
-    const parked = Account.parkedKey(account.issuer, account.userId);
-    const raw = await ns.get("session");
-    if (raw && (JSON.parse(raw) as StoredSession).userId === account.userId) {
-      await ns.delete(parked);
-      return "active";
-    }
-    return (await ns.get(parked)) ? "parked" : "signed_out";
+    return clientFor({ storage }).sessionState(account.issuer, account.userId);
   }
 
-  /** Whether a user's offline cache holds edits that haven't reached the server (reads no secrets). */
+  /** Whether `storage` holds edits of this user's vaults not yet uploaded. */
   static async hasPendingEdits(storage: KeyValueStorage, userId: string): Promise<boolean> {
-    const raw = await storage.get(OFFLINE.vaults(userId));
-    for (const v of raw ? (JSON.parse(raw) as Vault[]) : []) {
-      if ((await storage.get(OFFLINE.pending(userId, v.id))) ?? (await storage.get(OFFLINE.olderPending(v.id)))) return true;
-    }
-    return false;
+    return clientFor({ storage, offline: true }).hasPendingEdits(userId);
   }
 
-  /**
-   * Locks the account and moves its session aside, for its user to come back to. The server isn't told
-   * and the offline cache stays. False when no session is open.
-   */
-  async parkSession(): Promise<boolean> {
-    const session = await this.tokens.load();
-    if (!session) return false;
-    this.lock();
-    this.cacheUser = undefined;
-    this._offline = false;
-    return this.tokens.setAside(Account.parkedKey(this.config.issuer, session.userId));
+  /** Parks this session (switching accounts) so `resumeSession` can come back to it without signing in. */
+  parkSession(): Promise<boolean> {
+    return this.core.parkSession();
+  }
+  resumeSession(userId: string): Promise<boolean> {
+    return this.core.resumeSession(userId);
+  }
+  checkParkedSession(userId: string): Promise<"valid" | "ended" | "no_answer"> {
+    return this.core.checkParkedSession(userId);
+  }
+  logoutParked(userId: string): Promise<void> {
+    return this.core.signOutParked(userId);
+  }
+  forgetDevice(email: string): Promise<void> {
+    return this.core.forgetDevice(email);
   }
 
-  /** Makes a session set aside the active one. False when there's none to resume: it ended, and the user signs in. */
-  async resumeSession(userId: string): Promise<boolean> {
-    const active = await this.tokens.load();
-    if (active) {
-      if (active.userId === userId) return true;
-      throw new OpenVireoError("server_error", "another account is open");
-    }
-    if (!(await this.tokens.resume(Account.parkedKey(this.config.issuer, userId)))) return false;
-    this.cacheUser = userId;
-    return true;
-  }
-
-  /** A token manager for a session set aside, so refreshes rotate the token where it's kept. */
-  private parkedTokens(userId: string): TokenManager {
-    const base = new AuthClient({ ...this.opts, api: this.config.api });
-    return new TokenManager({
-      storage: new NamespacedStorage(this.storage, "ov:"),
-      storageKey: Account.parkedKey(this.config.issuer, userId),
-      refresh: (rt) => base.refresh(rt),
-    });
-  }
-
-  /**
-   * Asks the server about a session set aside: this keeps it within its 30 days, and a revoked device
-   * finds out. A refusal ends the session like any other (SPEC §9, §20). Run it when no switch is under
-   * way, so the session isn't moved while its token rotates.
-   */
-  async checkParkedSession(userId: string): Promise<"valid" | "ended" | "no_answer"> {
-    const tokens = this.parkedTokens(userId);
-    if (!(await tokens.load())) return "ended";
-    let ended = false;
-    tokens.onSignedOut(() => {
-      ended = true;
-    });
-    try {
-      await tokens.refreshNow();
-      return "valid";
-    } catch {
-      if (!ended) return "no_answer";
-      await this.clearOfflineData(userId);
-      return "ended";
-    }
-  }
-
-  /** Signs a session set aside out, as `logout` does for the open one. */
-  async logoutParked(userId: string): Promise<void> {
-    const tokens = this.parkedTokens(userId);
-    if (await tokens.load()) {
-      await new AuthClient({ ...this.opts, api: this.config.api }).withTokens(tokens).logout().catch(() => undefined);
-      await tokens.clear("logout");
-    }
-    await this.clearOfflineData(userId);
-  }
-
-  /**
-   * Removes what signing in again here would have reused, so the next sign-in needs the Emergency Kit.
-   * Works with no session; the account has to be signed out first.
-   */
-  async forgetDevice(email: string): Promise<void> {
-    const session = await this.tokens.load();
-    if (session && this.ids(session.email).idU === this.ids(email).idU) {
-      throw new OpenVireoError("server_error", "sign out of this account first");
-    }
-    for (const key of [this.skKey(email), this.devKey(email), this.olderSkKey(email), this.olderDevKey(email)]) await this.storage.delete(key);
-  }
-
-  /**
-   * For a tab closing on a shared session (SPEC §21): revokes the session with a request that outlives
-   * the page, and stops using it. Needs an access token already in hand, since a page closing can't
-   * refresh one. If it doesn't arrive, the refresh token was only in memory and nobody can use it.
-   */
+  /** Locks and signs out with a keepalive request, for `pagehide`. */
   logoutOnUnload(): void {
-    const token = this.tokens.accessTokenNow();
+    const req = this.core.signOutOnUnload();
     this.lock();
-    if (!token) return;
-    const url = `${this.config.api.replace(/\/+$/, "")}/auth/logout`;
-    void (this.opts.fetch ?? globalThis.fetch)(url, { method: "POST", keepalive: true, headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
-  }
-
-  private requireKeyset(): Keyset {
-    if (!this.keyset) throw new OpenVireoError("signed_out", "the account is locked");
-    return this.keyset;
+    if (!req) return;
+    const f = this.opts.fetch ?? globalThis.fetch;
+    const init: RequestInit = { method: req.method, keepalive: true, headers: req.headers };
+    if (req.body) init.body = req.body as BodyInit;
+    void f(req.url, init).catch(() => undefined);
   }
 
   // ------------------------------------------------------------------------------------- vaults
 
-  private ingest(v: Vault): VaultEntry {
-    const ks = this.requireKeyset();
-    const keys: KeyVersion[] = [];
-    for (const k of v.keys ?? []) {
-      try {
-        keys.push({ version: k.key_version, key: unsealVaultKey(ks.encSk, v.id, fromB64u(k.sealed_key)) });
-      } catch {
-        /* a key we can't open (sealed to an old keyset): skip, the other version may work */
-      }
-    }
-    keys.sort((a, b) => b.version - a.version);
-    let name = "";
-    for (const k of keys) {
-      try {
-        name = decryptVaultName(k.key, v.id, v.encrypted_name);
-        break;
-      } catch {
-        /* name encrypted under the other key version */
-      }
-    }
-    const entry: VaultEntry = {
-      info: {
-        id: v.id,
-        name,
-        role: v.role,
-        orgId: v.org_id ?? null,
-        currentKeyVersion: v.current_key_version,
-        pendingKeyVersion: v.pending_key_version ?? null,
-        rotationRequired: !!v.rotation_required,
-      },
-      keys,
-    };
-    const old = this.vaults.get(v.id);
-    if (old) for (const k of old.keys) if (!keys.some((n) => n.key === k.key)) wipe(k.key);
-    this.vaults.set(v.id, entry);
-    return entry;
-  }
-
-  /**
-   * GET /vaults: every vault this account can open, with names decrypted. With `offline`, an
-   * unreachable server falls back to the list from the last successful call.
-   */
+  /** Every vault this account can open, with names decrypted (offline: the cached list). */
   async listVaults(): Promise<VaultInfo[]> {
-    return (await this.loadVaultList()).vaults;
+    return (await this.core.vaults()).map(vaultInfoOf);
   }
 
-  private async loadVaultList(): Promise<{ vaults: VaultInfo[]; dropped: string[] }> {
-    let vaults: Vault[];
-    try {
-      ({ vaults } = await this.auth.listVaults());
-    } catch (e) {
-      const cached = isUnreachable(e) ? await this.cachedVaults() : null;
-      if (!cached) throw e;
-      this._offline = true;
-      return { vaults: cached.map((v) => this.ingest(v).info), dropped: [] };
-    }
-    this._offline = false;
-    const seen = new Set(vaults.map((v) => v.id));
-    const known = new Set([...this.vaults.keys(), ...((await this.cachedVaults()) ?? []).map((v) => v.id)]);
-    const dropped = [...known].filter((id) => !seen.has(id));
-    for (const id of dropped) {
-      for (const k of this.vaults.get(id)?.keys ?? []) wipe(k.key);
-      this.vaults.delete(id);
-    }
-    if (this.opts.offline) {
-      // What this device kept for a vault it can no longer open goes with it
-      for (const id of dropped) await this.forgetVaultData(this.tokens.current?.userId, id);
-      if (this.tokens.current) await this.storage.set(OFFLINE.vaults(this.tokens.current.userId), JSON.stringify(vaults));
-    }
-    return { vaults: vaults.map((v) => this.ingest(v).info), dropped };
-  }
-
-  private async entry(vaultId: string): Promise<VaultEntry> {
-    const known = this.vaults.get(vaultId);
-    if (known) return known;
-    try {
-      const v = await this.auth.getVault(vaultId);
-      await this.cacheVault(v);
-      return this.ingest(v);
-    } catch (e) {
-      const cached = isUnreachable(e) ? (await this.cachedVaults())?.find((v) => v.id === vaultId) : undefined;
-      if (!cached) throw e;
-      this._offline = true;
-      return this.ingest(cached);
-    }
-  }
-
-  /**
-   * Opens a vault: downloads and decrypts it (newest key first). With `offline`, an unreachable server
-   * falls back to the copy this device kept (local edits not yet uploaded, else the server's copy at
-   * the last sync), and the vault's `offline` is true; a vault never synced here fails with
-   * `not_available_offline`.
-   */
+  /** Downloads and opens a vault (offline: the cached copy). */
   async openVault(vaultId: string): Promise<AccountVault> {
-    const e = await this.entry(vaultId);
-    const v = new AccountVault(this, e.info, () => this.vaults.get(vaultId)?.keys ?? e.keys);
-    try {
-      await v.sync();
-    } catch (err) {
-      if (!this.opts.offline || !isUnreachable(err)) throw err;
-      await v.openLocalCopy(err);
-      this._offline = true;
-    }
-    return v;
+    return new AccountVault(await this.core.openVault(vaultId));
   }
 
-  /** Public keys of a principal, verified (sig) before anything is sealed to them. */
-  async verifiedPublicKeys(principal: Principal) {
-    return trustedPublicKeys(await this.auth.publicKey(principal));
+  /** The verified public keys of a user or service account (`invalid_public_keys` if the signature fails). */
+  verifiedPublicKeys(principal: Principal): Promise<PublicKeys> {
+    return this.core.verifiedPublicKeys(principal);
   }
 
-  /** Creates a vault (personal, or in an org with `orgId`; owners/admins are sealed in automatically). */
+  /** Creates a vault (in an org with `orgId`) and uploads it empty. */
   async createVault(name: string, opts: { orgId?: string } = {}): Promise<AccountVault> {
-    const { vault, key } = await this.registerVault(name, opts.orgId);
-    vault.db = createVaultKdbx(name, key);
-    await vault.sync();
-    return vault;
+    return new AccountVault(await this.core.createVault(name, opts.orgId));
   }
 
   /**
-   * "Move to account": copies an open database (local, or synced with a self-hosted server), re-keys
-   * the copy to a fresh vault key, creates the vault (personal, or in an org this account manages,
-   * sealed to every confirmed owner and admin) and uploads it with `If-None-Match: *`. The original
-   * is never changed. As in Qt, the copy's root group takes the vault name (default: the root
-   * group's name) and its sync server remotes are dropped. If the vault was created but the upload
-   * failed, a VaultUploadError carries the vault, whose `sync()` uploads it later.
+   * Imports an open local vault as a new account vault (re-keyed with a fresh vault key). Throws
+   * `VaultUploadError` (holding the new vault) when it was created but the first upload failed.
    */
-  async importVault(source: Kdbx, opts: { name?: string; orgId?: string } = {}): Promise<AccountVault> {
-    this.requireKeyset();
-    const copy = await copyKdbx(source);
-    const root = copy.getDefaultGroup();
-    const name = opts.name?.trim() || root.name?.trim() || "Imported";
-    dropServerRemotes(copy);
-    const { vault, key } = await this.registerVault(name, opts.orgId);
-    try {
-      rekeyToVaultKey(copy, key);
-    } finally {
-      wipe(key);
-    }
-    root.name = name;
-    root.times.update();
-    vault.db = copy;
-    try {
-      await vault.sync();
-    } catch (e) {
-      throw new VaultUploadError(vault, e);
-    }
+  async importVault(source: Vault, opts: { name?: string; orgId?: string } = {}): Promise<AccountVault> {
+    const mode: { kind: "newVault"; name?: string; orgId?: string } = { kind: "newVault" };
+    if (opts.name !== undefined) mode.name = opts.name;
+    if (opts.orgId !== undefined) mode.orgId = opts.orgId;
+    const r: ImportOutcome = await this.core.importVault(source, mode);
+    const vault = new AccountVault(r.vault);
+    if (!r.uploaded) throw new VaultUploadError(vault, r.uploadError);
     return vault;
   }
 
-  /** POST /vaults with key version 1 sealed to this account (and an org's owners/admins); no blob yet. */
-  private async registerVault(name: string, orgId?: string): Promise<{ vault: AccountVault; key: Uint8Array }> {
-    const ks = this.requireKeyset();
-    const id = randomUuid();
-    const key = randomBytes(32);
-    const grants: Grant[] = [{ principal: this.principal, role: "manage", key_version: 1, sealed_key: b64u(sealVaultKey(ks.encPk, id, key)) }];
-    if (orgId) {
-      const { members } = await this.auth.listMembers(orgId);
-      for (const m of members) {
-        const principal = `user:${m.user_id}`;
-        if (principal === this.principal || (m.role !== "owner" && m.role !== "admin") || m.status !== "confirmed" || !m.public) continue;
-        grants.push({ principal, role: "manage", key_version: 1, sealed_key: b64u(sealVaultKey(trustedPublicKeys(m.public).encPk, id, key)) });
-      }
-    }
-    const created = await this.auth.createVault({ id, org_id: orgId ?? null, encrypted_name: encryptVaultName(key, id, name), grants });
-    const listed: Vault = { ...created, keys: created.keys?.length ? created.keys : [{ key_version: 1, sealed_key: grants[0]!.sealed_key }] };
-    await this.cacheVault(listed);
-    const entry = this.ingest(listed);
-    // The new vault is only in the next token's vlt claim
-    await this.tokens.refreshNow();
-    return { vault: new AccountVault(this, entry.info, () => this.vaults.get(id)?.keys ?? entry.keys), key };
+  /** Grants a user (by email or principal) access to a vault; returns their principal and fingerprint. */
+  share(vaultId: string, who: { email?: string; principal?: Principal }, role: VaultRole): Promise<{ principal: Principal; fingerprint: string }> {
+    const grantee = who.principal ? { kind: "principal" as const, principal: who.principal } : { kind: "email" as const, email: who.email ?? "" };
+    return this.core.shareVault(vaultId, grantee, role) as Promise<{ principal: Principal; fingerprint: string }>;
   }
 
-  /** Grants (or changes) access: seals the current vault key to the grantee after checking their keys. */
-  async share(vaultId: string, who: { email?: string; principal?: Principal }, role: VaultRole): Promise<{ principal: Principal; fingerprint: string }> {
-    const e = await this.entry(vaultId);
-    const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
-    if (!current) throw new OpenVireoError("no_vault_key", "this account doesn't hold the current vault key");
-    const pp = who.principal ? await this.auth.publicKey(who.principal) : await this.auth.lookupUser(who.email ?? "");
-    const pub = trustedPublicKeys(pp);
-    await this.auth.grantAccess(vaultId, [{ principal: pp.principal, role, key_version: current.version, sealed_key: b64u(sealVaultKey(pub.encPk, vaultId, current.key)) }]);
-    return { principal: pp.principal, fingerprint: fingerprint(pub) };
+  /** Removes access and rotates the vault key so the removed principals can't read new versions. */
+  revoke(vaultId: string, principals: Principal[]): Promise<SyncReport> {
+    return this.core.revoke(vaultId, principals);
   }
 
-  /** Removes members and rotates the vault key in one step (SPEC §7). */
-  async revoke(vaultId: string, principals: Principal[]): Promise<SyncResult> {
-    return this.rotate(vaultId, { remove: principals });
+  /** Rotates the vault key (optionally removing principals). */
+  rotate(vaultId: string, opts: { remove?: Principal[] } = {}): Promise<SyncReport> {
+    return this.core.rotateVaultKey(vaultId, opts.remove ?? []);
   }
 
-  /**
-   * Rotation (SPEC §7): new key sealed to every remaining member → POST keys (removes `remove` at once)
-   * → download, re-key, conditional PUT (merge/retry on 412) → activate.
-   */
-  async rotate(vaultId: string, opts: { remove?: Principal[] } = {}): Promise<SyncResult> {
-    const e = await this.entry(vaultId);
-    if (ROLE_ORDER[e.info.role] < ROLE_ORDER.manage) throw new OpenVireoError("forbidden", "rotating a vault key needs the manage role", 403);
-    const remove = new Set(opts.remove ?? []);
-    const { access } = await this.auth.listAccess(vaultId);
-    const version = e.info.currentKeyVersion + 1;
-    const key = randomBytes(32);
-    const remaining = new Map<Principal, VaultRole>();
-    for (const a of access) if (!remove.has(a.principal)) remaining.set(a.principal, a.role);
-    remaining.set(this.principal, e.info.role);
-    const grants: Grant[] = [];
-    for (const [principal, role] of remaining) {
-      const pub = principal === this.principal ? this.requireKeyset() : await this.verifiedPublicKeys(principal);
-      grants.push({ principal, role, key_version: version, sealed_key: b64u(sealVaultKey(pub.encPk, vaultId, key)) });
-    }
-    await this.auth.startRotation(vaultId, { key_version: version, grants, remove: [...remove] });
-    e.keys = [{ version, key }, ...e.keys];
-    const vault = new AccountVault(this, e.info, () => e.keys);
-    const result = await vault.sync({ rekeyTo: key });
-    await this.auth.activateKey(vaultId, version);
-    // The name is encrypted under the vault key too
-    await this.auth.renameVault(vaultId, encryptVaultName(key, vaultId, e.info.name));
-    e.info = { ...e.info, currentKeyVersion: version, pendingKeyVersion: null, rotationRequired: false };
-    // The cached vault list must hold the new sealed key, or the re-keyed copy won't open offline
-    if (this.opts.offline) await this.auth.getVault(vaultId).then((v) => this.cacheVault(v), () => undefined);
-    return result;
-  }
+  // -------------------------------------------------------------------------------- share links
 
-  // --------------------------------------------------------------------------- share links (SPEC §22)
-
-  /** Where links point: the discovery `share` URL, else the web app's `/s`. Null when neither is known. */
+  /** Where this server's share links point (`config.share`, else `${config.web}/s`), or null. */
   get shareBase(): string | null {
-    return this.config.share ?? (this.config.web ? `${this.config.web.replace(/\/+$/, "")}/s` : null);
+    return nul(this.core.shareBase());
   }
 
-  /**
-   * Makes a share link for `payload` (see `itemSharePayload` and `textSharePayload` in the share
-   * module). The content is encrypted here with a fresh key that only the link holds.
-   */
+  /** Creates a share link (SPEC.md §22). The key stays in the link's fragment. */
   async createShare(payload: SharePayload, opts: ShareOptions): Promise<CreatedShare> {
-    const ks = this.requireKeyset();
-    const base = this.shareBase;
-    if (!base) throw new OpenVireoError("unsupported", "this server has no share page");
-    let passcodeKey: Uint8Array | undefined;
-    let kdf: ReturnType<typeof newKdfParams> | undefined;
-    let auth: Uint8Array | undefined;
-    if (opts.passcode) {
-      kdf = newKdfParams();
-      passcodeKey = await sharePasscodeKey(opts.passcode, kdf);
-      auth = shareAuth(passcodeKey);
-    }
-    const key = randomBytes(32);
-    try {
-      const share = await this.auth.createShare({
-        vault_id: opts.vaultId ?? null,
-        expires_in: opts.expiresIn,
-        max_opens: opts.maxOpens ?? null,
-        ...(kdf && auth ? { kdf, auth: b64u(auth) } : {}),
-      });
-      const ct = encryptSharePayload(key, share.id, payload, passcodeKey);
-      const ref = encryptShareRef(ks.encSk, share.id, { vault: opts.vaultId ?? null, entry: opts.entryId ?? null, title: payload.title ?? "" });
-      await this.auth.uploadShare(share.id, { ct: b64u(ct), ref });
-      return { id: share.id, url: shareLink(base, share.id, key), expiresAt: share.expires_at };
-    } finally {
-      wipe(key);
-      if (passcodeKey) wipe(passcodeKey);
-      if (auth) wipe(auth);
-    }
+    const o: { expiresIn: number; maxOpens?: number; passcode?: Uint8Array; vaultId?: string; entryId?: string } = { expiresIn: opts.expiresIn };
+    if (opts.maxOpens != null) o.maxOpens = opts.maxOpens;
+    if (opts.passcode) o.passcode = utf8(opts.passcode);
+    if (opts.vaultId) o.vaultId = opts.vaultId;
+    if (opts.entryId) o.entryId = opts.entryId;
+    const r = await this.core.createShare(payloadToCore(payload), o);
+    return { id: r.id, url: fromUtf8(r.url), expiresAt: r.expiresAt };
   }
 
-  /** This account's share links, newest first, with those that ended in the last 30 days. */
-  async listShares(): Promise<ShareListing[]> {
-    const ks = this.requireKeyset();
-    const { shares } = await this.auth.listShares();
-    return shares.map((s) => {
-      let ref: ShareRef | null = null;
-      try {
-        if (s.ref) ref = decryptShareRef(ks.encSk, s.id, s.ref);
-      } catch {
-        ref = null;
-      }
-      return {
-        id: s.id,
-        vaultId: s.vault_id,
-        ref,
-        passcode: s.passcode,
-        maxOpens: s.max_opens,
-        opens: s.opens,
-        openedAt: s.opened_at,
-        createdAt: s.created_at,
-        expiresAt: s.expires_at,
-        status: s.status,
-        endedAt: s.ended_at,
-        endReason: s.end_reason,
-      };
-    });
+  /** This account's share links, newest first, with where each came from when this account can read that. */
+  async listShares(): Promise<ShareListingInfo[]> {
+    return (await this.core.listShares()).map((l: ShareListing) => ({
+      id: l.id,
+      vaultId: l.vaultId ?? null,
+      ref: l.reference ? { vault: l.reference.vault ?? null, entry: l.reference.entry ?? null, title: l.reference.title } : null,
+      passcode: l.passcode,
+      maxOpens: l.maxOpens ?? null,
+      opens: l.opens,
+      openedAt: l.openedAt,
+      createdAt: l.createdAt,
+      expiresAt: l.expiresAt,
+      status: l.status as ShareListingInfo["status"],
+      endedAt: l.endedAt ?? null,
+      endReason: (l.endReason ?? null) as ShareListingInfo["endReason"],
+    }));
   }
 
-  /** Ends a share link at once; its content is deleted from the server. */
-  async revokeShare(id: string): Promise<void> {
-    await this.auth.revokeShare(id);
+  revokeShare(id: string): Promise<void> {
+    return this.core.revokeShare(id);
   }
 
-  // --------------------------------------------------------------------------- service accounts
+  // ---------------------------------------------------------------------- orgs and service accounts
 
-  /**
-   * Creates a service account in an org (owner/admin): generates its keyset and master key in this
-   * client, seals the master key to every owner and admin, grants it the given vaults, and returns the
-   * token to show once.
-   */
+  /** Creates a service account in an org; `token` (shown once) is what CI uses. */
   async createServiceAccount(orgId: string, p: { name: string; vaults?: { id: string; role: VaultRole }[]; expiresAt?: string | null; secretName?: string }) {
-    const saId = randomUuid();
-    const master = randomBytes(32);
-    const saKeys = generateKeyset();
-    try {
-      const { members } = await this.auth.listMembers(orgId);
-      const masterKeys = [];
-      for (const m of members) {
-        if ((m.role !== "owner" && m.role !== "admin") || !m.public) continue;
-        if (m.status !== "confirmed" && `user:${m.user_id}` !== this.principal) continue;
-        const pub = `user:${m.user_id}` === this.principal ? this.requireKeyset() : trustedPublicKeys(m.public);
-        masterKeys.push({ sa_id: saId, principal: `user:${m.user_id}`, sealed_key: b64u(sealSaMaster(pub.encPk, saId, master)) });
-      }
-      if (!masterKeys.some((k) => k.principal === this.principal)) {
-        masterKeys.push({ sa_id: saId, principal: this.principal, sealed_key: b64u(sealSaMaster(this.requireKeyset().encPk, saId, master)) });
-      }
-      const { token, body } = newSaSecret({ url: this.config.issuer, saId, master, secretId: randomUuid(), name: p.secretName, expiresAt: p.expiresAt });
-      const sa = await this.auth.createServiceAccount(orgId, { id: saId, name: p.name, expires_at: p.expiresAt ?? null, keyset: wrapKeyset(master, saKeys), master_keys: masterKeys, secret: body });
-      for (const g of p.vaults ?? []) {
-        const e = await this.entry(g.id);
-        const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
-        if (!current) throw new OpenVireoError("no_vault_key", `no current key for vault ${g.id}`);
-        await this.auth.grantAccess(g.id, [{ principal: `sa:${saId}`, role: g.role, key_version: current.version, sealed_key: b64u(sealVaultKey(saKeys.encPk, g.id, current.key)) }]);
-      }
-      return { serviceAccount: sa, token };
-    } finally {
-      wipe(master);
-      wipeKeyset(saKeys);
-    }
+    const input: { name: string; vaults: { vaultId: string; role: VaultRole }[]; expiresAt?: string; secretName?: string } = { name: p.name, vaults: (p.vaults ?? []).map((v) => ({ vaultId: v.id, role: v.role })) };
+    if (p.expiresAt) input.expiresAt = p.expiresAt;
+    if (p.secretName) input.secretName = p.secretName;
+    const r: CreatedServiceAccount = await this.core.createServiceAccount(orgId, input);
+    return { serviceAccount: r.serviceAccount, token: fromUtf8(r.token) };
   }
 
-  /** Issues another secret for an SA (owner/admin): unseals the master key and builds a token to show once. */
+  /** Issues another secret (token) for a service account. */
   async issueServiceAccountSecret(saId: string, p: { name?: string; expiresAt?: string | null } = {}) {
-    const sa = await this.auth.getServiceAccount(saId);
-    if (!sa.master_key) throw new OpenVireoError("forbidden", "only org owners and admins hold the SA master key", 403);
-    const master = unsealSaMaster(this.requireKeyset().encSk, saId, fromB64u(sa.master_key));
-    try {
-      const { token, body } = newSaSecret({ url: this.config.issuer, saId, master, secretId: randomUuid(), name: p.name, expiresAt: p.expiresAt });
-      await this.auth.issueSaSecret(saId, body);
-      return { token, prefix: body.prefix, id: body.id };
-    } finally {
-      wipe(master);
-    }
+    const r = await this.core.issueServiceAccountSecret(saId, p.name, p.expiresAt ?? undefined);
+    return { id: r.id, prefix: r.prefix, token: fromUtf8(r.token) };
   }
 
-  // --------------------------------------------------------------------------------------- orgs
+  /** Confirms an invited member (checking their keys) and grants vaults. */
+  confirmMember(orgId: string, member: Member, vaults: { id: string; role: VaultRole }[] = []) {
+    return this.core.confirmMember(orgId, member as never, vaults.map((v) => ({ vaultId: v.id, role: v.role })));
+  }
 
-  /**
-   * Confirms an accepted member (owner/admin) after checking their key signature. Owners and admins
-   * get every org vault this account manages, with manage, and the org's SA master keys; a member
-   * gets the vaults in `vaults` only.
-   */
-  async confirmMember(orgId: string, member: Member, vaults: { id: string; role: VaultRole }[] = []): Promise<Member> {
-    if (!member.public) throw new OpenVireoError("invalid_request", "this member has no public keys yet", 400);
-    const pub = trustedPublicKeys(member.public);
-    const principal: Principal = `user:${member.user_id}`;
-    const manager = isManager(member.role);
-    const chosen = manager ? (await this.managedOrgVaults(orgId)).map((v) => ({ id: v.id, role: "manage" as VaultRole })) : vaults;
-    const grants: VaultGrant[] = [];
-    for (const g of chosen) {
-      const e = await this.entry(g.id);
-      if (e.info.orgId !== orgId) throw new OpenVireoError("invalid_request", `vault ${g.id} is not a vault of this org`, 400);
-      const current = e.keys.find((k) => k.version === e.info.currentKeyVersion);
-      if (!current) throw new OpenVireoError("no_vault_key", `no current key for vault ${g.id}`);
-      grants.push({ vault_id: g.id, principal, role: g.role, key_version: current.version, sealed_key: b64u(sealVaultKey(pub.encPk, g.id, current.key)) });
-    }
-    return this.auth.confirmMember(orgId, member.user_id, {
-      grants,
-      sa_master_keys: manager ? await this.sealSaMasterKeys(orgId, principal, pub.encPk) : undefined,
-    });
+  setMemberRole(orgId: string, member: Member, role: OrgRole) {
+    return this.core.setMemberRole(orgId, member as never, role);
+  }
+
+  /** Removes a member and rotates the keys of the vaults they could read. */
+  removeMember(orgId: string, userId: string): Promise<RotationReport> {
+    return this.core.removeMember(orgId, userId);
+  }
+
+  /** The signed-in user's profile (plan, orgs, two-step status). */
+  me(): Promise<Profile> {
+    return this.core.me();
   }
 
   /**
-   * Changes a member's org role. Promoting a confirmed member to owner/admin also hands over the SA
-   * master keys and manage on every org vault this account manages; the server drops their master
-   * keys on a demotion to member.
+   * Server events: vault changes, access changes (the vault list is refetched) and the end of the session.
+   * Returns a handle to close.
    */
-  async setMemberRole(orgId: string, member: Member, role: OrgRole): Promise<Member> {
-    const principal: Principal = `user:${member.user_id}`;
-    const promote = isManager(role) && member.status === "confirmed" && !!member.public;
-    const pub = promote ? trustedPublicKeys(member.public!) : null;
-    const updated = await this.auth.setMemberRole(orgId, member.user_id, {
-      role,
-      sa_master_keys: pub ? await this.sealSaMasterKeys(orgId, principal, pub.encPk) : undefined,
-    });
-    if (pub) for (const v of await this.managedOrgVaults(orgId)) await this.share(v.id, { principal }, "manage");
-    return updated;
-  }
-
-  /**
-   * Removes a member, then rotates every org vault the server flagged (rotation_required) that this
-   * account manages, so the old key opens nothing new. Failed rotations are returned, not thrown.
-   */
-  async removeMember(orgId: string, userId: string): Promise<{ rotated: string[]; failed: { id: string; error: unknown }[] }> {
-    await this.auth.removeMember(orgId, userId);
-    const rotated: string[] = [];
-    const failed: { id: string; error: unknown }[] = [];
-    for (const v of await this.listVaults()) {
-      if (v.orgId !== orgId || !v.rotationRequired || v.role !== "manage") continue;
+  subscribe(handlers: { onVaultChanged?: (e: Extract<AccountEvent, { kind: "vaultChanged" }>) => void; onVaultsChanged?: (vaults: VaultInfo[]) => void; onError?: (e: unknown) => void } = {}): { close(): void } {
+    let closed = false;
+    let stream: { close(): void; next(): Promise<AccountEvent | undefined> } | null = null;
+    void (async () => {
       try {
-        await this.rotate(v.id);
-        rotated.push(v.id);
-      } catch (error) {
-        failed.push({ id: v.id, error });
-      }
-    }
-    return { rotated, failed };
-  }
-
-  private async managedOrgVaults(orgId: string): Promise<VaultInfo[]> {
-    return (await this.listVaults()).filter((v) => v.orgId === orgId && v.role === "manage");
-  }
-
-  /** Seals every SA master key of the org that this account holds to another owner/admin. */
-  private async sealSaMasterKeys(orgId: string, principal: Principal, encPk: Uint8Array): Promise<SaMasterGrant[]> {
-    const { service_accounts } = await this.auth.listServiceAccounts(orgId);
-    const grants: SaMasterGrant[] = [];
-    for (const listed of service_accounts) {
-      const sa = listed.master_key ? listed : await this.auth.getServiceAccount(listed.id);
-      if (!sa.master_key) continue;
-      const master = unsealSaMaster(this.requireKeyset().encSk, sa.id, fromB64u(sa.master_key));
-      try {
-        grants.push({ sa_id: sa.id, principal, sealed_key: b64u(sealSaMaster(encPk, sa.id, master)) });
-      } finally {
-        wipe(master);
-      }
-    }
-    return grants;
-  }
-
-  // ------------------------------------------------------------------------------------- events
-
-  /**
-   * Live updates: `vault` events are passed on; on `access` events the JWT is refreshed (new vlt
-   * claims), the vault list reloaded and the stream reconnected (SPEC §11).
-   */
-  subscribe(handlers: { onVaultChanged?: (e: Extract<SyncEvent, { type: "vault" }>) => void; onVaultsChanged?: (vaults: VaultInfo[]) => void; onError?: (e: unknown) => void } = {}): EventStream {
-    const stream: EventStream = subscribeEvents(this.sync, {
-      onEvent: (ev) => {
-        if (ev.type === "vault") handlers.onVaultChanged?.(ev);
-        else if (ev.type === "access" && (ev.change === "deletion_scheduled" || ev.change === "account_deleted")) {
-          const user = this.tokens.current?.userId;
-          stream.close();
-          if (user) void this.endSession(user, ev.change).catch((e) => handlers.onError?.(e));
-        } else if (ev.type === "access") {
-          void (async () => {
-            try {
-              await this.tokens.refreshNow();
-              const vaults = await this.listVaults();
-              handlers.onVaultsChanged?.(vaults);
-              stream.reconnect();
-            } catch (e) {
-              handlers.onError?.(e);
-            }
-          })();
+        stream = await this.core.subscribe();
+        if (closed) return stream.close();
+        for (;;) {
+          const ev = await stream.next();
+          if (!ev || closed) break;
+          if (ev.kind === "vaultChanged") handlers.onVaultChanged?.(ev);
+          else if (ev.kind === "vaultsChanged") handlers.onVaultsChanged?.(ev.vaults.map(vaultInfoOf));
         }
+      } catch (e) {
+        if (!closed) handlers.onError?.(e);
+      }
+    })();
+    return {
+      close() {
+        closed = true;
+        stream?.close();
       },
-      onStatus: (s, d) => d?.error && handlers.onError?.(d.error),
-    });
-    return stream;
-  }
-
-  /** The user whose cache a vault's state belongs to. */
-  private get stateUser(): string {
-    const user = this.tokens.current?.userId ?? this.cacheUser;
-    if (!user) throw new OpenVireoError("signed_out", "not signed in");
-    return user;
-  }
-
-  /** @internal storage for vault sync state */
-  async loadState(vaultId: string): Promise<SyncState | null> {
-    const raw = (await this.storage.get(OFFLINE.state(this.stateUser, vaultId))) ?? (await this.storage.get(OFFLINE.olderState(vaultId)));
-    return raw ? deserializeSyncState(raw) : null;
-  }
-  /** @internal */
-  async saveState(vaultId: string, state: SyncState): Promise<void> {
-    await this.storage.set(OFFLINE.state(this.stateUser, vaultId), serializeSyncState(state));
-    await this.storage.delete(OFFLINE.olderState(vaultId));
-  }
-
-  // ------------------------------------------------------------------------------ offline cache
-
-  /** @internal whether the offline cache is on */
-  get keepsOfflineData(): boolean {
-    return !!this.opts.offline;
-  }
-
-  /** @internal local edits not yet uploaded: a .kdbx encrypted with the vault key */
-  async loadPending(vaultId: string): Promise<Uint8Array | null> {
-    if (!this.opts.offline) return null;
-    const raw = (await this.storage.get(OFFLINE.pending(this.stateUser, vaultId))) ?? (await this.storage.get(OFFLINE.olderPending(vaultId)));
-    return raw ? fromB64u(raw) : null;
-  }
-  /** @internal */
-  async savePending(vaultId: string, data: Uint8Array): Promise<void> {
-    if (!this.opts.offline) return;
-    await this.storage.set(OFFLINE.pending(this.stateUser, vaultId), b64u(data));
-    await this.storage.delete(OFFLINE.olderPending(vaultId));
-  }
-  /** @internal */
-  async deletePending(vaultId: string): Promise<void> {
-    if (!this.opts.offline) return;
-    await this.storage.delete(OFFLINE.pending(this.stateUser, vaultId));
-    await this.storage.delete(OFFLINE.olderPending(vaultId));
-  }
-
-  private async forgetVaultData(userId: string | undefined, vaultId: string): Promise<void> {
-    if (userId) {
-      await this.storage.delete(OFFLINE.state(userId, vaultId));
-      await this.storage.delete(OFFLINE.pending(userId, vaultId));
-    }
-    await this.storage.delete(OFFLINE.olderState(vaultId));
-    await this.storage.delete(OFFLINE.olderPending(vaultId));
-  }
-
-  private async cacheProfile(userId: string, profile: Profile): Promise<void> {
-    if (this.opts.offline) await this.storage.set(OFFLINE.profile(userId), JSON.stringify({ kdf: profile.kdf, keyset: profile.keyset }));
-  }
-  private async cachedProfile(userId: string): Promise<Profile | null> {
-    if (!this.opts.offline) return null;
-    const raw = await this.storage.get(OFFLINE.profile(userId));
-    return raw ? (JSON.parse(raw) as Profile) : null;
-  }
-  /** Adds or replaces one vault in the cached vault list (after create, rotation or GET /vaults/{id}). */
-  private async cacheVault(v: Vault): Promise<void> {
-    const userId = this.tokens.current?.userId;
-    if (!this.opts.offline || !userId) return;
-    const list = ((await this.cachedVaults()) ?? []).filter((x) => x.id !== v.id);
-    await this.storage.set(OFFLINE.vaults(userId), JSON.stringify([...list, v]));
-  }
-  private async cachedVaults(): Promise<Vault[] | null> {
-    const userId = this.tokens.current?.userId;
-    if (!this.opts.offline || !userId) return null;
-    const raw = await this.storage.get(OFFLINE.vaults(userId));
-    return raw ? (JSON.parse(raw) as Vault[]) : null;
-  }
-
-  /** Drops everything the offline cache holds for a user (on sign-out, or when the session is rejected). */
-  private async clearOfflineData(userId: string, known: string[] = []): Promise<void> {
-    if (!this.opts.offline) return;
-    const raw = await this.storage.get(OFFLINE.vaults(userId));
-    const ids = new Set([...known, ...(raw ? (JSON.parse(raw) as Vault[]) : []).map((v) => v.id)]);
-    for (const id of ids) await this.forgetVaultData(userId, id);
-    await this.storage.delete(OFFLINE.vaults(userId));
-    await this.storage.delete(OFFLINE.profile(userId));
+    };
   }
 }
 
-/** An opened account vault: a kdbxweb database kept in sync with `vaults/<id>`. */
+/**
+ * An open account vault: the core's `Vault` (entries, groups, fields, history, attachments) plus
+ * string conveniences. Edit `vault`, then `sync()`.
+ */
 export class AccountVault {
-  db: Kdbx | null = null;
-  /** true when the last sync couldn't reach the server (or the vault was opened from the offline cache) */
-  offline = false;
-  private state: SyncState | null | undefined = undefined;
-  private hasPending = false;
-
-  constructor(
-    private readonly account: Account,
-    public info: VaultInfo,
-    private readonly keys: () => KeyVersion[],
-  ) {}
+  constructor(readonly vault: Vault) {}
 
   get id(): string {
-    return this.info.id;
+    return this.vault.id();
   }
   get name(): string {
-    return this.info.name;
+    return this.vault.name();
   }
-
-  /** The server ETag at the last sync (compare with a `vault` event's etag), or undefined before one. */
+  get info(): VaultInfo {
+    const i = this.vault.info();
+    if (!i) throw new OpenVireoError("kdbx_error", "not an account vault");
+    return vaultInfoOf(i);
+  }
+  /** The server ETag at the last sync (compare with a `vaultChanged` event's etag). */
   get etag(): string | undefined {
-    return this.state?.etag;
+    return this.vault.etag();
+  }
+  /** true when the last sync couldn't reach the server (or the vault was opened from the offline cache) */
+  get offline(): boolean {
+    return this.vault.isOffline();
+  }
+  get readOnly(): boolean {
+    return this.vault.isReadOnly();
   }
 
   /**
    * Downloads, merges local edits and uploads them (conditional PUT, merge and retry on 412). With
-   * `localChanged: false` it first asks the server with a HEAD and stops there when nothing changed.
+   * `localChanged: false` it first asks the server and stops there when nothing changed.
    */
-  async sync(opts: { rekeyTo?: Uint8Array; localChanged?: boolean } = {}): Promise<SyncResult> {
-    if (this.state === undefined) this.state = await this.account.loadState(this.id);
-    const keys = [...this.keys()].sort((a, b) => b.version - a.version);
-    const credentials = keys.map((k) => vaultCredentials(k.key));
-    const blob = this.account.sync.vault(this.id);
-    let db = this.db ?? (await this.openPending(keys));
-    if (!db) {
-      // Nothing local yet: the server copy becomes the working copy
-      const got = await blob.get().catch((e: unknown) => {
-        if (isUnreachable(e)) this.offline = true;
-        throw e;
-      });
-      if (got.status !== 200) throw new OpenVireoError("not_found", `vault ${this.id} has no data on the sync server`, 404);
-      db = (await openWithKeyVersions(got.data, keys)).db;
-    }
-    this.db = db;
-    let result: SyncResult;
-    try {
-      result = await syncKdbx({
-        blob,
-        db,
-        credentials,
-        state: this.state,
-        localChanged: opts.localChanged,
-        beforeUpload: opts.rekeyTo ? (d) => rekeyToVaultKey(d, opts.rekeyTo!) : undefined,
-      });
-    } catch (e) {
-      if (isUnreachable(e)) {
-        this.offline = true;
-        // Keep local edits on this device (encrypted with the vault key) until an upload succeeds
-        if (this.account.keepsOfflineData && (opts.localChanged !== false || this.hasPending)) {
-          await this.account.savePending(this.id, await saveKdbx(db));
-          this.hasPending = true;
-        }
-      }
-      throw e;
-    }
-    this.offline = false;
-    this.db = result.db;
-    this.state = result.state;
-    await this.account.saveState(this.id, result.state);
-    if (this.hasPending) {
-      await this.account.deletePending(this.id);
-      this.hasPending = false;
-    }
-    return result;
-  }
-
-  /** Local edits kept from an earlier session that couldn't upload them; they merge in on this sync. */
-  private async openPending(keys: KeyVersion[]): Promise<Kdbx | null> {
-    const pending = await this.account.loadPending(this.id);
-    if (!pending) return null;
-    this.hasPending = true;
-    try {
-      return (await openWithKeyVersions(pending, keys)).db;
-    } catch {
-      // Encrypted under a key this account no longer holds (rotated twice meanwhile): nothing to merge
-      return null;
-    }
-  }
-
-  /**
-   * @internal Offline open: local edits not yet uploaded (already loaded by `sync`), else the server's
-   * bytes at the last sync. `cause` is the network error to report when there is neither.
-   */
-  async openLocalCopy(cause: unknown): Promise<void> {
-    this.offline = true;
-    if (this.db) return;
-    const base = this.state?.base;
-    if (!base) {
-      throw new OpenVireoError("not_available_offline", `vault "${this.name || this.id}" was never synced on this device, so it can't be opened offline`, undefined, { cause });
-    }
-    this.db = (await openWithKeyVersions(base, [...this.keys()])).db;
+  sync(opts: { localChanged?: boolean; acceptServerState?: boolean } = {}): Promise<SyncReport> {
+    const o: SyncOptions = { localChanged: opts.localChanged ?? true };
+    if (opts.acceptServerState !== undefined) o.acceptServerState = opts.acceptServerState;
+    return this.vault.sync(o);
   }
 
   read(ref: string | Pick<SecretReference, "groupPath" | "entry" | "field">): string {
-    if (!this.db) throw new OpenVireoError("kdbx_error", "vault not opened");
-    return readField(this.db, typeof ref === "string" ? parseReference(ref) : ref);
+    const r = typeof ref === "string" ? ref : `ov://_/${[...ref.groupPath, ref.entry, ref.field].map(encodeURIComponent).join("/")}`;
+    if (typeof ref === "string") parseReference(ref);
+    return fromUtf8(this.vault.readField(r));
   }
 
-  /** Sets a field and syncs it up. */
-  async write(ref: string | Pick<SecretReference, "groupPath" | "entry" | "field">, value: string, opts: { create?: boolean } = {}): Promise<SyncResult> {
-    if (!this.db) throw new OpenVireoError("kdbx_error", "vault not opened");
-    writeField(this.db, typeof ref === "string" ? parseReference(ref) : ref, value, opts);
-    return this.sync();
-  }
-}
-
-/** The `del` claim of an access token: the erase date of a pending account (SPEC.md §23). */
-function pendingUntil(accessToken: string): string | null {
-  try {
-    const del = decodeJwt(accessToken).claims.del;
-    return typeof del === "string" ? del : null;
-  } catch {
-    return null;
+  /** Sets a field (creating the entry by title with `create`) and syncs it up. */
+  write(ref: string | Pick<SecretReference, "groupPath" | "entry" | "field">, value: string, opts: { create?: boolean } = {}): Promise<SyncReport> {
+    const r = typeof ref === "string" ? ref : `ov://_/${[...ref.groupPath, ref.entry, ref.field].map(encodeURIComponent).join("/")}`;
+    return this.vault.writeField(r, utf8(value), !!opts.create);
   }
 }

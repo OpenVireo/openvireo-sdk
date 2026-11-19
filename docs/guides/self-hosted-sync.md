@@ -36,26 +36,21 @@ declare const server: SelfHostedSync, fileBytes: Uint8Array, password: string;
 ```ts
 import { decryptKdbx, passwordCredentials } from "@openvireo/sdk";
 
-const { dbInstance } = await decryptKdbx(fileBytes, password);
-const result = await server.syncDatabase("personal", {
-  db: dbInstance,
-  credentials: passwordCredentials(password),
-});
-// result.db is the merged copy: save it locally and keep working on it
+const { vault } = await decryptKdbx(fileBytes, password);
+const result = await server.syncDatabase("personal", await vault.saveLocal(), passwordCredentials(password));
+// result.kdbx is the merged file: save it locally and reopen it (result.report says what changed)
 ```
 
 The first sync of a database id uploads it. Later syncs download the server copy, merge it with yours against
 the last common version, and upload the result, retrying on conflicts. The sync state (ETag, revision,
-base copy) is kept in `storage` under the database id; without `storage`, pass it yourself as `state` and
-keep `result.state`.
+base copy) is kept in `storage` (the core's offline cache), so give each device its own storage.
 
 To keep a database openable without keeping its password (for example, sealed for a page reload), keep
 `await passwordHash(password)` instead: the 32-byte password part of the KDBX key.
-`passwordHashCredentials(hash)` works anywhere `passwordCredentials(password)` does.
+`openKdbx(bytes, passwordHashCredentials(hash))` opens the file with it.
 
 If another device changed the database's password, the server copy doesn't open with yours
-(`vault_key_mismatch`): ask for the other password and pass both, newest first, as
-`credentials: [passwordCredentials(newPassword), passwordCredentials(password)]`.
+(`vault_key_mismatch`): ask for the other password and sync with that.
 
 ## Other calls
 
@@ -67,8 +62,8 @@ declare function resync(id: string): void;
 ```ts
 const databases = await server.listDatabases();          // [{ id, revision, etag, size, updatedAt }]
 const { code } = await server.createPairingCode();       // for the next device
-const stream = server.events({ onEvent: (e) => e.type === "database" && resync(e.id) });
+const stream = server.events((e) => e.kind === "databaseChanged" && resync(e.databaseId));
 ```
 
-`server.client` is the underlying `SyncClient`, with every database route (history, delete, conditional
-requests).
+`server.history(id)` and `server.openVersion(id, revision, credentials)` read earlier versions;
+`server.core` is the core's `SelfHosted` handle.

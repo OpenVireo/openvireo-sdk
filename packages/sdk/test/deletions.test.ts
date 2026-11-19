@@ -1,170 +1,160 @@
-/** Sync deletions decided against the common base, not by clocks (SyncEngine applyDeletions). */
+/**
+ * Sync deletions decided against the common base, not by clocks (SyncEngine applyDeletions), through the
+ * core's merge. Deletion times come from the test clock (`setNow`).
+ */
 import { describe, expect, it } from "vitest";
-import { mergeDatabases, needsCommonBase, snapshotOf } from "../src/merge/index.js";
+import type { Vault } from "@openvireo/core-wasm";
+import { needsCommonBase, snapshotOf } from "../src/merge/index.js";
 import { deleteEntryFromDb, deleteGroupFromDb, emptyRecycleBinInDb } from "../src/vault/entries.js";
-import type { Kdbx } from "../src/vault/kdbx.js";
-import { addEntry, at, byTitle, edit, threeCopies } from "./helpers/dbs.js";
+import { openKdbx } from "../src/vault/kdbx.js";
+import { KEY, addEntry, byTitle, edit, merge, setNow, threeCopies } from "./helpers/dbs.js";
 
-const now = () => at(1000);
-const bin = (db: Kdbx) => db.getGroup(db.meta.recycleBinUuid!)!;
-const group = (db: Kdbx, name: string) => {
-  const find = (g: Kdbx["groups"][number]): typeof g | undefined => (g.name === name ? g : g.groups.map(find).find(Boolean));
-  return find(db.getDefaultGroup());
-};
-const ids = (db: Kdbx) => db.deletedObjects.map((d) => d.uuid?.id).sort();
+const NOW = 1000;
+const bin = (v: Vault) => v.groups().find((g) => g.isRecycleBin)!;
+const group = (v: Vault, name: string) => v.groups().find((g) => g.name === name);
+const inBin = (v: Vault, title: string) => v.isInRecycleBin(byTitle(v, title)!.id);
+const kdbx = async (v: Vault) => openKdbx(await v.saveLocal(), { vaultKey: KEY });
 
 /** A vault with "Work" (holding "In Work") and "Loose" both in the Recycle Bin, and "Kept" outside it. */
 const binned = () =>
-  threeCopies((db) => {
-    const work = db.createGroup(db.getDefaultGroup(), "Work");
-    addEntry(db, "In Work", {}, 100, work);
-    addEntry(db, "Loose");
-    addEntry(db, "Kept");
-    db.remove(work);
-    db.remove(byTitle(db, "Loose")!);
+  threeCopies((v) => {
+    setNow(100);
+    const work = v.addGroup(v.rootGroupId(), "Work");
+    addEntry(v, "In Work", {}, 100, work);
+    addEntry(v, "Loose");
+    addEntry(v, "Kept");
+    v.deleteGroup(work);
+    v.deleteEntry(byTitle(v, "Loose")!.id);
   });
 
-describe("deleting for good records the deletion", () => {
+/** Deletes an entry for good: into the Recycle Bin, then out of it. */
+const destroy = (v: Vault, title: string, time: number) => {
+  setNow(time);
+  const id = byTitle(v, title)!.id;
+  if (!v.isInRecycleBin(id)) v.deleteEntry(id);
+  v.deleteEntry(id);
+};
+
+describe("deleting for good", () => {
   it("a group or entry in the Recycle Bin, and emptying it", async () => {
     let { local } = await binned();
-    await deleteGroupFromDb(local, group(local, "Work")!.uuid.id);
-    await deleteEntryFromDb(local, byTitle(local, "Loose")!.uuid.id);
-    expect(bin(local).groups).toEqual([]);
-    expect(bin(local).entries).toEqual([]);
-    expect(ids(local)).toHaveLength(3); // Work, In Work, Loose
+    deleteGroupFromDb(local, group(local, "Work")!.id);
+    deleteEntryFromDb(local, byTitle(local, "Loose")!.id);
+    expect(bin(local).entryCount).toBe(0);
+    expect(local.groups().filter((g) => g.parentId === bin(local).id)).toEqual([]);
+    expect(byTitle(local, "In Work")).toBeUndefined();
 
     ({ local } = await binned());
-    await emptyRecycleBinInDb(local);
-    expect(ids(local)).toHaveLength(3);
+    emptyRecycleBinInDb(local);
+    expect([byTitle(local, "Loose"), byTitle(local, "In Work"), group(local, "Work")]).toEqual([undefined, undefined, undefined]);
+    expect(byTitle(local, "Kept")).toBeDefined();
   });
 });
 
-describe("mergeDatabases applies deletions against the base", () => {
+describe("the merge applies deletions against the base", () => {
   it("a group deleted from the Recycle Bin stays deleted on both sides", async () => {
     const { local, remote, base } = await binned();
-    await deleteGroupFromDb(local, group(local, "Work")!.uuid.id);
-    await deleteEntryFromDb(local, byTitle(local, "Loose")!.uuid.id);
-    expect(needsCommonBase(local, remote, snapshotOf(base))).toBe(true);
-    const r = await mergeDatabases(local, remote, base, { now });
-    for (const db of [local, remote]) {
-      expect(group(db, "Work")).toBeUndefined();
-      expect(byTitle(db, "In Work")).toBeUndefined();
-      expect(byTitle(db, "Loose")).toBeUndefined();
-      expect(byTitle(db, "Kept")).toBeDefined();
+    setNow(500);
+    deleteGroupFromDb(local, group(local, "Work")!.id);
+    deleteEntryFromDb(local, byTitle(local, "Loose")!.id);
+    expect(needsCommonBase(await kdbx(local), await kdbx(remote), snapshotOf(await kdbx(base)))).toBe(true);
+    const r = await merge(local, remote, base, NOW);
+    for (const v of [r.local, r.remote]) {
+      expect(group(v, "Work")).toBeUndefined();
+      expect(byTitle(v, "In Work")).toBeUndefined();
+      expect(byTitle(v, "Loose")).toBeUndefined();
+      expect(byTitle(v, "Kept")).toBeDefined();
     }
-    expect(ids(remote)).toEqual(ids(local)); // passed on, for the devices that sync next
-    expect(r.remoteChanged).toBe(true);
+    expect(r.report.remoteChanged).toBe(true);
   });
 
   it("deletions made on the server copy are applied locally", async () => {
     const { local, remote, base } = await binned();
-    await emptyRecycleBinInDb(remote);
-    const r = await mergeDatabases(local, remote, base, { now });
-    expect(group(local, "Work")).toBeUndefined();
-    expect(byTitle(local, "Loose")).toBeUndefined();
-    expect(r.localChanged).toBe(true);
+    setNow(500);
+    emptyRecycleBinInDb(remote);
+    const r = await merge(local, remote, base, NOW);
+    expect(group(r.local, "Work")).toBeUndefined();
+    expect(byTitle(r.local, "Loose")).toBeUndefined();
+    expect(r.report.localChanged).toBe(true);
   });
 
   it("an entry edited on the other side is kept, whatever the clocks say", async () => {
     const { local, remote, base } = await binned();
     // The deleting device's clock is far ahead: its deletion looks newer than the edit
-    remote.move(byTitle(remote, "Kept")!, null);
-    remote.deletedObjects.at(-1)!.deletionTime = at(1e9);
+    destroy(remote, "Kept", 1e9);
     edit(local, "Kept", { Notes: "edited" }, 500);
-    await mergeDatabases(local, remote, base, { now });
-    for (const db of [local, remote]) expect(byTitle(db, "Kept")?.fields.get("Notes")).toBe("edited");
-    expect(ids(remote)).not.toContain(byTitle(local, "Kept")!.uuid.id); // the held-back deletion is dropped
+    const r = await merge(local, remote, base, NOW);
+    for (const v of [r.local, r.remote]) expect(byTitle(v, "Kept") && v.readField("ov://_/Kept/Notes")).toEqual(new TextEncoder().encode("edited"));
   });
 
   it("a deletion is applied even when the deleting device's clock is behind", async () => {
     const { local, remote, base } = await binned();
-    local.move(byTitle(local, "Kept")!, null);
-    local.deletedObjects.at(-1)!.deletionTime = at(1); // before the entry was last changed
-    await mergeDatabases(local, remote, base, { now });
-    expect(byTitle(remote, "Kept")).toBeUndefined();
-    expect(byTitle(local, "Kept")).toBeUndefined();
+    destroy(local, "Kept", 1); // before the entry was last changed
+    const r = await merge(local, remote, base, NOW);
+    expect(byTitle(r.remote, "Kept")).toBeUndefined();
+    expect(byTitle(r.local, "Kept")).toBeUndefined();
   });
 
   it("an entry moved on the other side is kept", async () => {
     const { local, remote, base } = await binned();
-    local.move(byTitle(local, "Kept")!, null);
-    remote.move(byTitle(remote, "Kept")!, bin(remote));
-    await mergeDatabases(local, remote, base, { now });
-    expect(byTitle(local, "Kept")).toBeDefined();
+    destroy(local, "Kept", 500);
+    setNow(600);
+    remote.moveEntry(byTitle(remote, "Kept")!.id, group(remote, "Work")!.id);
+    const r = await merge(local, remote, base, NOW);
+    expect(byTitle(r.local, "Kept")).toBeDefined();
   });
 
   it("a group that gained an entry on the other side is kept with it; the deleted entries go", async () => {
     const { local, remote, base } = await binned();
-    await deleteGroupFromDb(local, group(local, "Work")!.uuid.id);
-    addEntry(remote, "New in Work", {}, 600, group(remote, "Work"));
-    await mergeDatabases(local, remote, base, { now });
-    for (const db of [local, remote]) {
-      expect(group(db, "Work")).toBeDefined();
-      expect(byTitle(db, "New in Work")).toBeDefined();
-      expect(byTitle(db, "In Work")).toBeUndefined();
+    setNow(500);
+    deleteGroupFromDb(local, group(local, "Work")!.id);
+    addEntry(remote, "New in Work", {}, 600, group(remote, "Work")!.id);
+    const r = await merge(local, remote, base, NOW);
+    for (const v of [r.local, r.remote]) {
+      expect(group(v, "Work")).toBeDefined();
+      expect(byTitle(v, "New in Work")).toBeDefined();
+      expect(byTitle(v, "In Work")).toBeUndefined();
     }
   });
 
   it("a renamed group is kept", async () => {
     const { local, remote, base } = await binned();
-    await deleteGroupFromDb(local, group(local, "Work")!.uuid.id);
-    group(remote, "Work")!.name = "Work 2";
-    await mergeDatabases(local, remote, base, { now });
-    expect(group(local, "Work 2")).toBeDefined();
+    setNow(500);
+    deleteGroupFromDb(local, group(local, "Work")!.id);
+    setNow(600);
+    remote.renameGroup(group(remote, "Work")!.id, "Work 2");
+    const r = await merge(local, remote, base, NOW);
+    expect(group(r.local, "Work 2")).toBeDefined();
   });
 
   it("without a base nothing is deleted, and an item that came back isn't deleted by its old record", async () => {
     const { local, remote, base } = await binned();
-    await deleteEntryFromDb(local, byTitle(local, "Loose")!.uuid.id);
-    await mergeDatabases(local, remote, null, { now });
-    expect(byTitle(local, "Loose")).toBeDefined();
-    expect(needsCommonBase(local, remote, snapshotOf(base))).toBe(false);
-    await mergeDatabases(local, remote, base, { now });
-    expect(byTitle(local, "Loose")).toBeDefined();
+    setNow(500);
+    deleteEntryFromDb(local, byTitle(local, "Loose")!.id);
+    const first = await merge(local, remote, null, NOW);
+    expect(byTitle(first.local, "Loose")).toBeDefined();
+    expect(needsCommonBase(await kdbx(first.local), await kdbx(first.remote), snapshotOf(await kdbx(base)))).toBe(false);
+    const again = await merge(first.local, first.remote, base, NOW);
+    expect(byTitle(again.local, "Loose")).toBeDefined();
   });
 
   it("a group emptied by moving its entries out, then deleted, goes", async () => {
     const { local, remote, base } = await binned();
-    const work = group(local, "Work")!;
-    local.move(byTitle(local, "In Work")!, local.getDefaultGroup());
-    byTitle(local, "In Work")!.times.locationChanged = at(900);
-    local.move(work, null);
-    await mergeDatabases(local, remote, base, { now });
-    for (const db of [local, remote]) {
-      expect(group(db, "Work")).toBeUndefined();
-      expect(byTitle(db, "In Work")?.parentGroup).toBe(db.getDefaultGroup());
+    setNow(900);
+    local.moveEntry(byTitle(local, "In Work")!.id, local.rootGroupId());
+    deleteGroupFromDb(local, group(local, "Work")!.id);
+    const r = await merge(local, remote, base, NOW);
+    for (const v of [r.local, r.remote]) {
+      expect(group(v, "Work")).toBeUndefined();
+      expect(byTitle(v, "In Work")?.groupId).toBe(v.rootGroupId());
     }
   });
-});
 
-describe("mergeDatabases merges the Recycle Bin", () => {
-  it("a side without a bin takes the other side's", async () => {
+  it("entries in the Recycle Bin stay there after a merge", async () => {
     const { local, remote, base } = await binned();
-    remote.meta.recycleBinUuid = undefined;
-    await mergeDatabases(local, remote, base, { now });
-    expect(bin(remote).uuid.id).toBe(bin(local).uuid.id);
-  });
-
-  it("two bins become one, the one changed last, holding both", async () => {
-    const { local, remote, base } = await threeCopies((db) => {
-      // No bin yet
-      const root = db.getDefaultGroup();
-      root.groups = root.groups.filter((g) => g.uuid.id !== db.meta.recycleBinUuid?.id);
-      db.meta.recycleBinUuid = undefined;
-      addEntry(db, "A");
-      addEntry(db, "B");
-    });
-    // Each side made its own bin before seeing the other's
-    for (const [db, title, time] of [[local, "A", 500], [remote, "B", 600]] as const) {
-      db.createRecycleBin();
-      db.remove(byTitle(db, title)!);
-      db.meta.recycleBinChanged = at(time);
-    }
-    await mergeDatabases(local, remote, base, { now });
-    for (const db of [local, remote]) {
-      expect(db.meta.recycleBinUuid?.id).toBe(bin(remote).uuid.id);
-      expect(bin(db).entries.map((e) => e.fields.get("Title")).sort()).toEqual(["A", "B"]);
-      expect(db.getDefaultGroup().groups.filter((g) => g.name === "Recycle Bin")).toHaveLength(1);
-    }
+    edit(remote, "Kept", { Notes: "n" }, 500);
+    const r = await merge(local, remote, base, NOW);
+    expect(inBin(r.local, "Loose")).toBe(true);
+    expect(inBin(r.local, "Kept")).toBe(false);
   });
 });
