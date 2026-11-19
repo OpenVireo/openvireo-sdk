@@ -100,7 +100,7 @@ describe("Account.importVault (Move to account)", () => {
     const org = await alice.core.createOrg("Acme");
     auth.addMember(org.id, "carol@example.com", "admin");
     auth.addMember(org.id, "bob@example.com");
-    for (const m of (await alice.core.orgMembers(org.id)).filter((x) => x.status === "accepted")) await alice.confirmMember(org.id, m as never);
+    for (const m of (await alice.core.orgMembers(org.id)).filter((x) => x.status === "accepted")) await alice.confirmMember(org.id, m);
 
     const vault = await alice.importVault(await localDatabase(), { orgId: org.id });
     expect(vault.name).toBe("Home");

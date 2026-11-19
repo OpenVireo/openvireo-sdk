@@ -268,19 +268,19 @@ describe("Org members", () => {
     expect(pending.status).toBe("accepted");
 
     // a member gets only the vaults picked for them, and no SA master keys
-    const confirmed = await alice.confirmMember(org.id, pending as never, [{ id: infra.id, role: "read" }]);
+    const confirmed = await alice.confirmMember(org.id, pending, [{ id: infra.id, role: "read" }]);
     expect(confirmed.status).toBe("confirmed");
     expect((await bob.listVaults()).map((v) => [v.name, v.role])).toEqual([["Infra", "read"]]);
     expect((await bob.openVault(infra.id)).read("ov://Infra/GitHub/password")).toBe("s3cret");
     await expect(bob.issueServiceAccountSecret(serviceAccount.id)).rejects.toMatchObject({ code: "forbidden" });
 
     // promotion: manage on every org vault, and the SA master key
-    await alice.setMemberRole(org.id, confirmed as never, "admin");
+    await alice.setMemberRole(org.id, confirmed, "admin");
     expect((await bob.listVaults()).map((v) => [v.name, v.role]).sort()).toEqual([["Infra", "manage"], ["Payroll", "manage"]]);
     expect((await bob.issueServiceAccountSecret(serviceAccount.id)).token).toMatch(/^ov_sa_/);
 
     // removal: access goes at once, and both vault keys rotate
-    const { rotated, failed } = await alice.removeMember(org.id, confirmed.userId);
+    const { rotated, failed } = await alice.removeMember(org.id, confirmed.user_id);
     expect([rotated.sort(), failed]).toEqual([[infra.id, payroll.id].sort(), []]);
     expect(await bob.listVaults()).toEqual([]);
     expect(auth.vaults.get(infra.id)!.current).toBe(2);
@@ -298,7 +298,7 @@ describe("Org members", () => {
     await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
     auth.addMember(org.id, "bob@example.com");
     const m = (await alice.core.orgMembers(org.id)).find((x) => x.email === "bob@example.com")!;
-    expect((await alice.confirmMember(org.id, { ...m, publicKeys: undefined } as never)).status).toBe("confirmed");
+    expect((await alice.confirmMember(org.id, { ...m, publicKeys: undefined })).status).toBe("confirmed");
   });
 
   it("refuses a vault from another org", async () => {
@@ -311,7 +311,7 @@ describe("Org members", () => {
     await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
     auth.addMember(org.id, "bob@example.com");
     const m = (await alice.core.orgMembers(org.id)).find((x) => x.email === "bob@example.com")!;
-    await expect(alice.confirmMember(org.id, m as never, [{ id: personal.id, role: "read" }])).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(alice.confirmMember(org.id, m, [{ id: personal.id, role: "read" }])).rejects.toMatchObject({ code: "invalid_request" });
   });
 });
 

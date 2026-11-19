@@ -13,6 +13,7 @@ import type {
   ImportOutcome,
   KdfOverrides,
   LoginStep,
+  Member as CoreMember,
   OvClient,
   Plan as CorePlan,
   Profile,
@@ -219,6 +220,22 @@ export function planOf(p: CorePlan | undefined): Plan | undefined {
     const b = p.billing;
     out.billing = { source: b.source, interval: b.interval, status: b.status, renews_at: b.renewsAt ?? null, ends_at: b.endsAt ?? null, manage: b.manage as Plan["billing"] extends infer B ? (B extends { manage: infer M } ? M : never) : never };
   }
+  return out;
+}
+
+/** A member as the core takes it (the core fetches and verifies the keys itself). */
+function coreMember(m: Member | CoreMember): CoreMember {
+  if ("userId" in m) return m;
+  const out: CoreMember = { userId: m.user_id, email: m.email, role: m.role, status: m.status };
+  if (m.name) out.name = m.name;
+  return out;
+}
+
+/** A core member in the server's (snake_case) shape, as `account.auth.listMembers` gives it. */
+function memberJson(m: CoreMember): Member {
+  const out: Member = { user_id: m.userId, email: m.email, role: m.role, status: m.status };
+  if (m.name !== undefined) out.name = m.name;
+  if (m.publicKeys) out.public = { enc_pk: b64u(m.publicKeys.encPk), sign_pk: b64u(m.publicKeys.signPk), sig: b64u(m.publicKeys.sig) };
   return out;
 }
 
@@ -656,18 +673,23 @@ export class Account {
     return { id: r.id, prefix: r.prefix, token: fromUtf8(r.token) };
   }
 
-  /** Confirms an invited member (checking their keys) and grants vaults. */
-  confirmMember(orgId: string, member: Member, vaults: { id: string; role: VaultRole }[] = []) {
-    return this.core.confirmMember(orgId, member as never, vaults.map((v) => ({ vaultId: v.id, role: v.role })));
+  /**
+   * Confirms an accepted member (SPEC §12) and grants vaults. The core fetches and verifies the member's
+   * keys. Takes a member from `account.auth.listMembers` (snake_case) or `account.core.orgMembers`.
+   */
+  async confirmMember(orgId: string, member: Member | CoreMember, vaults: { id: string; role: VaultRole }[] = []): Promise<Member> {
+    return memberJson(await this.core.confirmMember(orgId, coreMember(member), vaults.map((v) => ({ vaultId: v.id, role: v.role }))));
   }
 
-  setMemberRole(orgId: string, member: Member, role: OrgRole) {
-    return this.core.setMemberRole(orgId, member as never, role);
+  /** Changes an org role; promotion to owner/admin includes the SA master keys and manage on every org vault. */
+  async setMemberRole(orgId: string, member: Member | CoreMember, role: OrgRole): Promise<Member> {
+    return memberJson(await this.core.setMemberRole(orgId, coreMember(member), role));
   }
 
   /** Removes a member and rotates the keys of the vaults they could read. */
-  removeMember(orgId: string, userId: string): Promise<RotationReport> {
-    return this.core.removeMember(orgId, userId);
+  async removeMember(orgId: string, userId: string): Promise<{ rotated: string[]; failed: { id: string; error: unknown }[] }> {
+    const r: RotationReport = await this.core.removeMember(orgId, userId);
+    return { rotated: r.rotated, failed: r.failed.map((f) => ({ id: f.vaultId, error: f.error })) };
   }
 
   /** The signed-in user's profile (plan, orgs, two-step status). */
