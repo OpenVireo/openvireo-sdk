@@ -1,6 +1,6 @@
 /**
  * Open, create and save .kdbx files with kdbxweb (2.1.1, same as openvireo-web), with Argon2 from
- * crypto/argon2 (hash-wasm by default). Account vaults use the vault key as a raw 32-byte key file
+ * crypto/argon2 (the shared Rust core's by default). Account vaults use the vault key as a raw 32-byte key file
  * component with no password (SPEC §7).
  */
 import * as kdbxweb from "kdbxweb";

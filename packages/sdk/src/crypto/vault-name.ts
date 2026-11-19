@@ -1,24 +1,12 @@
-/** SPEC §4: encrypted vault names. */
-import { b64u, fromB64u, fromUtf8, utf8, wipe } from "../util/bytes.js";
-import { AAD, unwrap, wrap } from "./envelope.js";
-import { hkdf } from "./primitives.js";
+/** SPEC §4: encrypted vault names, on the shared Rust core (ov-crypto). */
+import { call } from "../core/full.js";
 
-export const vaultNameKey = (vaultKey: Uint8Array): Uint8Array => hkdf(vaultKey, new Uint8Array(0), "ov-vault-name-v1", 32);
+export const vaultNameKey = (vaultKey: Uint8Array): Uint8Array => call((c) => c.vaultNameKey(vaultKey));
 
 export function encryptVaultName(vaultKey: Uint8Array, vaultId: string, name: string, nonce?: Uint8Array): string {
-  const k = vaultNameKey(vaultKey);
-  try {
-    return b64u(wrap(k, utf8(name), AAD.vaultName(vaultId), nonce));
-  } finally {
-    wipe(k);
-  }
+  return call((c) => c.encryptVaultName(vaultKey, vaultId, name, nonce));
 }
 
 export function decryptVaultName(vaultKey: Uint8Array, vaultId: string, encryptedName: string): string {
-  const k = vaultNameKey(vaultKey);
-  try {
-    return fromUtf8(unwrap(k, fromB64u(encryptedName), AAD.vaultName(vaultId)));
-  } finally {
-    wipe(k);
-  }
+  return call((c) => c.decryptVaultName(vaultKey, vaultId, encryptedName));
 }

@@ -20,6 +20,5 @@ export default defineConfig({
   clean: true,
   splitting: true,
   treeshake: true,
-  // The OPAQUE WASM module stays a separate file next to dist/ (see vendor/opaque/SOURCE.md)
-  external: ["@openvireo/sdk/vendor/opaque-wasm.js", "node:fs/promises", "node:path", "node:os"],
+  external: ["node:fs/promises", "node:path", "node:os"],
 });

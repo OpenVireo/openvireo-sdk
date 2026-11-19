@@ -1,14 +1,13 @@
 /**
- * OPAQUE (SPEC §8, RFC 9807) over opaque-ke: the shared Rust core's ov-opaque crate, compiled to WASM
- * (see vendor/opaque/SOURCE.md).
- * The module (~160 KB as base64) is loaded lazily on first use, through the package's own
- * "./vendor/opaque-wasm.js" export so the path works from src/, dist/, bundlers and Bun.
+ * OPAQUE (SPEC §8, RFC 9807) over opaque-ke: the shared Rust core's ov-opaque crate, in the core's
+ * full module.
  *
  * @module @openvireo/sdk/opaque
  */
+import { call, ready } from "../core/full.js";
 import { OpenVireoError } from "../errors.js";
 import { passwordBytes } from "../crypto/auk.js";
-import { exactBuffer, fromB64u, randomBytes, utf8, wipe } from "../util/bytes.js";
+import { wipe } from "../util/bytes.js";
 
 export const OPAQUE_CONTEXT = "ov-opaque-v1";
 
@@ -21,95 +20,17 @@ export interface OpaqueIds {
 
 /** idU = lowercased, trimmed email; idS = the issuer host (from discovery `opaque.ids`, or the issuer URL's host). */
 export function opaqueIds(email: string, issuerOrHost: string): OpaqueIds {
-  let idS = issuerOrHost.trim();
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(idS)) idS = new URL(idS).host;
-  return { idU: email.trim().toLowerCase(), idS };
+  return call((c) => c.opaqueIds(email, issuerOrHost));
 }
 
-/* The module's exports (openvireo-core crates/ov-opaque/src/legacy.rs). */
-interface OpaqueWasm {
-  memory: WebAssembly.Memory;
-  ov_alloc(len: number): number;
-  ov_free(ptr: number, len: number): void;
-  ov_call(op: number, ptr: number, len: number): number;
-  ov_out_ptr(): number;
-  ov_out_len(): number;
-  ov_out_clear(): void;
-}
-
-const enum Op {
-  RegStart = 1,
-  RegFinish = 2,
-  LoginStart = 3,
-  LoginFinish = 4,
-  SrvRegStart = 10,
-  SrvStore = 11,
-  SrvLoginStart = 12,
-  SrvLoginFinish = 13,
-}
-
-let loading: Promise<OpaqueWasm> | null = null;
-
-/** Loads the WASM module once. Safe to call repeatedly. */
-export function loadOpaque(): Promise<OpaqueWasm> {
-  loading ??= (async () => {
-    const mod = (await import("@openvireo/sdk/vendor/opaque-wasm.js")) as { default: string };
-    const instance = await WebAssembly.instantiate(await WebAssembly.compile(exactBuffer(fromB64u(mod.default))), {});
-    return instance.exports as unknown as OpaqueWasm;
-  })().catch((e) => {
-    loading = null;
-    throw new OpenVireoError("opaque_failed", "could not load the OPAQUE module", undefined, { cause: e });
-  });
-  return loading;
-}
-
-/** Fields are `u32 LE length ‖ bytes`, in and out. */
-function pack(fields: Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(fields.reduce((n, f) => n + 4 + f.length, 0));
-  const dv = new DataView(out.buffer);
-  let i = 0;
-  for (const f of fields) {
-    dv.setUint32(i, f.length, true);
-    out.set(f, i + 4);
-    i += 4 + f.length;
-  }
-  return out;
-}
-
-function unpack(b: Uint8Array): Uint8Array[] {
-  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
-  const out: Uint8Array[] = [];
-  for (let i = 0; i < b.length; ) {
-    const n = dv.getUint32(i, true);
-    out.push(b.slice(i + 4, i + 4 + n));
-    i += 4 + n;
-  }
-  return out;
-}
-
-/**
- * Runs one operation. Returns the output fields, or null when authentication failed (wrong password,
- * or a fake record for an unknown email). Inputs and outputs are wiped from the module's memory.
- */
-async function call(op: Op, fields: Uint8Array[], what: string): Promise<Uint8Array[] | null> {
-  const m = await loadOpaque();
-  const input = pack(fields);
-  const ptr = m.ov_alloc(input.length);
+/** Loads the core (the full module) asynchronously, so the OPAQUE calls that follow don't compile it on the spot. */
+export async function loadOpaque(): Promise<void> {
   try {
-    new Uint8Array(m.memory.buffer, ptr, input.length).set(input);
-    const status = m.ov_call(op, ptr, input.length);
-    if (status === 1) return null;
-    if (status !== 0) throw new OpenVireoError("opaque_failed", `${what} failed`);
-    return unpack(new Uint8Array(m.memory.buffer, m.ov_out_ptr(), m.ov_out_len()));
-  } finally {
-    wipe(input);
-    m.ov_free(ptr, input.length); // zeroes the input
-    m.ov_out_clear(); // zeroes the output
+    await ready();
+  } catch (e) {
+    throw new OpenVireoError("opaque_failed", "could not load the OPAQUE module", undefined, { cause: e });
   }
 }
-
-const seed = () => randomBytes(32);
-const idFields = (ids: OpaqueIds) => [utf8(ids.idU), utf8(ids.idS)];
 
 function checkPassword(pw: Uint8Array): void {
   if (pw.length === 0 || pw.length > 0xffff) throw new OpenVireoError("opaque_failed", "password must be 1..65535 UTF-8 bytes");
@@ -133,8 +54,8 @@ export async function startRegistration(password: string): Promise<RegistrationS
   const pw = passwordBytes(password);
   try {
     checkPassword(pw);
-    const [request, sec] = (await call(Op.RegStart, [seed(), pw], "registration request"))!;
-    return { request: request!, state: new OpaqueClientState(sec!) };
+    const r = call((c) => c.opaqueStartRegistration(pw));
+    return { request: r.request, state: new OpaqueClientState(r.state) };
   } finally {
     wipe(pw);
   }
@@ -143,9 +64,8 @@ export async function startRegistration(password: string): Promise<RegistrationS
 /** Returns the `record` for /auth/register/finish. `exportKey` is not used in v1 (SPEC §8). */
 export async function finishRegistration(state: OpaqueClientState, response: Uint8Array, ids: OpaqueIds) {
   try {
-    const r = await call(Op.RegFinish, [seed(), state.sec, response, ...idFields(ids)], "finishing the registration");
-    if (!r) throw new OpenVireoError("opaque_failed", "finishing the registration failed");
-    return { record: r[0]!, exportKey: r[1]! };
+    const r = call((c) => c.opaqueFinishRegistration(state.sec, response, ids));
+    return { record: r.record, exportKey: r.exportKey };
   } finally {
     state.dispose();
   }
@@ -161,8 +81,8 @@ export async function startLogin(password: string): Promise<LoginStart> {
   const pw = passwordBytes(password);
   try {
     checkPassword(pw);
-    const [ke1, sec] = (await call(Op.LoginStart, [seed(), pw], "credential request"))!;
-    return { ke1: ke1!, state: new OpaqueClientState(sec!) };
+    const r = call((c) => c.opaqueStartLogin(pw));
+    return { ke1: r.ke1, state: new OpaqueClientState(r.state) };
   } finally {
     wipe(pw);
   }
@@ -174,34 +94,33 @@ export async function startLogin(password: string): Promise<LoginStart> {
  */
 export async function finishLogin(state: OpaqueClientState, ke2: Uint8Array, ids: OpaqueIds, context = OPAQUE_CONTEXT) {
   try {
-    const r = await call(Op.LoginFinish, [seed(), state.sec, ke2, utf8(context), ...idFields(ids)], "recovering the credentials");
-    if (!r) throw new OpenVireoError("opaque_failed", "wrong password");
-    return { authU: r[0]!, sessionKey: r[1]!, exportKey: r[2]! };
+    const r = call((c) => c.opaqueFinishLogin(state.sec, ke2, ids, context));
+    return { authU: r.authU, sessionKey: r.sessionKey, exportKey: r.exportKey };
   } finally {
     state.dispose();
   }
 }
 
 /**
- * Server-side functions of the same module (opaque-ke's server, one ServerSetup per user), for tests and
- * local mock servers only. The real server is libopaque's C core through its Python binding (Flask).
+ * Server-side functions (opaque-ke's server, one ServerSetup per user), for tests and local mock servers
+ * only. The real server is libopaque's C core through its Python binding (Flask).
  */
 export const opaqueServerForTests = {
   async registrationResponse(request: Uint8Array) {
-    const [sec, response] = (await call(Op.SrvRegStart, [seed(), request], "registration response"))!;
-    return { sec: sec!, response: response! };
+    const r = call((c) => c.opaqueServerRegistrationResponse(request));
+    return { sec: r.sec, response: r.response };
   },
   async storeRecord(sec: Uint8Array, record: Uint8Array) {
-    return (await call(Op.SrvStore, [sec, record], "storing the record"))![0]!;
+    return call((c) => c.opaqueServerStoreRecord(sec, record));
   },
   async credentialResponse(ke1: Uint8Array, storedRecord: Uint8Array, ids: OpaqueIds, context = OPAQUE_CONTEXT) {
-    const [ke2, sec] = (await call(Op.SrvLoginStart, [seed(), ke1, storedRecord, utf8(context), ...idFields(ids)], "credential response"))!;
-    return { ke2: ke2!, sec: sec! };
+    const r = call((c) => c.opaqueServerCredentialResponse(ke1, storedRecord, ids, context));
+    return { ke2: r.ke2, sec: r.sec };
   },
   /** Checks the client's `authU`; returns the server's session key, or null when it is wrong. */
   async userAuth(sec: Uint8Array, authU: Uint8Array): Promise<Uint8Array | null> {
     try {
-      return (await call(Op.SrvLoginFinish, [sec, authU], "user auth"))?.[0] ?? null;
+      return call((c) => c.opaqueServerUserAuth(sec, authU)) ?? null;
     } catch {
       return null;
     }

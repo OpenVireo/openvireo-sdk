@@ -3,7 +3,6 @@
  * codes and KeePass TOTP fields run on the shared Rust core (ov-share).
  */
 import { callLite as call } from "../core/lite.js";
-import { OpenVireoError } from "../errors.js";
 import { fromUtf8, utf8 } from "../util/bytes.js";
 
 export interface TotpParams {
@@ -15,24 +14,9 @@ export interface TotpParams {
   steam?: boolean;
 }
 
-const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-
+/** RFC 4648 base32 (case-insensitive; spaces, `=` and `-` ignored); `invalid_totp` otherwise. */
 export function base32Decode(text: string): Uint8Array {
-  const clean = text.toUpperCase().replace(/[\s=-]/g, "");
-  const out: number[] = [];
-  let bits = 0;
-  let value = 0;
-  for (const c of clean) {
-    const i = BASE32.indexOf(c);
-    if (i < 0) throw new OpenVireoError("invalid_totp", "the TOTP secret isn't base32");
-    value = (value << 5) | i;
-    bits += 5;
-    if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-  }
-  return new Uint8Array(out);
+  return call((c) => c.base32Decode(text));
 }
 
 /** Reads an `otpauth://totp/…?secret=…` URI. */

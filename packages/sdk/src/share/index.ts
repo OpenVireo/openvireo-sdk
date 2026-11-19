@@ -6,10 +6,11 @@
  * @module @openvireo/sdk/share
  */
 import type { KdfParams } from "../crypto/auk.js";
-import { b64u, fromUtf8, utf8 } from "../util/bytes.js";
-import { parseShareLink, type ShareField, type SharePayload } from "../crypto/share.js";
-import { call, coreClient, fromCore, type CoreSharePayload } from "../core/full.js";
-import { requireSecureUrl, type HttpOptions } from "../http/request.js";
+import { fromUtf8, utf8 } from "../util/bytes.js";
+import type { ShareField, SharePayload } from "../crypto/share.js";
+import { payloadFromCore } from "../crypto/share-convert.js";
+import { callLite as call, fromCore, lite } from "../core/lite.js";
+import { joinUrl, requireSecureUrl, sendJson, seg, type HttpOptions } from "../http/request.js";
 import type { Item } from "../vault/items.js";
 
 export * from "../crypto/share.js";
@@ -35,12 +36,8 @@ export interface OpenedShare {
  */
 export async function getShareInfo(api: string, id: string, http: HttpOptions = {}): Promise<ShareInfo> {
   requireSecureUrl(api, "api");
-  try {
-    const r = await coreClient(http).shareInfo(api, id);
-    return { expiresAt: r.expiresAt, opensLeft: r.opensLeft ?? null, kdf: (r.kdf as KdfParams | undefined) ?? null };
-  } catch (e) {
-    throw fromCore(e);
-  }
+  const r = await sendJson<{ expires_at: string; opens_left: number | null; kdf: KdfParams | null }>(http, joinUrl(api, `public/shares/${seg(id)}`));
+  return { expiresAt: r.expires_at, opensLeft: r.opens_left, kdf: r.kdf };
 }
 
 /**
@@ -54,25 +51,29 @@ export async function openShare(
   opts: { passcode?: string; info?: ShareInfo; http?: HttpOptions } = {},
 ): Promise<OpenedShare> {
   requireSecureUrl(api, "api");
-  if (typeof link === "string") parseShareLink(link); // same errors as before for a malformed link
-  const url = typeof link === "string" ? link : `https://share.invalid/${link.id}#${b64u(link.key)}`;
-  const info = opts.info && { expiresAt: opts.info.expiresAt, ...(opts.info.opensLeft !== null ? { opensLeft: opts.info.opensLeft } : {}), ...(opts.info.kdf ? { kdf: opts.info.kdf } : {}) };
+  const url = typeof link === "string" ? link : fromUtf8(call((c) => c.shareLink("https://share.invalid", link.id, link.key)));
+  const id = call((c) => c.parseShareLink(url)).id;
+  const info = opts.info ?? (await getShareInfo(api, id, opts.http));
+  let open;
   try {
-    const r = await coreClient(opts.http ?? {}).openShare(api, utf8(url), opts.passcode ? utf8(opts.passcode) : undefined, info);
-    return { payload: payloadFromCore(r.payload), opensLeft: r.opensLeft ?? null };
+    open = new (lite().ShareOpen)(url, info.kdf ?? undefined, opts.passcode || undefined);
   } catch (e) {
     throw fromCore(e);
   }
-}
-
-function payloadFromCore(p: CoreSharePayload): SharePayload {
-  return {
-    v: p.v as 1,
-    kind: p.kind as SharePayload["kind"],
-    ...(p.title !== undefined ? { title: p.title } : {}),
-    ...(p.sharedBy !== undefined ? { shared_by: p.sharedBy } : {}),
-    fields: p.fields.map((f) => field(f.k, f.label, f.value, f.protected)),
-  };
+  try {
+    const body = JSON.parse(fromUtf8(open.requestBody())) as Record<string, unknown>;
+    const r = await sendJson<{ ct: string; opens_left: number | null }>(opts.http ?? {}, joinUrl(api, `public/shares/${seg(id)}/open`), {
+      method: "POST",
+      json: body,
+    });
+    try {
+      return { payload: payloadFromCore(open.decrypt(r.ct)), opensLeft: r.opens_left };
+    } catch (e) {
+      throw fromCore(e);
+    }
+  } finally {
+    open.free();
+  }
 }
 
 const field = (k: string, label: string, value: Uint8Array, prot: boolean): ShareField => ({ k, label, value: fromUtf8(value), ...(prot ? { protected: true } : {}) });
@@ -80,28 +81,13 @@ const field = (k: string, label: string, value: Uint8Array, prot: boolean): Shar
 /** Fields an item shares by default; the rest are opt-in. */
 export const DEFAULT_SHARE_FIELDS = ["UserName", "Password", "URL"] as const;
 
-/** The item as the core's entry record: only its fields matter here, with Title set to the item's title. */
-function entryRecord(item: Item) {
+/** The item's fields as the core's field records, with Title set to the item's title. */
+function fieldRecords(item: Item) {
   const fields = Object.entries(item.fields)
     .filter(([name]) => name !== "Title")
     .map(([name, value]) => ({ name, value: utf8(value), protected: item.protected.includes(name) }));
   fields.unshift({ name: "Title", value: utf8(item.title), protected: false });
-  return {
-    id: item.id,
-    groupId: "",
-    groupPath: item.group,
-    fields,
-    tags: item.tags,
-    iconId: 0,
-    foregroundColor: "",
-    backgroundColor: "",
-    overrideUrl: "",
-    createdAt: 0,
-    modifiedAt: 0,
-    attachments: [],
-    historyCount: 0,
-    qualityCheck: true,
-  };
+  return fields;
 }
 
 /**
@@ -110,12 +96,12 @@ function entryRecord(item: Item) {
  * read with `reveal` so protected values are present.
  */
 export function shareableFields(item: Item): { name: string; field: ShareField }[] {
-  return call((c) => c.shareableFields(entryRecord(item))).map((f) => ({ name: f.name, field: field(f.kind, f.label, f.value, f.protected) }));
+  return call((c) => c.shareableFields(fieldRecords(item))).map((f) => ({ name: f.name, field: field(f.kind, f.label, f.value, f.protected) }));
 }
 
 /** A payload for the chosen fields of an item (names as in `shareableFields`). */
 export function itemSharePayload(item: Item, names: readonly string[], sharedBy?: string): SharePayload {
-  return payloadFromCore(call((c) => c.itemSharePayload(entryRecord(item), [...names], sharedBy)));
+  return payloadFromCore(call((c) => c.itemSharePayload(fieldRecords(item), [...names], sharedBy)));
 }
 
 /** A payload for some text. */
