@@ -56,7 +56,7 @@ The lower-level file handle is `Kdbx` (`openKdbx`, `createVaultKdbx`, `openWithK
 ## Argon2
 
 Argon2 (all three types, any output length) runs on the core's lite module. At m = 64 MiB, t = 3 it takes
-about 110 ms (Node 24, M-series Mac), the same as hash-wasm did. `setArgon2Impl(fn)` replaces it for the AUK
+about 110 ms (Node 24, M-series Mac), as fast as the hash-wasm build 0.x used. `setArgon2Impl(fn)` replaces it for the AUK
 (for example with a native binding in Node); `coreArgon2` is the default.
 
 ## The core modules

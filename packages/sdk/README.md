@@ -47,19 +47,21 @@ The protocol is specified in OpenVireo's
 |---|---|
 | `@openvireo/sdk` | everything below, plus `Account`, `ServiceAccount`, `SelfHostedSync` |
 | `@openvireo/sdk/crypto` | Secret Key, AUK (Argon2id), wrap/seal, keysets, fingerprints, vault names, SA/refresh tokens, JWT verify |
-| `@openvireo/sdk/opaque` | OPAQUE client (opaque-ke compiled to WASM, lazy-loaded) |
+| `@openvireo/sdk/opaque` | OPAQUE client and test-server steps (opaque-ke, in the core) |
 | `@openvireo/sdk/auth` | `AuthClient` (all of `openapi.yaml`), discovery, `TokenManager`, storage adapters |
 | `@openvireo/sdk/storage/node` | `FileStorage` (0600 JSON file) for the CLI and connect |
-| `@openvireo/sdk/sync` | `SyncClient` (vault + legacy routes), `syncKdbx` merge/retry loop, SSE `subscribeEvents` |
-| `@openvireo/sdk/vault` | kdbxweb open/save, vault-key credentials, rotation helpers, entry helpers, `ov://` references |
-| `@openvireo/sdk/merge` | the sync merge, matching the Qt client |
+| `@openvireo/sdk/sync` | `SyncClient` (vault + legacy routes), SSE `subscribeEvents`, sync results and the clock-skew check |
+| `@openvireo/sdk/vault` | the core's `Vault` and `Kdbx` handles: local vaults, credentials, rotation helpers, entry helpers, `ov://` references |
+| `@openvireo/sdk/merge` | the sync merge (on `Kdbx` handles or bytes) and `.kdbx` import, matching the Qt client |
 | `@openvireo/sdk/testing` | in-memory auth and sync servers (`FakeAuthServer`, `FakeSyncServer`) for app tests; not for production |
 
-## OPAQUE module
+## The shared Rust core
 
-OPAQUE runs in a small WASM module (~118 KB, no imports) built from `opaque-wasm/` with opaque-ke 4.0.1.
-Rebuild it with `opaque-wasm/build.sh` (needs Rust; the toolchain is pinned) and see `vendor/opaque/SOURCE.md`
-for the checksums.
+Since 1.0 the SDK is a TypeScript layer over `@openvireo/core-wasm`, openvireo-core compiled to WebAssembly:
+crypto, OPAQUE, sessions, the keyring, sync, KDBX and merge run in the same code as the iOS and desktop apps.
+`@openvireo/sdk/share` loads only the core's lite module (about 190 KB gzip); the rest loads the full module
+(about 880 KB gzip) the first time it's used. Until `@openvireo/core-wasm` is published, it's vendored under
+`vendor/core-wasm` (see its `SOURCE.md`). Upgrading from 0.x: [docs/migrating-to-1.0.md](../../docs/migrating-to-1.0.md).
 
 ## Development
 

@@ -89,7 +89,7 @@ Purchase routes the iOS app uses:
 | `vault_key_mismatch` | | None of the keys or passwords opens the server copy | Self-hosted: ask for the database's new password. Accounts: the keys are out of date; reload the vault list |
 | `no_vault_key` | | The account holds no usable key for this vault | Reload the vault list; ask a manager to share it again |
 | `too_many_conflicts` | 412 | The vault kept changing during the sync, five times in a row. Local changes are kept | Sync again |
-| `server_rolled_back` | | The server returned an older copy than this device already synced: restored from a backup, or tampered with | Ask the user; `syncKdbx` with `acceptServerState: true` merges anyway |
+| `server_rolled_back` | | The server returned an older copy than this device already synced: restored from a backup, or tampered with | Ask the user; `vault.sync({ acceptServerState: true })` merges anyway |
 | `server_lost_database` | | The server no longer has a database this device synced before | Ask the user before uploading it again |
 | `vault_upload_failed` | | `importVault` created the vault, but the first upload failed (`VaultUploadError`, with `.vault`) | `e.vault.sync()` later |
 | `kdbx_error` | | The file couldn't be read or written as KDBX, or the vault isn't open | |

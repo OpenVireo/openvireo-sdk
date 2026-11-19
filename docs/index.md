@@ -78,7 +78,8 @@ limited to a few vaults.
 - [Concepts](concepts.md): keys, vaults, roles, references, what the servers see
 - [Errors](errors.md): every error code and what to do about it
 - [Merge behaviour](merge-behaviour.md): how concurrent edits are combined
-- [Lower-level APIs](lower-level.md): the sync loop, HTTP clients, KDBX helpers, Argon2, OPAQUE
+- [Lower-level APIs](lower-level.md): the sync loop, HTTP clients, vaults and KDBX, Argon2, the core modules
+- [Migrating to 1.0](migrating-to-1.0.md): from 0.x (kdbxweb) to the core's handles
 - [API reference](https://openvireo.com/docs/sdk/api/): every export, generated from the source
   (`npm run docs:api` builds it locally)
 
@@ -89,13 +90,13 @@ Everything is exported from `@openvireo/sdk`. Smaller entry points keep bundles 
 | Subpath | What it contains |
 |---|---|
 | `@openvireo/sdk/crypto` | Secret Key, AUK (Argon2id), wrap/seal, keysets, fingerprints, vault names, SA and refresh tokens, JWT verification |
-| `@openvireo/sdk/opaque` | The OPAQUE client (opaque-ke compiled to WASM, lazy-loaded) |
+| `@openvireo/sdk/opaque` | The OPAQUE client (opaque-ke, in the shared core) |
 | `@openvireo/sdk/auth` | `AuthClient` (every account server route), discovery, `TokenManager`, storage adapters |
 | `@openvireo/sdk/storage/node` | `FileStorage` (a 0600 JSON file) |
-| `@openvireo/sdk/sync` | `SyncClient`, the `syncKdbx` merge and retry loop, `subscribeEvents` |
-| `@openvireo/sdk/vault` | kdbxweb open and save, vault-key credentials, entry helpers, `ov://` references |
-| `@openvireo/sdk/merge` | The sync merge, matching the desktop app |
-| `@openvireo/sdk/share` | Opening share links without an account, share payloads, TOTP codes |
+| `@openvireo/sdk/sync` | `SyncClient`, `subscribeEvents`, sync results and the clock-skew check |
+| `@openvireo/sdk/vault` | The core's `Vault` and `Kdbx` handles, credentials, entry helpers, `ov://` references |
+| `@openvireo/sdk/merge` | The sync merge and `.kdbx` import, matching the desktop app |
+| `@openvireo/sdk/share` | Opening share links without an account, share payloads, TOTP codes (loads only the core's lite module) |
 | `@openvireo/sdk/testing` | In-memory auth and sync servers for tests (not for production) |
 
 ## License
