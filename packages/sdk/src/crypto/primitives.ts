@@ -4,7 +4,7 @@
  * Ed25519 stay on @noble/curves until the core's WebAssembly binding exports them.
  */
 import { ed25519, x25519 } from "@noble/curves/ed25519.js";
-import { call } from "../core.js";
+import { callLite as call } from "../core/lite.js";
 import { utf8 } from "../util/bytes.js";
 
 export const sha256 = (data: Uint8Array): Uint8Array => call((c) => c.sha256(data));

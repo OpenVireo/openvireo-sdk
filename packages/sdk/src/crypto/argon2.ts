@@ -1,4 +1,4 @@
-import { core, fromCore } from "../core.js";
+import { core, fromCore } from "../core/full.js";
 
 /**
  * Argon2 for the AUK (SPEC §3) and for kdbxweb. The default implementation runs Argon2id with a
@@ -25,7 +25,7 @@ export type Argon2Impl = (params: Argon2Params) => Promise<Uint8Array>;
 const defaultArgon2: Argon2Impl = async ({ type, password, salt, m, t, p, dkLen }) => {
   if (type === "argon2id" && dkLen === 32) {
     try {
-      return core.argon2id(password, salt, m, t, p);
+      return core().argon2id(password, salt, m, t, p);
     } catch (e) {
       throw fromCore(e);
     }

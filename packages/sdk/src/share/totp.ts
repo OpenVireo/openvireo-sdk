@@ -2,7 +2,7 @@
  * RFC 6238 codes for `otpauth://totp/` URIs, so a share page can show the current one-time code. Parsing,
  * codes and KeePass TOTP fields run on the shared Rust core (ov-share).
  */
-import { call } from "../core.js";
+import { callLite as call } from "../core/lite.js";
 import { OpenVireoError } from "../errors.js";
 import { fromUtf8, utf8 } from "../util/bytes.js";
 

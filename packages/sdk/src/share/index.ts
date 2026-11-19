@@ -8,7 +8,7 @@
 import type { KdfParams } from "../crypto/auk.js";
 import { b64u, fromUtf8, utf8 } from "../util/bytes.js";
 import { parseShareLink, type ShareField, type SharePayload } from "../crypto/share.js";
-import { call, coreClient, fromCore, type CoreSharePayload } from "../core.js";
+import { call, coreClient, fromCore, type CoreSharePayload } from "../core/full.js";
 import { requireSecureUrl, type HttpOptions } from "../http/request.js";
 import type { Item } from "../vault/items.js";
 

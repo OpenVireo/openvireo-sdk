@@ -1,33 +1,32 @@
 /**
- * The shared Rust core (`@openvireo/core-wasm`, openvireo-core compiled to WebAssembly). The SDK's
- * primitives, Argon2id, TOTP and share-link opening run on it, so every OpenVireo client computes them
- * with the same code.
- *
- * The module is loaded once, when this file is first imported (top-level await), so the SDK's
- * synchronous functions (`sha256`, `hkdf`, the AEAD) can call it directly. The core's `OvError`
- * becomes the SDK's `OpenVireoError` with the same code at the edge (`fromCore`).
+ * The shared Rust core's full module (`@openvireo/core-wasm/sync`): the facade handles (`OvClient`,
+ * `Account`, `Vault`, `Kdbx`, …) and every low-level export. Loaded synchronously on first use (no
+ * top-level await); in a browser, `await ready()` once at startup so the module compiles off the main
+ * thread's critical path.
  *
  * @internal
  */
-import { loadCore, OvError, type Core, type HttpTransport, type LogSink, type OvClient } from "@openvireo/core-wasm";
+import { loadCoreSync, type Core } from "@openvireo/core-wasm/sync";
+import { loadCore, type HttpTransport, type LogSink, type OvClient } from "@openvireo/core-wasm";
 import { fetchTransport, memoryCache, memoryStore, systemClock } from "@openvireo/core-wasm/host";
-import { OpenVireoError } from "./errors.js";
-import type { FetchLike, HttpOptions } from "./http/request.js";
+import { OpenVireoError } from "../errors.js";
+import type { FetchLike, HttpOptions } from "../http/request.js";
+import { fromCore } from "./lite.js";
 
-/** The loaded core. */
-export const core: Core = await loadCore();
+export { fromCore };
 
-/** Converts the core's `OvError` into an `OpenVireoError` with the same code, status and details. */
-export function fromCore(e: unknown): unknown {
-  if (!(e instanceof OvError)) return e;
-  const details = typeof e.details === "object" && e.details !== null ? e.details : undefined;
-  return new OpenVireoError(e.code, e.message, e.status, { cause: e, ...(details ? { details } : {}) });
+/** The full module, instantiated on first use. */
+export const core = (): Core => loadCoreSync();
+
+/** Compiles and instantiates the full module asynchronously (shares the instance with `core()`). */
+export async function ready(): Promise<void> {
+  await loadCore();
 }
 
 /** Runs a synchronous core call, rethrowing its errors as `OpenVireoError`. */
 export function call<T>(fn: (core: Core) => T): T {
   try {
-    return fn(core);
+    return fn(core());
   } catch (e) {
     throw fromCore(e);
   }
@@ -54,7 +53,7 @@ const noLog: LogSink = { log() {} };
  * persists. One per call, so each uses the `HttpOptions` it was given.
  */
 export function coreClient(http: HttpOptions): OvClient {
-  return new core.OvClient(
+  return new (core().OvClient)(
     { device: { name: "OpenVireo SDK", platform: "web" }, offline: false },
     { http: transport(http), store: memoryStore(), cache: memoryCache(), clock: systemClock, log: noLog },
   );
