@@ -10,7 +10,7 @@ declare const account: Account, fileBytes: Uint8Array, password: string, orgId: 
 ```ts
 import { VaultUploadError, decryptKdbx } from "@openvireo/sdk";
 
-const { dbInstance: localDb } = await decryptKdbx(fileBytes, password);
+const { vault: localDb } = await decryptKdbx(fileBytes, password);
 try {
   const vault = await account.importVault(localDb, { name: "Home" });   // or { name, orgId } for an org vault
 } catch (e) {
@@ -30,7 +30,7 @@ Tell the user the old file and the new vault are now separate: edits to one don'
 ## Importing into a vault you already have
 
 To bring a `.kdbx`'s entries into an existing vault (or any open database) instead, use `importInto` or
-`importAsCopies` from `@openvireo/sdk/merge` on `vault.db`, then `sync()` as after any other change:
+`importAsCopies` from `@openvireo/sdk/merge` on `vault.vault` (the core `Vault`), then `sync()` as after any other change:
 
 <!-- prelude
 import type { AccountVault } from "@openvireo/sdk";
@@ -40,9 +40,9 @@ declare const vault: AccountVault, fileBytes: Uint8Array, password: string, grou
 import { decryptKdbx } from "@openvireo/sdk";
 import { importAsCopies, importInto } from "@openvireo/sdk/merge";
 
-const { dbInstance: file } = await decryptKdbx(fileBytes, password);
-const { added, updated, unchanged } = importInto(file, vault.db!);
-// or: importAsCopies(file, vault.db!, groupUuid), with importTargets(vault.db!) listing the groups to offer
+const { vault: file } = await decryptKdbx(fileBytes, password);
+const { added, updated, unchanged } = importInto(file, vault.vault);
+// or: importAsCopies(file, vault.vault, groupUuid), with importTargets(vault.vault) listing the groups to offer
 await vault.sync();
 ```
 

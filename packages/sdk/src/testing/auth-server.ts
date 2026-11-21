@@ -456,7 +456,7 @@ export class FakeAuthServer extends MockServer {
     this.on("POST", P + "orgs", A((req, _p, pr) => {
       const id = randomUuid();
       this.orgs.set(id, { name: req.json.name, members: new Map([[pr.split(":")[1]!, { role: "owner", status: "confirmed" }]]) });
-      return json(201, { id, name: req.json.name, role: "owner" });
+      return json(201, { id, name: req.json.name, role: "owner", created_at: new Date().toISOString() });
     }));
     this.on("GET", P + "orgs/{org}/members", A((_r, p) =>
       json(200, { members: [...this.orgs.get(p.org)!.members].map(([uid, m]) => this.memberJson(uid, m)) }),

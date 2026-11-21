@@ -2,10 +2,10 @@
  * Whole entries ("items") for the CLI's `ov item` and `ov connect`'s REST API. An item reference is
  * a secret reference without the field: ov://<vault>/[<group>/…]<entry uuid or title>.
  */
+import type { EntryRecord, Vault } from "@openvireo/core-wasm";
 import { OpenVireoError } from "../errors.js";
-import { kdbxweb, type Kdbx } from "./kdbx.js";
-import { fieldText } from "./entries.js";
-import { findEntry, resolveFieldName, type SecretReference } from "./reference.js";
+import { fromUtf8, utf8 } from "../util/bytes.js";
+import type { SecretReference } from "./reference.js";
 
 export type ItemReference = Omit<SecretReference, "field">;
 
@@ -42,87 +42,55 @@ export interface Item {
   updatedAt?: string;
 }
 
-export const entryId = (entry: kdbxweb.KdbxEntry): string =>
-  Array.from(new Uint8Array(entry.uuid.toBytes() ?? []), (b) => b.toString(16).padStart(2, "0")).join("");
-
-function groupPathOf(entry: kdbxweb.KdbxEntry): string[] {
-  const path: string[] = [];
-  for (let g = entry.parentGroup; g?.parentGroup; g = g.parentGroup) path.unshift(g.name ?? "");
-  return path;
-}
-
-/** An entry as JSON. Protected values are left out unless `reveal` (the names are always listed). */
-export function itemOf(entry: kdbxweb.KdbxEntry, opts: { reveal?: boolean; values?: boolean } = {}): Item {
+/** An entry record as an item. Protected values are left out unless `reveal` (the names are always listed). */
+export function itemOf(entry: EntryRecord, opts: { reveal?: boolean; values?: boolean } = {}): Item {
   const fields: Record<string, string> = {};
   const prot: string[] = [];
-  for (const [k, v] of entry.fields) {
-    const isProtected = v instanceof kdbxweb.ProtectedValue;
-    if (isProtected) prot.push(k);
+  for (const f of entry.fields) {
+    if (f.protected) prot.push(f.name);
     if (opts.values === false) continue;
-    if (!isProtected || opts.reveal) fields[k] = fieldText(v);
+    if (!f.protected || opts.reveal) fields[f.name] = fromUtf8(f.value);
   }
-  const lm = entry.times.lastModTime;
+  const title = entry.fields.find((f) => f.name === "Title");
   return {
-    id: entryId(entry),
-    title: fieldText(entry.fields.get("Title")),
-    group: groupPathOf(entry),
+    id: entry.id,
+    title: title ? fromUtf8(title.value) : "",
+    group: [...entry.groupPath],
     fields,
     protected: prot,
-    tags: [...(entry.tags ?? [])],
-    ...(lm ? { updatedAt: new Date(lm).toISOString() } : {}),
+    tags: [...entry.tags],
+    ...(entry.modifiedAt ? { updatedAt: new Date(entry.modifiedAt * 1000).toISOString() } : {}),
   };
 }
 
 /** Every entry outside the recycle bin, without field values. */
-export function listItems(db: Kdbx): Item[] {
-  const rb = db.meta.recycleBinUuid?.toString();
-  const out: Item[] = [];
-  const walk = (g: kdbxweb.KdbxGroup) => {
-    if (rb && g.uuid.toString() === rb) return;
-    for (const e of g.entries) out.push(itemOf(e, { values: false }));
-    for (const c of g.groups) walk(c);
-  };
-  walk(db.getDefaultGroup());
-  return out;
+export function listItems(vault: Vault): Item[] {
+  return vault.entryRecords(false).map((e) => itemOf(e, { values: false }));
 }
 
 /** Password and custom fields are stored protected; Title, UserName, URL and Notes are not. */
 export const isProtectedByDefault = (field: string): boolean => field === "Password" || !STANDARD_FIELDS.includes(field);
 
+const itemRef = (ref: Pick<ItemReference, "groupPath" | "entry">): string =>
+  SCHEME + ["_", ...ref.groupPath, ref.entry].map((s) => encodeURIComponent(s)).join("/");
+
 /**
- * Sets several fields of one entry, keeping history (`pushHistory` first, like KeePassXC).
- * `create`: create the entry (by title, under its group path) when it's missing; `"only"`: fail if it exists.
- * `protect` overrides which fields are protected (default: `isProtectedByDefault`).
+ * Sets several fields of one entry, keeping history (like KeePassXC). `create`: create the entry (by
+ * title, under its group path) when it's missing; `"only"`: fail if it exists. `protect` overrides which
+ * fields are protected (default: `isProtectedByDefault`).
  */
 export function setItemFields(
-  db: Kdbx,
+  vault: Vault,
   ref: Pick<ItemReference, "groupPath" | "entry">,
   fields: Record<string, string>,
   opts: { create?: boolean | "only"; protect?: Record<string, boolean> } = {},
-): { entry: kdbxweb.KdbxEntry; created: boolean } {
-  let entry: kdbxweb.KdbxEntry | null = null;
-  try {
-    entry = findEntry(db, ref);
-  } catch (e) {
-    const ambiguous = /\d+ entries/.test((e as Error).message);
-    if (!opts.create || (e as OpenVireoError).code !== "entry_not_found" || ambiguous) throw e;
-  }
-  const created = !entry;
-  if (entry) {
-    if (opts.create === "only") throw new OpenVireoError("conflict", `entry "${ref.entry}" already exists`, 409);
-    entry.pushHistory();
-  } else {
-    let group = db.getDefaultGroup();
-    for (const name of ref.groupPath) group = group.groups.find((g) => g.name === name) ?? db.createGroup(group, name);
-    entry = db.createEntry(group);
-    entry.fields.set("Title", ref.entry);
-  }
-  for (const [field, value] of Object.entries(fields)) {
-    const name = resolveFieldName(entry, field);
-    const protect = opts.protect?.[field] ?? opts.protect?.[name] ?? isProtectedByDefault(name);
-    entry.fields.set(name, protect ? kdbxweb.ProtectedValue.fromString(value) : value);
-  }
-  entry.times.update();
-  db.cleanup({ historyRules: true });
-  return { entry, created };
+): { entry: EntryRecord; created: boolean } {
+  const inputs = Object.entries(fields).map(([name, value]) => {
+    const f: { name: string; value: Uint8Array; protected?: boolean } = { name, value: utf8(value) };
+    const p = opts.protect?.[name];
+    if (p !== undefined) f.protected = p;
+    return f;
+  });
+  const mode = opts.create === "only" ? "create_only" : opts.create ? "create_if_missing" : "must_exist";
+  return vault.setFields(itemRef(ref), inputs, mode);
 }

@@ -1,5 +1,5 @@
 /** An in-memory sync server with the legacy and JWT blob semantics (ETag, revision, 412/428, history). */
-import { sha256 } from "@noble/hashes/sha2.js";
+import { sha256 } from "../crypto/primitives.js";
 import { MockServer, bytes, json } from "./mock-fetch.js";
 
 interface Version {

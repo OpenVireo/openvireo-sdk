@@ -18,7 +18,7 @@ declare const account: Account, vault: AccountVault, entryId: string;
 ```ts
 import { DEFAULT_SHARE_FIELDS, findEntry, itemOf, itemSharePayload, shareableFields } from "@openvireo/sdk";
 
-const item = itemOf(findEntry(vault.db!, { groupPath: [], entry: entryId }), { reveal: true });
+const item = itemOf(findEntry(vault.vault, { groupPath: [], entry: entryId }), { reveal: true });
 
 // What can be shared, in display order: [{ name: "UserName", field: { k: "username", … } }, …]
 const choices = shareableFields(item);

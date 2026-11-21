@@ -25,13 +25,13 @@ async function world() {
   const old = await connect(oldStorage);
   const { secretKey: oldSecretKey } = await old.register({ email: "alice@example.com", password: "old pw", kdf });
   const home = await old.createVault("Home");
-  addEntry(home.db!, "Bank", { Password: "hunter2" }, 1000);
+  addEntry(home.vault, "Bank", { Password: "hunter2" }, 1000);
   await home.sync();
 
   const bob = await connect();
   await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
   const bobs = await bob.createVault("Bob's");
-  addEntry(bobs.db!, "Wifi", { Password: "guest" }, 1000);
+  addEntry(bobs.vault, "Wifi", { Password: "guest" }, 1000);
   await bobs.sync();
   await bob.share(bobs.id, { email: "alice@example.com" }, "write");
 
@@ -71,7 +71,7 @@ describe("Account recovery: reset (SPEC.md §18)", () => {
     expect(await alice.secretKey()).toBe(secretKey);
     expect(await alice.listVaults()).toEqual([]);
     expect(JSON.stringify(w.auth.calls.map((c) => c.json))).not.toContain("new pw");
-    expect(await alice.recoveryStatus()).toEqual({ archived: true, email: "alice@example.com", expiresAt: expect.any(String), vaults: 2, locked: false });
+    expect(await alice.recoveryStatus()).toEqual({ archived: true, email: "alice@example.com", expiresAt: expect.any(String), vaults: 2 });
     // TOTP is off and the old device is signed out
     expect(w.auth.totp.has("alice@example.com")).toBe(false);
     await expect(w.old.listVaults()).rejects.toMatchObject({ status: 401 });

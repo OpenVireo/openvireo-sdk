@@ -8,7 +8,7 @@ import { MemoryStorage } from "../../src/auth/storage.js";
 import { FakeAuthServer, ISSUER } from "./auth-server.js";
 import { FakeSyncServer } from "./sync-server.js";
 import { json } from "./mock-fetch.js";
-import { addEntry } from "./dbs.js";
+import { addEntry, byTitle } from "./dbs.js";
 
 export interface World {
   auth: FakeAuthServer;
@@ -42,15 +42,15 @@ export async function makeWorld(): Promise<World> {
   const password = "correct horse ü";
   const alice = await Account.connect({ issuer: ISSUER, fetch, storage: new MemoryStorage(), device: { name: "test", platform: "web" } });
   const { secretKey } = await alice.register({ email: "alice@example.com", password, kdf: { m: 19456, t: 2 } });
-  const org = await alice.auth.createOrg("Acme");
+  const org = await alice.core.createOrg("Acme");
   const vault = await alice.createVault("Team Infra", { orgId: org.id });
-  const db = vault.db!;
-  addEntry(db, "GitHub", { UserName: "ci", Password: "s3cret", URL: "https://github.com" }, 1000);
-  const deploy = db.createGroup(db.getDefaultGroup(), "Deploy");
-  addEntry(db, "Database", { UserName: "app", Password: "pg-pa$$word", Notes: "multi\nline" }, 1000, deploy);
+  const v = vault.vault;
+  addEntry(v, "GitHub", { UserName: "ci", Password: "s3cret", URL: "https://github.com" }, 1000);
+  const deploy = v.addGroup(v.rootGroupId(), "Deploy");
+  addEntry(v, "Database", { UserName: "app", Password: "pg-pa$$word", Notes: "multi\nline" }, 1000, deploy);
   await vault.sync();
   const other = await alice.createVault("Private", { orgId: org.id });
-  addEntry(other.db!, "Bank", { Password: "nope" }, 1000);
+  addEntry(other.vault, "Bank", { Password: "nope" }, 1000);
   await other.sync();
 
   const read = await alice.createServiceAccount(org.id, { name: "ci-read", vaults: [{ id: vault.id, role: "read" }] });
@@ -63,23 +63,18 @@ export async function makeWorld(): Promise<World> {
  * `skipGets`: GETs of the vault to let through first (a client that downloads, then syncs).
  */
 export async function editBetweenGetAndPut(w: World, title: string, fields: Record<string, string>, opts: { skipGets?: number } = {}) {
-  const { openWithKeyVersions, saveKdbx, kdbxweb } = await import("../../src/vault/kdbx.js");
-  const { fieldText } = await import("../../src/vault/entries.js");
-  const vault = await w.alice.openVault(w.vaultId);
+  const { openLocalVault } = await import("../../src/vault/kdbx.js");
+  const credentials = await w.alice.core.vaultKdbxCredentials(w.vaultId);
   let done = false;
   let skip = opts.skipGets ?? 0;
   w.sync.afterGet = async (key) => {
     if (done || key !== `vaults/${w.vaultId}` || skip-- > 0) return;
     done = true;
     const cur = w.sync.blobs.get(key)!.at(-1)!.data;
-    const keys = [{ version: vault.info.currentKeyVersion, key: (vault as any).keys()[0].key }];
-    const { db } = await openWithKeyVersions(cur, keys);
-    const find = (g: any): any => g.entries.find((e: any) => fieldText(e.fields.get("Title")) === title) ?? g.groups.map(find).find(Boolean);
-    const e = find(db.getDefaultGroup());
-    e.pushHistory();
-    for (const [k, v] of Object.entries(fields)) e.fields.set(k, k === "Password" ? kdbxweb.ProtectedValue.fromString(v) : v);
-    e.times.update();
-    w.sync.store(key, await saveKdbx(db));
+    const other = await openLocalVault(cur, credentials);
+    const e = byTitle(other, title)!;
+    other.editEntry(e.id, { fields: Object.entries(fields).map(([k, v]) => ({ name: k, value: new TextEncoder().encode(v), protected: k === "Password" })), removeFields: [], expiry: { kind: "keep" } });
+    w.sync.store(key, await other.saveLocal());
   };
   return {
     get fired() {

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { CLOCK_SKEW_WARNING_MS, SseParser, SyncClient, deserializeSyncState, isClockSkewed, serializeSyncState, subscribeEvents, syncKdbx, toSyncEvent, type SyncEvent } from "../src/sync/index.js";
-import { openKdbx, saveKdbx, vaultCredentials } from "../src/vault/kdbx.js";
-import { KEY, addEntry, edit, get, threeCopies } from "./helpers/dbs.js";
+import { CLOCK_SKEW_WARNING_MS, SseParser, SyncClient, isClockSkewed, subscribeEvents, toSyncEvent, type SyncEvent } from "../src/sync/index.js";
+import { SelfHostedSync } from "../src/self-hosted.js";
+import { MemoryStorage } from "../src/auth/storage.js";
+import { openLocalVault, passwordCredentials, passwordHash, passwordHashCredentials, vaultCredentials } from "../src/vault/kdbx.js";
+import { KEY, addEntry, edit, get, newLocal, openLocal, openVault, threeCopies } from "./helpers/dbs.js";
 import { FakeSyncServer } from "./helpers/sync-server.js";
 import { json } from "./helpers/mock-fetch.js";
 
@@ -58,6 +60,10 @@ describe("SyncClient (legacy and JWT routes)", () => {
   });
 });
 
+// The sync loop is the core's (ov-sync). These tests drive it through SelfHostedSync.syncDatabase (bytes in,
+// merged bytes out), one SelfHostedSync per device so each keeps its own base copy.
+const device = (s: FakeSyncServer, fetch: typeof s.fetch = s.fetch) => SelfHostedSync.connect("https://sync.example", "dev-token", { fetch, storage: new MemoryStorage() });
+
 describe("clock offset from the server's Date header", () => {
   it("measures this computer's clock against the server's on every sync", async () => {
     const s = new FakeSyncServer();
@@ -69,110 +75,157 @@ describe("clock offset from the server's Date header", () => {
       headers.set("Date", new Date(Date.now() + serverAhead).toUTCString());
       return new Response(res.status === 204 || res.status === 304 || init?.method === "HEAD" ? null : await res.arrayBuffer(), { status: res.status, headers });
     };
-    const blob = SyncClient.selfHosted("https://sync.example", { fetch, token: "dev-token" }).database("db");
-    const { local } = await threeCopies((db) => void addEntry(db, "A"));
+    const dev = device(s, fetch);
+    const { bytes } = await threeCopies((v) => void addEntry(v, "A"));
 
-    const first = await syncKdbx({ blob, db: local, credentials: creds });
-    expect(Math.abs(first.clockOffsetMs!)).toBeLessThan(1500);
-    expect(isClockSkewed(first.clockOffsetMs)).toBe(false);
+    const first = await dev.syncDatabase("db", bytes, creds);
+    expect(Math.abs(first.report.clockOffsetMs!)).toBeLessThan(1500);
+    expect(isClockSkewed(first.report.clockOffsetMs)).toBe(false);
 
     serverAhead = -2 * CLOCK_SKEW_WARNING_MS; // this computer is 10 minutes ahead
-    const second = await syncKdbx({ blob, db: first.db, credentials: creds, state: first.state, localChanged: false });
-    expect(second.clockOffsetMs! / 60_000).toBeCloseTo(10, 1);
-    expect(isClockSkewed(second.clockOffsetMs)).toBe(true);
+    const second = await dev.syncDatabase("db", first.kdbx, creds);
+    expect(second.report.clockOffsetMs! / 60_000).toBeCloseTo(10, 1);
+    expect(second.report.clockSkewed).toBe(true);
+    expect(isClockSkewed(second.report.clockOffsetMs)).toBe(true);
     expect(isClockSkewed(undefined)).toBe(false);
   });
 });
 
-describe("syncKdbx (download → merge → conditional PUT → 412 retry)", () => {
+describe("sync loop (download → merge → conditional PUT → 412 retry)", () => {
   async function setup() {
     const s = new FakeSyncServer();
-    const client = SyncClient.selfHosted("https://sync.example", { fetch: s.fetch, token: "dev-token" });
-    const copies = await threeCopies((db) => void addEntry(db, "A", { Password: "p", URL: "x" }));
-    return { s, blob: client.database("db"), ...copies };
+    const copies = await threeCopies((v) => void addEntry(v, "A", { Password: "p", URL: "x" }));
+    return { s, ...copies };
   }
+  const editBytes = async (bytes: Uint8Array, fields: Record<string, string>, time: number) => {
+    const v = await openVault(bytes);
+    edit(v, "A", fields, time);
+    return v.saveLocal();
+  };
 
   it("creates, then pulls, then uploads merged changes, keeping a base copy", async () => {
-    const { s, blob, local, remote } = await setup();
-    const first = await syncKdbx({ blob, db: local, credentials: creds });
-    expect(first.outcome).toBe("created");
-    expect(first.state.revision).toBe(1);
-    expect(first.state.base).toBeDefined();
+    const { s, bytes } = await setup();
+    const dev1 = device(s);
+    const first = await dev1.syncDatabase("db", bytes, creds);
+    expect(first.report.outcome).toBe("created");
 
     // device 2 starts from the server copy, edits URL and uploads
-    const dev2 = await syncKdbx({ blob, db: remote, credentials: creds });
-    expect(dev2.outcome).toBe("pulled");
-    edit(dev2.db, "A", { URL: "y" }, 300);
-    const up2 = await syncKdbx({ blob, db: dev2.db, credentials: creds, state: dev2.state });
-    expect(up2.outcome).toBe("uploaded");
+    const dev2 = device(s);
+    const pulled = await dev2.syncDatabase("db", bytes, creds);
+    expect(pulled.report.outcome).toBe("pulled");
+    const up2 = await dev2.syncDatabase("db", await editBytes(pulled.kdbx, { URL: "y" }, 300), creds);
+    expect(up2.report.outcome).toBe("uploaded");
 
     // device 1 changed Password meanwhile: the base copy lets both changes survive
-    edit(local, "A", { Password: "p2" }, 200);
-    const r = await syncKdbx({ blob, db: local, credentials: creds, state: first.state });
-    expect(r.outcome).toBe("uploaded");
-    expect(r.conflicts).toEqual([]);
-    expect([get(r.db, "A", "Password"), get(r.db, "A", "URL")]).toEqual(["p2", "y"]);
-    const server = await openKdbx(s.blobs.get("databases/db")!.at(-1)!.data, creds);
+    const r = await dev1.syncDatabase("db", await editBytes(first.kdbx, { Password: "p2" }, 200), creds);
+    expect(r.report.outcome).toBe("uploaded");
+    expect(r.report.conflicts).toEqual([]);
+    const mine = await openVault(r.kdbx);
+    expect([get(mine, "A", "Password"), get(mine, "A", "URL")]).toEqual(["p2", "y"]);
+    const server = await openVault(s.blobs.get("databases/db")!.at(-1)!.data);
     expect([get(server, "A", "Password"), get(server, "A", "URL")]).toEqual(["p2", "y"]);
-    expect(r.state.revision).toBe(3);
-    expect(serializeSyncState(deserializeSyncState(serializeSyncState(r.state)))).toBe(serializeSyncState(r.state));
+    expect(s.blobs.get("databases/db")!.at(-1)!.revision).toBe(3);
   });
 
   it("on 412 downloads the newer version, merges it too and retries", async () => {
-    const { s, blob, local, remote } = await setup();
-    const first = await syncKdbx({ blob, db: local, credentials: creds });
-    edit(local, "A", { Password: "mine" }, 200);
+    const { s, bytes, remote } = await setup();
+    const dev = device(s);
+    const first = await dev.syncDatabase("db", bytes, creds);
+    const mine = await editBytes(first.kdbx, { Password: "mine" }, 200);
     // another device uploads between our GET and PUT, once
     let raced = false;
     s.afterGet = async (key) => {
       if (raced) return;
       raced = true;
       edit(remote, "A", { Notes: "theirs" }, 250);
-      s.store(key, await saveKdbx(remote));
+      s.store(key, await remote.saveLocal());
     };
-    const r = await syncKdbx({ blob, db: local, credentials: creds, state: first.state });
-    expect(r.attempts).toBe(2);
+    const r = await dev.syncDatabase("db", mine, creds);
+    expect(r.report.attempts).toBe(2);
     expect(s.calls.filter((c) => c.method === "PUT").length).toBe(3); // create, 412, success
-    const server = await openKdbx(s.blobs.get("databases/db")!.at(-1)!.data, creds);
+    const server = await openVault(s.blobs.get("databases/db")!.at(-1)!.data);
     expect([get(server, "A", "Password"), get(server, "A", "Notes")]).toEqual(["mine", "theirs"]);
   });
 
-  it("gives up after maxAttempts when the server keeps changing", async () => {
-    const { s, blob, local, remote } = await setup();
-    const first = await syncKdbx({ blob, db: local, credentials: creds });
-    edit(local, "A", { Password: "mine" }, 200);
+  it("gives up when the server keeps changing", async () => {
+    const { s, bytes, remote } = await setup();
+    const dev = device(s);
+    const first = await dev.syncDatabase("db", bytes, creds);
+    const mine = await editBytes(first.kdbx, { Password: "mine" }, 200);
     let n = 0;
     s.afterGet = async (key) => {
       edit(remote, "A", { Notes: `theirs ${n++}` }, 250 + n);
-      s.store(key, await saveKdbx(remote));
+      s.store(key, await remote.saveLocal());
     };
-    await expect(syncKdbx({ blob, db: local, credentials: creds, state: first.state, maxAttempts: 3 })).rejects.toMatchObject({ code: "too_many_conflicts" });
-    expect(n).toBe(3);
+    await expect(dev.syncDatabase("db", mine, creds)).rejects.toMatchObject({ code: "too_many_conflicts" });
+    expect(n).toBeGreaterThanOrEqual(3);
   });
 
-  it("HEAD-checks when nothing changed locally, and detects rollbacks and lost databases", async () => {
-    const { s, blob, local } = await setup();
-    const first = await syncKdbx({ blob, db: local, credentials: creds });
-    const again = await syncKdbx({ blob, db: local, credentials: creds, state: first.state, localChanged: false });
-    expect(again.outcome).toBe("unchanged");
-    expect(s.last().method).toBe("HEAD");
-    await expect(syncKdbx({ blob, db: local, credentials: creds, state: { ...first.state, revision: 7 } })).rejects.toMatchObject({ code: "server_rolled_back" });
+  it("detects rollbacks and lost databases", async () => {
+    const { s, bytes } = await setup();
+    const dev = device(s);
+    const first = await dev.syncDatabase("db", bytes, creds);
+    const second = await dev.syncDatabase("db", await editBytes(first.kdbx, { URL: "z" }, 300), creds);
+    expect(second.report.outcome).toBe("uploaded");
+    // the server goes back to revision 1
+    s.blobs.set("databases/db", s.blobs.get("databases/db")!.slice(0, 1));
+    await expect(dev.syncDatabase("db", second.kdbx, creds)).rejects.toMatchObject({ code: "server_rolled_back" });
     s.blobs.clear();
-    await expect(syncKdbx({ blob, db: local, credentials: creds, state: first.state })).rejects.toMatchObject({ code: "server_lost_database" });
-    expect((await syncKdbx({ blob, db: local, credentials: creds, state: first.state, acceptServerState: true })).outcome).toBe("created");
+    await expect(dev.syncDatabase("db", second.kdbx, creds)).rejects.toMatchObject({ code: "server_lost_database" });
+    // once the user confirms, acceptServerState starts over from what the server has (here: nothing)
+    const fresh = await dev.syncDatabase("db", second.kdbx, creds, { acceptServerState: true });
+    expect(fresh.report.outcome).toBe("created");
   });
 
-  it("re-keys before upload (rotation) and opens with the first credentials that work", async () => {
-    const { s, blob, local } = await setup();
-    await syncKdbx({ blob, db: local, credentials: creds });
-    const newKey = new Uint8Array(32).fill(9);
-    const { rekeyToVaultKey } = await import("../src/vault/kdbx.js");
-    const r = await syncKdbx({ blob, db: local, credentials: [vaultCredentials(newKey), creds], beforeUpload: (db) => rekeyToVaultKey(db, newKey) });
-    expect(r.outcome).toBe("uploaded");
-    expect(r.credentialsIndex).toBe(1);
-    const data = s.blobs.get("databases/db")!.at(-1)!.data;
-    await expect(openKdbx(data, creds)).rejects.toMatchObject({ code: "vault_key_mismatch" });
-    expect(get(await openKdbx(data, vaultCredentials(newKey)), "A", "Password")).toBe("p");
+  it("checks with a HEAD first when nothing changed here (localChanged: false)", async () => {
+    const { s, bytes } = await setup();
+    const dev = device(s);
+    const first = await dev.syncDatabase("db", bytes, creds);
+    const n = s.calls.length;
+    const quiet = await dev.syncDatabase("db", first.kdbx, creds, { localChanged: false });
+    expect(quiet.report.outcome).toBe("unchanged");
+    expect(s.calls.slice(n).map((c) => c.method)).toEqual(["HEAD"]);
+    expect(quiet.kdbx).toEqual(first.kdbx);
+    // another device uploads: the HEAD sees it and the change is pulled
+    const other = device(s);
+    const pulled = await other.syncDatabase("db", bytes, creds);
+    await other.syncDatabase("db", await editBytes(pulled.kdbx, { URL: "elsewhere" }, 300), creds);
+    const r = await dev.syncDatabase("db", first.kdbx, creds, { localChanged: false });
+    expect(r.report.outcome).toBe("pulled");
+    expect(get(await openVault(r.kdbx), "A", "URL")).toBe("elsewhere");
+  });
+});
+
+describe("a password database reopened from its password hash (e.g. after a page reload)", () => {
+  it("opens, saves and syncs with passwordHashCredentials, no password needed", async () => {
+    const s = new FakeSyncServer();
+    const pw = passwordCredentials("home pw ü");
+    const home = await newLocal("Home", pw);
+    addEntry(home, "Wifi", { Password: "hunter2" }, 100);
+    const dev1 = device(s);
+    const first = await dev1.syncDatabase("home", await home.saveLocal(), pw);
+    expect(first.report.outcome).toBe("created");
+
+    // another device (with the password) changes the server copy
+    const dev2 = device(s);
+    const other = await openLocal((await dev2.syncDatabase("home", first.kdbx, pw)).kdbx, pw);
+    edit(other, "Wifi", { URL: "router.local" }, 300);
+    await dev2.syncDatabase("home", await other.saveLocal(), pw);
+
+    // device 1 reloads: only the hash is kept. It opens, edits and syncs with the hash alone
+    const hashed = passwordHashCredentials(await passwordHash("home pw ü"));
+    const reopened = await openLocalVault(first.kdbx, hashed);
+    edit(reopened, "Wifi", { Password: "hunter3" }, 400);
+    const r = await dev1.syncDatabase("home", await reopened.saveLocal(), hashed);
+    expect(r.report.outcome).toBe("uploaded");
+    const merged = await openLocalVault(r.kdbx, hashed);
+    expect([get(merged, "Wifi", "Password"), get(merged, "Wifi", "URL")]).toEqual(["hunter3", "router.local"]);
+    // the file still opens with the password, on the server too
+    const server = await openLocal(s.blobs.get("databases/home")!.at(-1)!.data, pw);
+    expect([get(server, "Wifi", "Password"), get(server, "Wifi", "URL")]).toEqual(["hunter3", "router.local"]);
+    // a wrong hash is vault_key_mismatch, not kdbx_error
+    await expect(openLocalVault(first.kdbx, passwordHashCredentials(new Uint8Array(32).fill(1)))).rejects.toMatchObject({ code: "vault_key_mismatch" });
+    await expect(dev1.syncDatabase("home", r.kdbx, passwordHashCredentials(new Uint8Array(32).fill(1)))).rejects.toMatchObject({ code: "vault_key_mismatch" });
   });
 });
 

@@ -10,6 +10,7 @@
     "packages/sdk/src/sync/index.ts",
     "packages/sdk/src/vault/index.ts",
     "packages/sdk/src/merge/index.ts",
+    "packages/sdk/src/share/index.ts",
     "packages/sdk/src/testing/index.ts"
   ],
   "tsconfig": "packages/sdk/tsconfig.json",

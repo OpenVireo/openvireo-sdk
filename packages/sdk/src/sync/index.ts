@@ -1,5 +1,5 @@
 /**
- * The sync server client (`SyncClient`), the sync loop (`syncKdbx`) and the events stream.
+ * The sync server client (`SyncClient`), the events stream, sync results and the clock-skew check.
  *
  * @module @openvireo/sdk/sync
  */

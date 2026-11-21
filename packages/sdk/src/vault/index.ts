@@ -1,5 +1,6 @@
 /**
- * kdbxweb helpers: opening and saving vaults, entries, `ov://` references and items.
+ * Vaults as the shared Rust core's handles (`Vault`, `Kdbx`): opening, creating and saving local
+ * databases, plain-data entry views and edits, `ov://` references and items.
  *
  * @module @openvireo/sdk/vault
  */

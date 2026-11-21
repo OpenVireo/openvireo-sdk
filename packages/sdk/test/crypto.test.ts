@@ -16,7 +16,7 @@ import {
   isOpenVireoError,
   checkKdfParams,
   keysetFromSecrets,
-  nobleArgon2,
+  coreArgon2,
   parseSaToken,
   parseSecretKey,
   passwordBytes,
@@ -90,11 +90,13 @@ describe("§3 AUK", () => {
       expect(toHex(await deriveAuk(v.password, v.kdf, fromHex(v.secret_key_hex), { allowWeak: true }))).toBe(v.auk_hex);
     });
   }
-  it("the noble fallback gives the same result", async () => {
+  it("an app-provided Argon2 (setArgon2Impl) is used and gives the same result", async () => {
     const v = V.auk[1];
-    setArgon2Impl(nobleArgon2);
+    let calls = 0;
+    setArgon2Impl(async (p) => (calls++, coreArgon2(p)));
     try {
       expect(toHex(await deriveAuk(v.password, v.kdf, fromHex(v.secret_key_hex), { allowWeak: true }))).toBe(v.auk_hex);
+      expect(calls).toBe(1);
     } finally {
       setArgon2Impl(null);
     }

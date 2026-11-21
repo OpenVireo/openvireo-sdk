@@ -6,7 +6,7 @@ const fail = (m) => { console.error("FAIL", m); process.exit(1); };
 if (sdk.formatSecretKey(sdk.fromHex(V.secret_key[0].raw_hex)) !== V.secret_key[0].display) fail("secret key");
 const auk = await sdk.deriveAuk(V.auk[0].password, V.auk[0].kdf, sdk.fromHex(V.auk[0].secret_key_hex), { allowWeak: true });
 if (sdk.toHex(auk) !== V.auk[0].auk_hex) fail("auk");
-const db = await sdk.openKdbx(readFileSync(new URL("../test/fixtures/vault-fixture.kdbx", import.meta.url)), sdk.vaultCredentials(sdk.fromHex(V.vault_kdbx.vault_key_hex)));
+const db = await sdk.openLocalVault(readFileSync(new URL("../test/fixtures/vault-fixture.kdbx", import.meta.url)), sdk.vaultCredentials(sdk.fromHex(V.vault_kdbx.vault_key_hex)));
 if (sdk.readField(db, sdk.parseReference("ov://v/GitHub%20deploy%20key/password")) !== "hunter2-but-longer") fail("fixture");
 const ids = sdk.opaqueIds("a@b.c", "openvireo.example");
 const r = await sdk.startRegistration("pässwörd");

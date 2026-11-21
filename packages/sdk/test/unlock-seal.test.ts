@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { Account, MemoryStorage, kdbxweb, openKdbx, passwordCredentials, passwordHash, passwordHashCredentials, saveKdbx } from "../src/index.js";
+import { Account, MemoryStorage, openKdbx, passwordCredentials, passwordHash, passwordHashCredentials, saveKdbx } from "../src/index.js";
 import { FakeAuthServer, FakeSyncServer, ISSUER } from "../src/testing/index.js";
-import { addEntry, get } from "./helpers/dbs.js";
+import { addEntry, get, newLocal, openLocal } from "./helpers/dbs.js";
 
 const kdf = { m: 19456, t: 2 };
 const device = { name: "web", platform: "web" as const };
@@ -32,11 +32,11 @@ describe("Account.sealUnlocked / resumeUnlocked", () => {
   it("resumes after a reload without the password, and the vaults open", async () => {
     const { acct, connect } = await signedUp();
     const vault = await acct.createVault("Personal");
-    addEntry(vault.db!, "GitHub", { Password: "s3cret" }, 1000);
+    addEntry(vault.vault, "GitHub", { Password: "s3cret" }, 1000);
     await vault.sync();
     const key = await sealingKey();
     const sealed = await acct.sealUnlocked(key);
-    expect(sealed).toMatch(/^s1\.[\w-]+\.[\w-]+$/);
+    expect(sealed).toMatch(/^s2\.[\w-]+\.[\w-]+$/);
 
     const reloaded = await connect();
     expect(reloaded.unlocked).toBe(false);
@@ -44,7 +44,7 @@ describe("Account.sealUnlocked / resumeUnlocked", () => {
     expect(reloaded.unlocked).toBe(true);
     expect(reloaded.fingerprint).toBe(acct.fingerprint);
     const v = await reloaded.openVault(vault.id);
-    expect(get(v.db!, "GitHub", "Password")).toBe("s3cret");
+    expect(get(v.vault, "GitHub", "Password")).toBe("s3cret");
     expect(v.read("ov://Personal/GitHub/password")).toBe("s3cret");
 
     reloaded.lock();
@@ -117,23 +117,22 @@ describe("Account.sealUnlocked / resumeUnlocked", () => {
 
 describe("passwordHash / passwordHashCredentials", () => {
   it("opens a password database like the password does, and saves so the password still opens it", async () => {
-    const db = kdbxweb.Kdbx.create(new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString("local pw ü")), "Home");
-    addEntry(db, "Wifi", { Password: "hunter2" }, 1000);
-    const bytes = await saveKdbx(db);
+    const v = await newLocal("Home", passwordCredentials("local pw ü"));
+    addEntry(v, "Wifi", { Password: "hunter2" }, 1000);
+    const bytes = await v.saveLocal();
 
     const hash = await passwordHash("local pw ü");
     expect(hash.length).toBe(32);
-    const factory = passwordHashCredentials(hash);
-    const opened = await openKdbx(bytes, factory);
-    expect(get(opened, "Wifi", "Password")).toBe("hunter2");
-    // the factory makes fresh credentials each time
-    await openKdbx(bytes, factory);
+    const key = passwordHashCredentials(hash);
+    const opened = openKdbx(bytes, key);
+    expect(opened.entries().find((e) => e.title === "Wifi")!.passwordValue).toEqual(new TextEncoder().encode("hunter2"));
+    // the key can be used again
+    openKdbx(bytes, key);
 
-    addEntry(opened, "Router", { Password: "admin" }, 2000);
-    const again = await openKdbx(await saveKdbx(opened), passwordCredentials("local pw ü"));
-    expect(get(again, "Router", "Password")).toBe("admin");
+    const again = await openLocal(saveKdbx(opened), passwordCredentials("local pw ü"));
+    expect(get(again, "Wifi", "Password")).toBe("hunter2");
 
-    await expect(openKdbx(bytes, passwordHashCredentials(await passwordHash("wrong")))).rejects.toMatchObject({ code: "vault_key_mismatch" });
+    expect(() => openKdbx(bytes, passwordHashCredentials(new Uint8Array(32).fill(1)))).toThrow(expect.objectContaining({ code: "vault_key_mismatch" }));
     expect(() => passwordHashCredentials(new Uint8Array(16))).toThrow(/32 bytes/);
   });
 });

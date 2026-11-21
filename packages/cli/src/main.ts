@@ -199,7 +199,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         if (values.generate) fields.Password = generated(values);
         if (sub === "edit" && !Object.keys(fields).length) throw new UsageError("nothing to change: give field=value, --generate or --stdin-field");
         const s = await src();
-        const item = await s.edit(ref.vault, (db) => itemOf(setItemFields(db, ref, fields, { create: sub === "create" ? "only" : false }).entry));
+        const item = await s.edit(ref.vault, (vault) => itemOf(setItemFields(vault, ref, fields, { create: sub === "create" ? "only" : false }).entry));
         err(`${sub === "create" ? "Created" : "Updated"} ${[...item.group, item.title].join("/")} (${item.id})\n`);
         if (values.json) out(JSON.stringify(item, null, 2) + "\n");
         return 0;
@@ -211,7 +211,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         const ref = parseReference(positionals[0]!);
         const value = values.generate ? generated(values) : stripNewline(await io.stdin());
         if (!value) throw new UsageError("the new value is empty");
-        await (await src()).edit(ref.vault, (db) => void writeField(db, ref, value));
+        await (await src()).edit(ref.vault, (vault) => void writeField(vault, ref, value));
         err(`Rotated ${formatReference(ref)}\n`);
         if (values.print) out(value + "\n");
         return 0;

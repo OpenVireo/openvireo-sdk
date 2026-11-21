@@ -14,7 +14,7 @@ const vaults = await account.listVaults();
 
 const vault = await account.openVault(vaults[0]!.id);   // downloads and decrypts it
 vault.name;
-vault.db;        // the kdbxweb database
+vault.vault;     // the core `Vault` handle: entries, groups, fields, history, attachments
 vault.etag;      // the server version this copy is based on
 ```
 
@@ -40,8 +40,8 @@ version in the entry's history and stores password and custom fields protected.
 
 ## Editing the database directly
 
-`vault.db` is a [kdbxweb](https://github.com/keeweb/kdbxweb) `Kdbx`. Change it any way you like, then call
-`sync()`:
+`vault.vault` is the shared Rust core's `Vault` handle. Edit it (`addEntry`, `editEntry`, `setFields`,
+`moveEntry`, `addGroup`, `setAttachment`, …, or the SDK's plain-data helpers), then call `sync()`:
 
 <!-- prelude
 import type { AccountVault } from "@openvireo/sdk";
@@ -50,11 +50,10 @@ declare const vault: AccountVault;
 ```ts
 import { addEntryToDb, setItemFields } from "@openvireo/sdk";
 
-const root = vault.db!.getDefaultGroup();
-await addEntryToDb(vault.db!, root.uuid.toString(), {
+addEntryToDb(vault.vault, vault.vault.rootGroupId(), {
   title: "Database", username: "app", passwordValue: "s3cret", url: "", notes: "", tags: [],
 });
-setItemFields(vault.db!, { groupPath: ["Apps"], entry: "Api" }, { username: "svc", token: "…" }, { create: true });
+setItemFields(vault.vault, { groupPath: ["Apps"], entry: "Api" }, { username: "svc", token: "…" }, { create: true });
 
 const result = await vault.sync();
 result.outcome;     // "uploaded", "pulled" (only downloaded), "created" or "unchanged"
@@ -64,7 +63,7 @@ result.changes;     // what the merge did, entry by entry
 
 `sync()` downloads the server copy, merges it with your changes against the last common version, and
 uploads the result with `If-Match`. When another device uploaded in between, it merges again and retries (up
-to five times, then `too_many_conflicts`; your changes stay in `vault.db`). See
+to five times, then `too_many_conflicts`; your changes stay in `vault.vault`). See
 [Merge behaviour](../merge-behaviour.md).
 
 Call `vault.sync({ localChanged: false })` to only pick up changes from elsewhere: it asks the server with a

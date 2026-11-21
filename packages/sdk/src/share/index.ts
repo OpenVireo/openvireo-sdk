@@ -1,24 +1,17 @@
 /**
- * Share links (SPEC §22): opening one without an account, and turning an item into share fields. Small
- * on purpose, so a public share page loads no OPAQUE, KDBX or sync code.
+ * Share links (SPEC §22): opening one without an account, and turning an item into share fields. Runs on
+ * the shared Rust core's lite module (primitives, share links and TOTP, about 190 KB gzip), so a public
+ * share page loads nothing else: no full core, no OPAQUE, KDBX or sync code.
  *
  * @module @openvireo/sdk/share
  */
 import type { KdfParams } from "../crypto/auk.js";
-import { checkKdfParams } from "../crypto/auk.js";
-import {
-  decryptSharePayload,
-  parseShareLink,
-  shareAuth,
-  sharePasscodeKey,
-  type ShareField,
-  type SharePayload,
-} from "../crypto/share.js";
-import { OpenVireoError } from "../errors.js";
+import { fromUtf8, utf8 } from "../util/bytes.js";
+import type { ShareField, SharePayload } from "../crypto/share.js";
+import { payloadFromCore } from "../crypto/share-convert.js";
+import { callLite as call, fromCore, lite } from "../core/lite.js";
 import { joinUrl, requireSecureUrl, sendJson, seg, type HttpOptions } from "../http/request.js";
-import { b64u, fromB64u, wipe } from "../util/bytes.js";
 import type { Item } from "../vault/items.js";
-import { entryTotpUri } from "./totp.js";
 
 export * from "../crypto/share.js";
 export * from "./totp.js";
@@ -58,39 +51,44 @@ export async function openShare(
   opts: { passcode?: string; info?: ShareInfo; http?: HttpOptions } = {},
 ): Promise<OpenedShare> {
   requireSecureUrl(api, "api");
-  const { id, key } = typeof link === "string" ? parseShareLink(link) : link;
+  const url = typeof link === "string" ? link : fromUtf8(call((c) => c.shareLink("https://share.invalid", link.id, link.key)));
+  const id = call((c) => c.parseShareLink(url)).id;
   const info = opts.info ?? (await getShareInfo(api, id, opts.http));
-  let passcodeKey: Uint8Array | undefined;
-  const body: { auth?: string } = {};
-  if (info.kdf) {
-    if (!opts.passcode) throw new OpenVireoError("passcode_required", "this link needs a passcode");
-    checkKdfParams(info.kdf);
-    passcodeKey = await sharePasscodeKey(opts.passcode, info.kdf);
-    const auth = shareAuth(passcodeKey);
-    body.auth = b64u(auth);
-    wipe(auth);
+  let open;
+  try {
+    open = new (lite().ShareOpen)(url, info.kdf ?? undefined, opts.passcode || undefined);
+  } catch (e) {
+    throw fromCore(e);
   }
   try {
+    const body = JSON.parse(fromUtf8(open.requestBody())) as Record<string, unknown>;
     const r = await sendJson<{ ct: string; opens_left: number | null }>(opts.http ?? {}, joinUrl(api, `public/shares/${seg(id)}/open`), {
       method: "POST",
       json: body,
     });
-    return { payload: decryptSharePayload(key, id, fromB64u(r.ct), passcodeKey), opensLeft: r.opens_left };
+    try {
+      return { payload: payloadFromCore(open.decrypt(r.ct)), opensLeft: r.opens_left };
+    } catch (e) {
+      throw fromCore(e);
+    }
   } finally {
-    if (passcodeKey) wipe(passcodeKey);
+    open.free();
   }
 }
 
-const STANDARD: Record<string, { k: ShareField["k"]; label: string }> = {
-  UserName: { k: "username", label: "Username" },
-  Password: { k: "password", label: "Password" },
-  URL: { k: "url", label: "Website" },
-  Notes: { k: "notes", label: "Notes" },
-};
+const field = (k: string, label: string, value: Uint8Array, prot: boolean): ShareField => ({ k, label, value: fromUtf8(value), ...(prot ? { protected: true } : {}) });
+
 /** Fields an item shares by default; the rest are opt-in. */
 export const DEFAULT_SHARE_FIELDS = ["UserName", "Password", "URL"] as const;
-/** KeePass fields that hold TOTP settings, shared together as one `totp` field named "otp". */
-const TOTP_FIELDS = ["otp", "TOTP Seed", "TOTP Settings"];
+
+/** The item's fields as the core's field records, with Title set to the item's title. */
+function fieldRecords(item: Item) {
+  const fields = Object.entries(item.fields)
+    .filter(([name]) => name !== "Title")
+    .map(([name, value]) => ({ name, value: utf8(value), protected: item.protected.includes(name) }));
+  fields.unshift({ name: "Title", value: utf8(item.title), protected: false });
+  return fields;
+}
 
 /**
  * The fields of an item a user can choose to share, in display order, with what's in them. `name` is
@@ -98,34 +96,14 @@ const TOTP_FIELDS = ["otp", "TOTP Seed", "TOTP Settings"];
  * read with `reveal` so protected values are present.
  */
 export function shareableFields(item: Item): { name: string; field: ShareField }[] {
-  const out: { name: string; field: ShareField }[] = [];
-  for (const name of Object.keys(STANDARD)) {
-    const value = item.fields[name];
-    if (value) out.push({ name, field: { ...STANDARD[name]!, value, ...(item.protected.includes(name) || name === "Password" ? { protected: true } : {}) } });
-  }
-  const totp = entryTotpUri(item.fields, item.title || "OpenVireo");
-  if (totp) out.push({ name: "otp", field: { k: "totp", label: "One-time code", value: totp, protected: true } });
-  for (const [name, value] of Object.entries(item.fields)) {
-    if (name === "Title" || STANDARD[name] || TOTP_FIELDS.includes(name) || !value) continue;
-    out.push({ name, field: { k: "custom", label: name, value, ...(item.protected.includes(name) ? { protected: true } : {}) } });
-  }
-  return out;
+  return call((c) => c.shareableFields(fieldRecords(item))).map((f) => ({ name: f.name, field: field(f.kind, f.label, f.value, f.protected) }));
 }
 
 /** A payload for the chosen fields of an item (names as in `shareableFields`). */
 export function itemSharePayload(item: Item, names: readonly string[], sharedBy?: string): SharePayload {
-  const chosen = new Set(names);
-  const fields = shareableFields(item)
-    .filter((f) => chosen.has(f.name))
-    .map((f) => f.field);
-  return { v: 1, kind: "entry", title: item.title, ...(sharedBy ? { shared_by: sharedBy } : {}), fields };
+  return payloadFromCore(call((c) => c.itemSharePayload(fieldRecords(item), [...names], sharedBy)));
 }
 
 /** A payload for some text. */
-export const textSharePayload = (text: string, title?: string, sharedBy?: string): SharePayload => ({
-  v: 1,
-  kind: "text",
-  ...(title ? { title } : {}),
-  ...(sharedBy ? { shared_by: sharedBy } : {}),
-  fields: [{ k: "text", label: "Text", value: text }],
-});
+export const textSharePayload = (text: string, title?: string, sharedBy?: string): SharePayload =>
+  payloadFromCore(call((c) => c.textSharePayload(utf8(text), title, sharedBy)));

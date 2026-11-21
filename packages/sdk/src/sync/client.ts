@@ -201,7 +201,7 @@ export class SyncClient {
 
   /** Same as Qt's SyncServerClient::etagFor: the quoted hex SHA-256 of the data. */
   static async etagFor(data: Uint8Array): Promise<string> {
-    const { sha256 } = await import("@noble/hashes/sha2.js");
+    const { sha256 } = await import("../crypto/primitives.js");
     return `"${Array.from(sha256(data), (b) => b.toString(16).padStart(2, "0")).join("")}"`;
   }
 }

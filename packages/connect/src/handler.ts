@@ -13,7 +13,7 @@
  * {vault} is a vault id or name, {entry} an entry UUID or title; segments are percent-encoded.
  * Errors are {"error","code"} as in openapi.yaml.
  */
-import { OpenVireoError, type Item, type Kdbx, type SaVault, type ServiceAccount, findEntry, itemOf, listItems, resolveFieldName, setItemFields } from "@openvireo/sdk";
+import { OpenVireoError, type Item, type SaVault, type Vault, type ServiceAccount, findEntry, itemOf, listItems, resolveFieldName, setItemFields } from "@openvireo/sdk";
 import { type ConnectToken, allowsVault, authenticate } from "./tokens.js";
 
 /** The part of ServiceAccount the server uses (a fake in tests). */
@@ -88,8 +88,8 @@ export function createConnectHandler(opts: ConnectOptions): Handler {
   };
 
   /** The SA's copy of a vault; pull() (a HEAD check) runs at most once per TTL. */
-  const cache = new Map<string, { db: Kdbx; at: number }>();
-  const current = async (v: SaVault): Promise<Kdbx> => {
+  const cache = new Map<string, { db: Vault; at: number }>();
+  const current = async (v: SaVault): Promise<Vault> => {
     const c = cache.get(v.id);
     if (c && Date.now() - c.at < ttl) return c.db;
     const db = await opts.source.pull(v.id);
@@ -118,7 +118,7 @@ export function createConnectHandler(opts: ConnectOptions): Handler {
       const field = url.searchParams.get("field");
       if (field === null) return json(200, itemOf(entry, { reveal: true }));
       const name = resolveFieldName(entry, field);
-      if (!entry.fields.has(name)) return fail(404, "not_found", `field "${field}" not found`);
+      if (!entry.fields.some((f) => f.name === name)) return fail(404, "not_found", `field "${field}" not found`);
       const value = itemOf(entry, { reveal: true }).fields[name] ?? "";
       const accept = req.headers.get("accept") ?? "";
       if (accept.includes("text/plain") && !accept.includes("json")) return new Response(value, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });

@@ -30,7 +30,7 @@ import type {
   ShareJson,
   ShareLinkPolicy,
   TokenPair,
-  Vault,
+  VaultJson,
   VaultAccess,
   VaultGrant,
   WrappedKeysetJson,
@@ -273,23 +273,23 @@ export class AuthClient {
 
   // ---------------------------------------------------------------- vaults
   listVaults() {
-    return this.authed<{ vaults: Vault[] }>("GET", "vaults");
+    return this.authed<{ vaults: VaultJson[] }>("GET", "vaults");
   }
   createVault(body: { id: string; org_id?: string | null; encrypted_name: string; grants: Grant[] }) {
-    return this.authed<Vault>("POST", "vaults", body);
+    return this.authed<VaultJson>("POST", "vaults", body);
   }
   getVault(vault: string) {
-    return this.authed<Vault>("GET", `vaults/${seg(vault)}`);
+    return this.authed<VaultJson>("GET", `vaults/${seg(vault)}`);
   }
   renameVault(vault: string, encryptedName: string) {
-    return this.authed<Vault>("PATCH", `vaults/${seg(vault)}`, { encrypted_name: encryptedName });
+    return this.authed<VaultJson>("PATCH", `vaults/${seg(vault)}`, { encrypted_name: encryptedName });
   }
   deleteVault(vault: string) {
     return this.authed<void>("DELETE", `vaults/${seg(vault)}`);
   }
   /** Gives a personal vault to a user who already holds its current key (SPEC.md §23) */
   transferVault(vault: string, principal: Principal) {
-    return this.authed<Vault>("POST", `vaults/${seg(vault)}/owner`, { principal });
+    return this.authed<VaultJson>("POST", `vaults/${seg(vault)}/owner`, { principal });
   }
   listAccess(vault: string) {
     return this.authed<{ access: VaultAccess[] }>("GET", `vaults/${seg(vault)}/access`);

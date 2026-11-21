@@ -3,6 +3,7 @@ import { Account, MemoryStorage, SelfHostedSync, ServiceAccount, openKdbx, vault
 import { CONFIG, FakeAuthServer, ISSUER } from "./helpers/auth-server.js";
 import { FakeSyncServer } from "./helpers/sync-server.js";
 import { addEntry } from "./helpers/dbs.js";
+import { formatSecretKey, generateSecretKey } from "../src/crypto/secret-key.js";
 
 function servers() {
   const auth = new FakeAuthServer();
@@ -25,13 +26,17 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
     expect(JSON.stringify([...auth.calls.map((c) => c.json)])).not.toContain("correct horse");
 
     const vault = await alice.createVault("Team Infra");
-    addEntry(vault.db!, "GitHub", { Password: "s3cret", UserName: "ci" }, 1000);
+    addEntry(vault.vault, "GitHub", { Password: "s3cret", UserName: "ci" }, 1000);
     await vault.sync();
     expect((await alice.listVaults()).map((v) => [v.name, v.role])).toEqual([["Team Infra", "manage"]]);
 
     // a second device: login with the Secret Key, open the vault
     const alice2 = await Account.connect({ issuer: ISSUER, fetch, device: { name: "cli", platform: "cli" } });
-    await expect(alice2.login({ email: "alice@example.com", password: "wrong", secretKey })).rejects.toMatchObject({ code: "unauthorized" });
+    await expect(alice2.login({ email: "alice@example.com", password: "wrong", secretKey })).rejects.toMatchObject({ code: "unauthorized", details: { reason: "opaque_refused" } });
+    // the right password with another Secret Key: the server accepts the password, the keyset doesn't unwrap
+    const otherKey = formatSecretKey(generateSecretKey());
+    await expect(alice2.login({ email: "alice@example.com", password: "correct horse ü", secretKey: otherKey })).rejects.toMatchObject({ code: "unauthorized", details: { reason: "keyset_unwrap_failed" } });
+    expect(alice2.signedIn).toBe(false);
     await alice2.login({ email: "alice@example.com", password: "correct horse ü", secretKey });
     const v2 = await alice2.openVault(vault.id);
     expect(v2.read("ov://Team%20Infra/GitHub/password")).toBe("s3cret");
@@ -57,7 +62,14 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
     expect([sv.current, sv.pending, sv.access.has(bob.principal)]).toEqual([2, null, false]);
     expect(await bob.listVaults()).toEqual([]);
     const newBlob = sync.blobs.get(`vaults/${vault.id}`)!.at(-1)!.data;
-    const oldKey = (await openKdbx(oldBlob, vaultCredentials(new Uint8Array(32))).catch((e) => e)).code;
+    const oldKey = (() => {
+      try {
+        openKdbx(oldBlob, vaultCredentials(new Uint8Array(32)));
+        return "opened";
+      } catch (e) {
+        return (e as { code?: string }).code;
+      }
+    })();
     expect(oldKey).toBe("vault_key_mismatch");
     // bob's old key (still in his memory) no longer opens the new blob
     await expect(bv.sync()).rejects.toBeTruthy();
@@ -66,9 +78,10 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
     expect(again.read("ov://x/GitHub/password")).toBe("s3cret");
     expect((await alice2.listVaults())[0]!.name).toBe("Team Infra");
 
-    // service account in an org with write access
-    const org = await alice.auth.createOrg("Acme");
-    const { token } = await alice.createServiceAccount(org.id, { name: "ci", vaults: [{ id: vault.id, role: "write" }] });
+    // service account in an org with write access. From here on device 1 is `resumed`: it shares alice's
+    // storage, and the core keeps one live session per storage (alice's refresh token has rotated).
+    const org = await resumed.core.createOrg("Acme");
+    const { token } = await resumed.createServiceAccount(org.id, { name: "ci", vaults: [{ id: vault.id, role: "write" }] });
     expect(token).toMatch(/^ov_sa_/);
     const sa = await ServiceAccount.fromToken(token, { fetch });
     expect(await sa.read(`ov://${vault.id}/GitHub/password`)).toBe("s3cret");
@@ -77,15 +90,15 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
     await again.sync();
     expect(again.read("ov://x/GitHub/password")).toBe("rotated-by-ci");
     // a second secret, issued by an admin without the first one
-    const second = await alice.issueServiceAccountSecret(sa.saId);
+    const second = await resumed.issueServiceAccountSecret(sa.saId);
     const sa2 = await ServiceAccount.fromToken(second.token, { fetch });
     expect(await sa2.read("ov://Team%20Infra/GitHub/password")).toBe("rotated-by-ci");
     sa.close();
     sa2.close();
     expect(bobKit.secretKey).not.toBe(secretKey);
 
-    await alice.logout();
-    expect(alice.signedIn).toBe(false);
+    await resumed.logout();
+    expect(resumed.signedIn).toBe(false);
   });
 });
 
@@ -225,7 +238,7 @@ describe("AccountVault.sync with no local edits", () => {
     const other = await Account.connect({ issuer: ISSUER, fetch, device: { name: "cli", platform: "cli" } });
     await other.login({ email: "alice@example.com", password: "pw", secretKey });
     const theirs = await other.openVault(vault.id);
-    addEntry(theirs.db!, "New", { Password: "x" }, 2000);
+    addEntry(theirs.vault, "New", { Password: "x" }, 2000);
     await theirs.sync();
     const mark = sync.calls.length;
     await vault.sync({ localChanged: false });
@@ -246,9 +259,9 @@ describe("Org members", () => {
     const { auth, fetch } = servers();
     const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
     await alice.register({ email: "alice@example.com", password: "pw", kdf });
-    const org = await alice.auth.createOrg("Acme");
+    const org = await alice.core.createOrg("Acme");
     const infra = await alice.createVault("Infra", { orgId: org.id });
-    addEntry(infra.db!, "GitHub", { Password: "s3cret" }, 1000);
+    addEntry(infra.vault, "GitHub", { Password: "s3cret" }, 1000);
     await infra.sync();
     const payroll = await alice.createVault("Payroll", { orgId: org.id });
     const { serviceAccount } = await alice.createServiceAccount(org.id, { name: "ci" });
@@ -256,7 +269,7 @@ describe("Org members", () => {
     const bob = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
     await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
     auth.addMember(org.id, "bob@example.com");
-    const pending = (await alice.auth.listMembers(org.id)).members.find((m) => m.email === "bob@example.com")!;
+    const pending = (await alice.core.orgMembers(org.id)).find((m) => m.email === "bob@example.com")!;
     expect(pending.status).toBe("accepted");
 
     // a member gets only the vaults picked for them, and no SA master keys
@@ -278,18 +291,32 @@ describe("Org members", () => {
     expect(auth.vaults.get(infra.id)!.current).toBe(2);
   });
 
-  it("refuses a vault from another org or a member without keys", async () => {
+  // Behaviour change in 1.0: the core fetches and verifies the member's keys itself, so a member record
+  // without keys no longer fails (the TS SDK refused it with invalid_request).
+  it("confirms with the member's keys from the server", async () => {
     const { auth, fetch } = servers();
     const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
     await alice.register({ email: "alice@example.com", password: "pw", kdf });
-    const org = await alice.auth.createOrg("Acme");
+    const org = await alice.core.createOrg("Acme");
     const personal = await alice.createVault("Personal");
     const bob = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
     await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
     auth.addMember(org.id, "bob@example.com");
-    const m = (await alice.auth.listMembers(org.id)).members.find((x) => x.email === "bob@example.com")!;
+    const m = (await alice.core.orgMembers(org.id)).find((x) => x.email === "bob@example.com")!;
+    expect((await alice.confirmMember(org.id, { ...m, publicKeys: undefined })).status).toBe("confirmed");
+  });
+
+  it("refuses a vault from another org", async () => {
+    const { auth, fetch } = servers();
+    const alice = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await alice.register({ email: "alice@example.com", password: "pw", kdf });
+    const org = await alice.core.createOrg("Acme");
+    const personal = await alice.createVault("Personal");
+    const bob = await Account.connect({ issuer: ISSUER, fetch, device: { name: "web", platform: "web" } });
+    await bob.register({ email: "bob@example.com", password: "bob pw", kdf });
+    auth.addMember(org.id, "bob@example.com");
+    const m = (await alice.core.orgMembers(org.id)).find((x) => x.email === "bob@example.com")!;
     await expect(alice.confirmMember(org.id, m, [{ id: personal.id, role: "read" }])).rejects.toMatchObject({ code: "invalid_request" });
-    await expect(alice.confirmMember(org.id, { ...m, public: undefined })).rejects.toMatchObject({ code: "invalid_request" });
   });
 });
 
@@ -298,15 +325,15 @@ describe("SelfHostedSync", () => {
     const { sync } = servers();
     const storage = new MemoryStorage();
     const sh = await SelfHostedSync.pair("https://sync.example", "ABCD-EFGH", "Web", { fetch: sync.fetch, storage });
-    expect(sh.deviceToken).toBe("dev-token-2");
-    const { createNewKdbx, passwordCredentials, addEntryToDb } = await import("../src/vault/index.js");
-    const { dbInstance: db, groups } = await createNewKdbx("Home", "pw");
-    await addEntryToDb(db, groups[0]!.uuid, { title: "Wifi", username: "", passwordValue: "hunter2", url: "", notes: "", tags: [] });
-    const r = await sh.syncDatabase("home", { db, credentials: passwordCredentials("pw") });
-    expect(r.outcome).toBe("created");
+    expect(sh.serverUrl).toBe("https://sync.example");
+    const { createNewKdbx, passwordCredentials, addEntryToDb, openLocalVault } = await import("../src/vault/index.js");
+    const { vault: db, groups } = await createNewKdbx("Home", "pw");
+    addEntryToDb(db, groups[0]!.uuid, { title: "Wifi", username: "", passwordValue: "hunter2", url: "", notes: "", tags: [] });
+    const r = await sh.syncDatabase("home", await db.saveLocal(), passwordCredentials("pw"));
+    expect(r.report.outcome).toBe("created");
     const restored = await SelfHostedSync.restore("https://sync.example/", { fetch: sync.fetch, storage });
     expect((await restored!.listDatabases()).map((d) => d.id)).toEqual(["home"]);
-    const server = await openKdbx(sync.blobs.get("databases/home")!.at(-1)!.data, passwordCredentials("pw"));
+    const server = await openLocalVault(sync.blobs.get("databases/home")!.at(-1)!.data, passwordCredentials("pw"));
     expect(get(server, "Wifi", "Password")).toBe("hunter2");
   });
 });
