@@ -135,6 +135,10 @@ const stop = account.onSignedOut((reason) => {   // "session_expired" | "token_r
 });
 ```
 
+After `session_expired` or `token_reused` (an accident, not a sign-out), edits this device hadn't uploaded
+yet are kept and sync once the same user signs in again. Every other reason, and `logout()`, drops them with
+the rest of the offline cache.
+
 ## The account itself
 
 <!-- prelude

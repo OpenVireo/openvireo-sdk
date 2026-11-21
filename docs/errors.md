@@ -48,7 +48,7 @@ as opposed to refusing the request.
 | Code | Status | Meaning | What to do |
 |---|---|---|---|
 | `account_pending_deletion` | 403 | The account is scheduled for deletion; `err.details.scheduledFor` is the erase date | Offer `restoreAccount`, or sign out |
-| `deletion_blocked` | 409 | The user is the only owner of organizations with other members; `err.details.orgs` lists them | Make someone else an owner, or delete the org, then try again |
+| `deletion_blocked` | 409 | The user is the only owner of organizations with other members; `err.details.orgs` lists them as `[{ id, name }]` | Make someone else an owner, or delete the org, then try again |
 | `confirm_mismatch` | 400 | The typed email isn't the account's | Ask again |
 | `not_a_member` | 409 | `transferVault` to someone without access to the vault | Share it with them first |
 
@@ -89,8 +89,10 @@ Purchase routes the iOS app uses:
 | `vault_key_mismatch` | | The password, password hash or key file doesn't open the file (a local database, or the server copy) | Self-hosted: ask for the database's new password. Accounts: the keys are out of date; reload the vault list |
 | `no_vault_key` | | The account holds no usable key for this vault | Reload the vault list; ask a manager to share it again |
 | `too_many_conflicts` | 412 | The vault kept changing during the sync, five times in a row. Local changes are kept | Sync again |
+| `rotation_pending` | 409 | `revoke` or `rotate`: another account started a key rotation on this vault and hasn't finished it (one this account started is finished for it). `err.status` is 409; the server lets a new rotation replace it after 24 hours | Ask the other manager to open the vault, or try again later |
 | `server_rolled_back` | | The server returned an older copy than this device already synced: restored from a backup, or tampered with | Ask the user; `vault.sync({ acceptServerState: true })` merges anyway |
 | `server_lost_database` | | The server no longer has a database this device synced before | Ask the user before uploading it again |
+| `not_sync_server` | the page's | `SelfHostedSync.health()`: the address answers, but not as an OpenVireo sync server (a web page, a 404, other JSON) | Check the URL (path, port) |
 | `vault_upload_failed` | | `importVault` created the vault, but the first upload failed (`VaultUploadError`, with `.vault`) | `e.vault.sync()` later |
 | `kdbx_error` | | The file couldn't be read or written as KDBX, or the vault isn't open | |
 | `merge_failed` | | The merge couldn't combine the two copies | Report it, with the databases if possible |
@@ -143,3 +145,10 @@ in the server's `openvireo-configuration`, and self-hosted sync servers.
 `decryption_failed`, `unsupported_version`, `invalid_public_keys`, `invalid_token` and `low_order_point` mean
 data didn't decrypt or verify: wrong key, corrupted data, a malformed token, or keys whose signature doesn't
 match. They shouldn't happen in normal use. Don't retry them; report them.
+
+Two `invalid_public_keys` cases are expected and need the user:
+
+- `shareWithKeys`: the person's keys changed since their fingerprint was shown (they reset their account).
+  Look them up again and have the user compare the new fingerprint.
+- `createVault` or `importVault` in an organization: an owner or admin has keys that don't verify, and
+  nothing was created. `err.details.principal` (`user:<id>`) and `err.details.email` name them.
