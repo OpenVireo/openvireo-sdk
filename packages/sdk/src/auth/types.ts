@@ -9,6 +9,11 @@ export type Principal = string;
 export type OrgRole = "owner" | "admin" | "member";
 export type MemberStatus = "invited" | "accepted" | "confirmed";
 export type Platform = "qt-linux" | "qt-macos" | "qt-windows" | "web" | "cli" | "connect" | "ios";
+/**
+ * A platform as device lists report it: every {@link Platform} plus `"android"` (Android apps,
+ * contract-v1.9). Not yet accepted as `DeviceInfo.platform`: the bundled core predates it.
+ */
+export type DevicePlatform = Platform | "android";
 
 /** GET /.well-known/openvireo-configuration (SPEC §10) */
 export interface OpenVireoConfiguration {
@@ -133,7 +138,7 @@ export interface PublicPrincipal extends PublicKeysJson {
 export interface Device {
   id: string;
   name: string;
-  platform: Platform;
+  platform: DevicePlatform;
   created_at: string;
   last_seen_at: string;
   current: boolean;
