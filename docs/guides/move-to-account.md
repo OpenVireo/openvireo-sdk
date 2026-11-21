@@ -22,7 +22,7 @@ try {
 - The original database is never changed. A copy is re-keyed to a fresh vault key (the database's password
   no longer opens it) and uploaded as a new vault with `If-None-Match: *`.
 - The copy's root group takes the vault name (by default, the root group's current name), and its sync server
-  settings are dropped.
+  settings are dropped. The rest of its database custom data comes along.
 - In an organisation, the vault is sealed to every confirmed owner and admin, like any new org vault.
 
 Tell the user the old file and the new vault are now separate: edits to one don't reach the other.
@@ -52,5 +52,8 @@ await vault.sync();
 - `importAsCopies` puts the file's tree, named after its root group, under the chosen group with fresh UUIDs
   for every entry and group; references between the copied entries (`{REF:…@I:…}`) follow them. Importing
   twice gives two copies.
-- Both leave out the file's recycle bin and its database custom data (sync server settings, browser keys), and
-  never change the vault's root group, which holds its name. The file itself is not changed.
+- Both leave out the file's recycle bin and never change the vault's root group, which holds its name. The
+  file itself is not changed.
+- `importInto` also brings the file's database custom data items the vault doesn't have yet (browser
+  integration keys, plugin settings), but never its sync server settings (`KPXC_REMOTE_SYNC_SETTINGS`) or
+  generated items. `importAsCopies` brings no custom data.

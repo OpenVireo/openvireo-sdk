@@ -69,6 +69,10 @@ to five times, then `too_many_conflicts`; your changes stay in `vault.vault`). S
 Call `vault.sync({ localChanged: false })` to only pick up changes from elsewhere: it asks the server with a
 `HEAD` first and downloads nothing when the version hasn't moved.
 
+Editing `vault.vault` while a sync runs is safe: the core merges those edits into the sync's result and
+uploads them in up to two more rounds of the same call. Edits that land after that stay as unsynced edits
+(`vault.vault.hasPendingEdits()`) for the next sync.
+
 ## Creating vaults
 
 <!-- prelude
@@ -100,6 +104,24 @@ await account.share(vaultId, { principal }, "read");   // changing the role
 `share` looks up the person's public keys, checks their signature, seals the vault key to them and grants the
 role. It needs `manage` on the vault. The other person needs an account already.
 
+To have the user compare the fingerprint *before* anything is sealed, look the person up first and share to
+the keys they confirmed. If the keys changed in between (the person reset their account), `shareWithKeys`
+seals nothing and fails with `invalid_public_keys`:
+
+<!-- prelude
+import type { Account } from "@openvireo/sdk";
+declare const account: Account, vaultId: string;
+declare function confirmWithBob(fingerprint: string): Promise<void>;
+-->
+```ts
+import { fingerprint, trustedPublicKeys } from "@openvireo/sdk";
+
+const bob = await account.auth.lookupUser("bob@example.com");
+const keys = trustedPublicKeys(bob);   // throws invalid_public_keys if the signature doesn't verify
+await confirmWithBob(fingerprint(keys));
+await account.shareWithKeys(vaultId, { principal: bob.principal }, "write", keys);
+```
+
 ## Revoking and rotating
 
 <!-- prelude
@@ -115,6 +137,10 @@ Rotating makes a new vault key, seals it to everyone who stays, re-encrypts the 
 current. Access is removed on the server first, so the removed person can't download the re-encrypted
 file. Their old downloads still open with the old key, so change the secrets inside if that matters. A vault
 whose `rotationRequired` is true (someone left the organisation) should be rotated by a manager.
+
+A rotation that stopped half way (the app closed before the new key was made current) is finished by the
+next `revoke` or `rotate` from the same account, before its own rotation. Another account's unfinished
+rotation blocks it with `rotation_pending` (409) until that one is finished or, after 24 hours, replaced.
 
 ## Organisations
 

@@ -60,7 +60,9 @@ export const hasPendingDeletions = (local: Kdbx, remote: Kdbx): boolean => local
 
 /**
  * Merges `source` into `target` by UUID, keeping the newer version of each entry (the older one goes into
- * its history) and deleting nothing. The source's Recycle Bin and database custom data stay behind.
+ * its history) and deleting nothing. The source's Recycle Bin stays behind. Its database custom data
+ * (`Meta/CustomData`) items the target lacks come along, except the remote sync settings
+ * (`KPXC_REMOTE_SYNC_SETTINGS`) and generated items (sync generation, `_LAST_MODIFIED`, `KPXC_RANDOM_SLUG`).
  */
 export function importInto(source: Vault, target: Vault): ImportSummary {
   return target.importFrom(source, { kind: "merge" });

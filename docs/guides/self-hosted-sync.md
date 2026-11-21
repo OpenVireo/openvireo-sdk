@@ -60,10 +60,17 @@ declare const server: SelfHostedSync;
 declare function resync(id: string): void;
 -->
 ```ts
+await server.health();                                   // '{"status":"ok"}'; not_sync_server for another site
 const databases = await server.listDatabases();          // [{ id, revision, etag, size, updatedAt }]
+const first = await server.download("personal");         // the .kdbx as uploaded, or null; opens with its password
 const { code } = await server.createPairingCode();       // for the next device
 const stream = server.events((e) => e.kind === "databaseChanged" && resync(e.databaseId));
 ```
+
+`health()` checks an address before pairing: a web page, a 404 or JSON that isn't the sync server's is
+`not_sync_server` (with the page's `status`), and an address that doesn't answer is `network_error`.
+`download(id)` fetches a database this device doesn't have yet, without its password, to save as the first
+local copy before the first `syncDatabase`.
 
 `server.history(id)` and `server.openVersion(id, revision, credentials)` read earlier versions;
 `server.core` is the core's `SelfHosted` handle.

@@ -242,6 +242,9 @@ function memberJson(m: CoreMember): Member {
 const kdfOf = (k?: { m?: number; t?: number; p?: number }): KdfOverrides | undefined => (k ? { ...k } : undefined);
 const nul = <T>(v: T | undefined): T | null => (v === undefined ? null : v);
 
+const granteeOf = (who: { email?: string; principal?: Principal }) =>
+  who.principal ? { kind: "principal" as const, principal: who.principal } : { kind: "email" as const, email: who.email ?? "" };
+
 export class Account {
   /** The core's account handle, for everything this class doesn't wrap (orgs, devices, audit, billing…). */
   readonly core: CoreAccount;
@@ -600,18 +603,36 @@ export class Account {
     return vault;
   }
 
-  /** Grants a user (by email or principal) access to a vault; returns their principal and fingerprint. */
+  /**
+   * Grants a user (by email or principal) access to a vault; returns their principal and fingerprint. When
+   * the user was shown the grantee's fingerprint to compare first, use `shareWithKeys`.
+   */
   share(vaultId: string, who: { email?: string; principal?: Principal }, role: VaultRole): Promise<{ principal: Principal; fingerprint: string }> {
-    const grantee = who.principal ? { kind: "principal" as const, principal: who.principal } : { kind: "email" as const, email: who.email ?? "" };
-    return this.core.shareVault(vaultId, grantee, role) as Promise<{ principal: Principal; fingerprint: string }>;
+    return this.core.shareVault(vaultId, granteeOf(who), role) as Promise<{ principal: Principal; fingerprint: string }>;
   }
 
-  /** Removes access and rotates the vault key so the removed principals can't read new versions. */
+  /**
+   * Shares a vault to the keys the user confirmed: `keys` are the grantee's public keys whose fingerprint
+   * was shown (e.g. `trustedPublicKeys(await account.auth.lookupUser(email))`). The core fetches the
+   * grantee's keys again and, if they are no longer `keys` (changed since they were shown), seals nothing
+   * and fails with `invalid_public_keys`.
+   */
+  shareWithKeys(vaultId: string, who: { email?: string; principal?: Principal }, role: VaultRole, keys: { encPk: Uint8Array; signPk: Uint8Array; sig: Uint8Array; fingerprint?: string }): Promise<{ principal: Principal; fingerprint: string }> {
+    const confirmed: PublicKeys = { encPk: keys.encPk, signPk: keys.signPk, sig: keys.sig, fingerprint: keys.fingerprint ?? "" };
+    return this.core.shareVaultWithKeys(vaultId, granteeOf(who), role, confirmed) as Promise<{ principal: Principal; fingerprint: string }>;
+  }
+
+  /**
+   * Removes access and rotates the vault key so the removed principals can't read new versions. A rotation
+   * left pending on the vault by this account (another device, or this one, stopped before activating) is
+   * finished first; one this account holds no key for is `rotation_pending` (409) until it is activated or,
+   * after 24 hours, replaced.
+   */
   revoke(vaultId: string, principals: Principal[]): Promise<SyncReport> {
     return this.core.revoke(vaultId, principals);
   }
 
-  /** Rotates the vault key (optionally removing principals). */
+  /** Rotates the vault key (optionally removing principals), with `revoke`'s pending-rotation rules. */
   rotate(vaultId: string, opts: { remove?: Principal[] } = {}): Promise<SyncReport> {
     return this.core.rotateVaultKey(vaultId, opts.remove ?? []);
   }
@@ -692,7 +713,10 @@ export class Account {
     return { rotated: r.rotated, failed: r.failed.map((f) => ({ id: f.vaultId, error: f.error })) };
   }
 
-  /** The signed-in user's profile (plan, orgs, two-step status). */
+  /**
+   * The signed-in user's profile: plan, orgs, two-step status, and the keyset's `kdf` parameters and
+   * signature-checked `publicKeys` (with `fingerprint`). Keys that don't verify are `invalid_public_keys`.
+   */
   me(): Promise<Profile> {
     return this.core.me();
   }
@@ -760,6 +784,10 @@ export class AccountVault {
   /**
    * Downloads, merges local edits and uploads them (conditional PUT, merge and retry on 412). With
    * `localChanged: false` it first asks the server and stops there when nothing changed.
+   *
+   * Edits made to `vault` while the sync runs are kept: the core merges them into the result and uploads
+   * them in up to two more rounds of the same call. Any still landing after that stay as unsynced edits
+   * for the next sync (`vault.hasPendingEdits()`). The report's `outcome` is the most any round did.
    */
   sync(opts: { localChanged?: boolean; acceptServerState?: boolean } = {}): Promise<SyncReport> {
     const o: SyncOptions = { localChanged: opts.localChanged ?? true };

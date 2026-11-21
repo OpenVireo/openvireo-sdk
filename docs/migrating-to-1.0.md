@@ -42,7 +42,8 @@ const account = await sdk.Account.connect({ issuer });
 | `account.tokens` (`TokenManager`), `tokens.current` | gone: `account.signedIn`, `account.userId`, `account.email`; `account.core.accessToken(false)` gives the token |
 | `alice.auth.createOrg`, `listMembers`, `listDevices`, … | still on `account.auth` (snake_case JSON), or `account.core.createOrg`, `orgMembers`, `devices`, … (camelCase records) |
 | `confirmMember(orgId, member)` with `auth.listMembers` members | pass members from `account.core.orgMembers(orgId)` (`userId`, `publicKeys`). The core fetches and checks the keys itself |
-| `account.me()` | the core's `Profile` (camelCase). `planOf(profile.plan)` turns its plan into the 0.x `Plan` shape |
+| `account.me()` | the core's `Profile` (camelCase), which also has `kdf` (the keyset's KDF parameters) and `publicKeys` (signature checked, with `fingerprint`). `planOf(profile.plan)` turns its plan into the 0.x `Plan` shape |
+| `share(vaultId, who, role)`, then show the fingerprint it returns | the same; new: `shareWithKeys(vaultId, who, role, keys)` shares to the keys whose fingerprint the user confirmed beforehand, and fails with `invalid_public_keys` if they changed since |
 | `sealUnlocked` output `s1.…` | now `s2.…`. Seals made by 0.x don't open, so after the upgrade, unlock once with the password |
 | `importVault(source: Kdbx, …)` | `importVault(source: Vault, …)` |
 | `subscribe({ onVaultChanged })` gets `{ type: "vault", id, etag }` | gets `{ kind: "vaultChanged", vaultId, etag, revision, deleted }` |
@@ -61,6 +62,12 @@ was accepted but the Secret Key doesn't match; on an offline unlock, a wrong pas
 `ov:parked_session:…`), so signed-in sessions and trusted-device Secret Keys carry over. The offline cache
 uses a new format. Edits that a 0.x device made offline and never uploaded are **not** carried over, so let
 each device sync before upgrading. After the upgrade, vaults download again the first time they're opened.
+
+**Accidental session ends keep unsynced edits.** In 0.x, and in early 1.0 builds, any end of the session
+dropped the whole offline cache. Now, when the session ends by accident (`onSignedOut` reports
+`session_expired` or `token_reused`), each vault's edits not yet uploaded stay (encrypted with the vault key)
+and sync after the same user signs in again. `logout()`, a revoked session and every other reason still drop
+everything.
 
 **One live session per storage.** The core keeps the session in memory. Two `Account` instances on the
 same storage in one process can't both refresh tokens (the server sees a reused refresh token and ends the
@@ -85,6 +92,19 @@ const report = await vault.sync();   // 0.x SyncResult → the core's SyncReport
 - `vault.sync({ rekeyTo })` is gone: `account.rotate` re-keys.
 - `vault.sync({ acceptServerState: true })` continues after `server_rolled_back` or `server_lost_database`.
 - `vault.info` has the same shape. `vault.etag` and `vault.offline` are unchanged, and `vault.readOnly` is new.
+- Editing `vault.vault` while `sync()` runs is safe: the core merges those edits into the result and uploads
+  them in the same call (up to two more rounds; anything later stays as unsynced edits for the next sync).
+  0.x and early 1.0 builds dropped them, so apps queued edits behind syncs; that queue is no longer needed
+  for account vaults.
+- A pull (`sync({ localChanged: false })` when another device changed the vault) reports `pulled` and uploads
+  nothing. Early 1.0 builds sometimes uploaded once after merging an edit made in the same second.
+- Moves and deletes remember the group an entry or group left (`PreviousParentGroup`), so restoring from the
+  Recycle Bin puts it back there instead of in the root. A file that uses this is saved as KDBX 4.1 (KeePassXC
+  2.7+ and KeePass 2.48+ read it; older KDBX 4 readers open it and ignore the element).
+- `vault.vault.restoreEntry(version, id, groupPath)` on an entry in the Recycle Bin keeps its history and moves it
+  out of the bin (to its previous group, else `groupPath`).
+- `revoke` and `rotate` finish a rotation this account left half done; another account's unfinished rotation
+  is `rotation_pending` (409).
 
 ## Local databases (`@openvireo/sdk/vault`)
 
@@ -111,6 +131,13 @@ A wrong password, password hash or key file is `vault_key_mismatch`, as in 0.x, 
 `openKdbx`, `decryptKdbx` and sync alike. (Early 1.0 builds reported `kdbx_error` from `openLocalVault`; that
 code now only means a file that isn't valid KDBX.)
 
+`vault.exportPlain("csv" | "json", groupIds?)` writes exactly the bytes the web app's Export dialog
+writes: CSV with the unquoted header `Folder,Title,Username,Password,URL,Notes`, every value quoted (`"`
+doubled), lines joined by `\n` and no newline at the end; JSON as `JSON.stringify(rows, null, 2)` with the keys
+`folder`, `title`, `username`, `passwordValue`, `url`, `notes` in that order. `folder` is the name of the
+entry's own group (not its path) and an empty title is `(Untitled Entry)`. Early 1.0 builds quoted the header,
+ended the CSV with a newline, sorted the JSON keys and wrote the group path as `folder`.
+
 Entry and group ids are the core's: 32 lowercase hex digits. kdbxweb used base64 ids, so if you stored ids,
 convert them (`base64 → bytes → hex`).
 
@@ -134,7 +161,8 @@ const merged = kdbxMerge(localBytes, remoteBytes, baseBytes, { vaultKey });
 - `mergeInto(source, target, mode)` (KeePassXC's Database > Merge), `snapshotOf`, `needsCommonBase`,
   `findConflicts` and `hasPendingDeletions` take `Kdbx` handles.
 - `importInto(source, target)` and `importAsCopies(source, target, parentId)` take `Vault`s. Their summary
-  is the same.
+  is the same. `importInto` now also brings the source's database custom data items the target lacks
+  (never `KPXC_REMOTE_SYNC_SETTINGS` or generated items); 0.x left all custom data behind.
 - `fieldsOf`, `applyField`, `resolveFields`, `conflictingFields`, `combineEntries`, `sameFields`,
   `binaryBytes`, `findEntryByUuid`, `entrySeconds` are gone. They worked on kdbxweb entries, and the core does
   all of that inside the merge.
@@ -168,13 +196,18 @@ const { kdbx, report } = await server.syncDatabase("home", bytes, passwordCreden
 - `credentials` can be `passwordHashCredentials(hash)`, so a database reopened from its hash (after a page
   reload) syncs without asking for the password again.
 - `new SelfHostedSync(url, token)` is now `SelfHostedSync.connect(url, token, opts)`.
+- New: `download(id)` fetches a database as the server has it (or `null`), without its password, for the
+  first local copy. `health()` rejects with `not_sync_server` when the address isn't a sync server (0.x
+  reported the page's own status code).
 - `deviceToken` and `client` are gone. `serverUrl` is a getter, and `history` and `openVersion` are new.
 - `events({ onEvent })` is now `events(onEvent, onError?)` with the core's event records.
 
 ## Service accounts
 
 `ServiceAccount.fromToken`, `read`, `inject`, `write` and `listVaults` are unchanged. `openVault` and `pull`
-return the core's `Vault`, and `edit(id, fn)` hands `fn` a `Vault`. `sa.config` and `sa.auth`/`sa.sync` are
+return the core's `Vault`, and `edit(id, fn)` hands `fn` a `Vault`. New on `sa.core`: `vaultKdbxCredentials(vaultId)`
+and `syncVaultKdbx(vaultId, bytes, base)`, to hold a granted vault as a `.kdbx` file (as `account.core` has
+for accounts). `sa.config` and `sa.auth`/`sa.sync` are
 gone: use `sa.issuer` (or `sa.core.serverConfig()`).
 
 ## Crypto, OPAQUE, share links
