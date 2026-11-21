@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { CLOCK_SKEW_WARNING_MS, SseParser, SyncClient, isClockSkewed, subscribeEvents, toSyncEvent, type SyncEvent } from "../src/sync/index.js";
 import { SelfHostedSync } from "../src/self-hosted.js";
 import { MemoryStorage } from "../src/auth/storage.js";
-import { vaultCredentials } from "../src/vault/kdbx.js";
-import { KEY, addEntry, edit, get, openVault, threeCopies } from "./helpers/dbs.js";
+import { openLocalVault, passwordCredentials, passwordHash, passwordHashCredentials, vaultCredentials } from "../src/vault/kdbx.js";
+import { KEY, addEntry, edit, get, newLocal, openLocal, openVault, threeCopies } from "./helpers/dbs.js";
 import { FakeSyncServer } from "./helpers/sync-server.js";
 import { json } from "./helpers/mock-fetch.js";
 
@@ -172,6 +172,60 @@ describe("sync loop (download → merge → conditional PUT → 412 retry)", () 
     await expect(dev.syncDatabase("db", second.kdbx, creds)).rejects.toMatchObject({ code: "server_rolled_back" });
     s.blobs.clear();
     await expect(dev.syncDatabase("db", second.kdbx, creds)).rejects.toMatchObject({ code: "server_lost_database" });
+    // once the user confirms, acceptServerState starts over from what the server has (here: nothing)
+    const fresh = await dev.syncDatabase("db", second.kdbx, creds, { acceptServerState: true });
+    expect(fresh.report.outcome).toBe("created");
+  });
+
+  it("checks with a HEAD first when nothing changed here (localChanged: false)", async () => {
+    const { s, bytes } = await setup();
+    const dev = device(s);
+    const first = await dev.syncDatabase("db", bytes, creds);
+    const n = s.calls.length;
+    const quiet = await dev.syncDatabase("db", first.kdbx, creds, { localChanged: false });
+    expect(quiet.report.outcome).toBe("unchanged");
+    expect(s.calls.slice(n).map((c) => c.method)).toEqual(["HEAD"]);
+    expect(quiet.kdbx).toEqual(first.kdbx);
+    // another device uploads: the HEAD sees it and the change is pulled
+    const other = device(s);
+    const pulled = await other.syncDatabase("db", bytes, creds);
+    await other.syncDatabase("db", await editBytes(pulled.kdbx, { URL: "elsewhere" }, 300), creds);
+    const r = await dev.syncDatabase("db", first.kdbx, creds, { localChanged: false });
+    expect(r.report.outcome).toBe("pulled");
+    expect(get(await openVault(r.kdbx), "A", "URL")).toBe("elsewhere");
+  });
+});
+
+describe("a password database reopened from its password hash (e.g. after a page reload)", () => {
+  it("opens, saves and syncs with passwordHashCredentials, no password needed", async () => {
+    const s = new FakeSyncServer();
+    const pw = passwordCredentials("home pw ü");
+    const home = await newLocal("Home", pw);
+    addEntry(home, "Wifi", { Password: "hunter2" }, 100);
+    const dev1 = device(s);
+    const first = await dev1.syncDatabase("home", await home.saveLocal(), pw);
+    expect(first.report.outcome).toBe("created");
+
+    // another device (with the password) changes the server copy
+    const dev2 = device(s);
+    const other = await openLocal((await dev2.syncDatabase("home", first.kdbx, pw)).kdbx, pw);
+    edit(other, "Wifi", { URL: "router.local" }, 300);
+    await dev2.syncDatabase("home", await other.saveLocal(), pw);
+
+    // device 1 reloads: only the hash is kept. It opens, edits and syncs with the hash alone
+    const hashed = passwordHashCredentials(await passwordHash("home pw ü"));
+    const reopened = await openLocalVault(first.kdbx, hashed);
+    edit(reopened, "Wifi", { Password: "hunter3" }, 400);
+    const r = await dev1.syncDatabase("home", await reopened.saveLocal(), hashed);
+    expect(r.report.outcome).toBe("uploaded");
+    const merged = await openLocalVault(r.kdbx, hashed);
+    expect([get(merged, "Wifi", "Password"), get(merged, "Wifi", "URL")]).toEqual(["hunter3", "router.local"]);
+    // the file still opens with the password, on the server too
+    const server = await openLocal(s.blobs.get("databases/home")!.at(-1)!.data, pw);
+    expect([get(server, "Wifi", "Password"), get(server, "Wifi", "URL")]).toEqual(["hunter3", "router.local"]);
+    // a wrong hash is vault_key_mismatch, not kdbx_error
+    await expect(openLocalVault(first.kdbx, passwordHashCredentials(new Uint8Array(32).fill(1)))).rejects.toMatchObject({ code: "vault_key_mismatch" });
+    await expect(dev1.syncDatabase("home", r.kdbx, passwordHashCredentials(new Uint8Array(32).fill(1)))).rejects.toMatchObject({ code: "vault_key_mismatch" });
   });
 });
 

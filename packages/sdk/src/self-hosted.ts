@@ -3,7 +3,7 @@
  * password-protected .kdbx files against `databases/<id>` with the same ETag/merge logic. A thin layer
  * over the shared Rust core's `SelfHosted` (`sh.core`).
  */
-import type { AccountEvent, BlobMeta, KdbxCredentials, SelfHosted as CoreSelfHosted, SyncReport, Vault, VaultVersion } from "@openvireo/core-wasm";
+import type { AccountEvent, BlobMeta, KdbxCredentials, SelfHosted as CoreSelfHosted, SyncOptions, SyncReport, Vault, VaultVersion } from "@openvireo/core-wasm";
 import { core } from "./core/full.js";
 import { guard, guarded } from "./core/guard.js";
 import { makeHost, storageStore } from "./core/host.js";
@@ -12,6 +12,14 @@ import type { HttpOptions } from "./http/request.js";
 import { utf8 } from "./util/bytes.js";
 
 export type { BlobMeta, VaultVersion } from "@openvireo/core-wasm";
+
+/** Options for `SelfHostedSync.syncDatabase`. */
+export interface SelfHostedSyncOptions {
+  /** whether the local copy changed since the last sync (default true). False → a HEAD check first. */
+  localChanged?: boolean;
+  /** start over from what the server has (after the user confirmed a rollback or loss) */
+  acceptServerState?: boolean;
+}
 
 export interface SelfHostedOptions extends HttpOptions {
   /** where the device token and sync state are kept (default: memory) */
@@ -55,9 +63,20 @@ export class SelfHostedSync {
     return this.core.createPairingCode();
   }
 
-  /** Syncs a local database (its bytes and credentials) with `databases/<databaseId>`; returns the merged bytes. */
-  syncDatabase(databaseId: string, kdbx: Uint8Array, credentials: KdbxCredentials): Promise<{ kdbx: Uint8Array; report: SyncReport }> {
-    return this.core.syncDatabase(databaseId, kdbx, credentials);
+  /**
+   * Syncs a local database (its bytes and credentials: a password, `passwordHashCredentials(hash)` and/or a
+   * key file) with `databases/<databaseId>`; returns the merged bytes.
+   *
+   * - `localChanged: false`: nothing changed here since the last sync, so a cheap HEAD check runs first and,
+   *   when the server is unchanged too, `kdbx` comes back as it is (outcome `"unchanged"`). Default true.
+   * - `acceptServerState: true`: start over from what the server has, after the user confirmed a
+   *   `server_rolled_back` or `server_lost_database`.
+   */
+  syncDatabase(databaseId: string, kdbx: Uint8Array, credentials: KdbxCredentials, options: SelfHostedSyncOptions = {}): Promise<{ kdbx: Uint8Array; report: SyncReport }> {
+    if (options.localChanged === undefined && options.acceptServerState === undefined) return this.core.syncDatabase(databaseId, kdbx, credentials);
+    const o: SyncOptions = { localChanged: options.localChanged ?? true };
+    if (options.acceptServerState !== undefined) o.acceptServerState = options.acceptServerState;
+    return this.core.syncDatabaseWith(databaseId, kdbx, credentials, o);
   }
 
   /** Earlier versions of a database on the server. */

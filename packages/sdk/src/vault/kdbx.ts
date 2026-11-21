@@ -50,31 +50,31 @@ export function vaultCredentials(vaultKey: Uint8Array): KdbxCredentials {
 
 /**
  * SHA-256 of the password: the password component of a KDBX composite key. An app that has to keep a
- * database openable (e.g. across a page reload) can keep this instead of the password, and open the file
- * with `openKdbx(bytes, { passwordHash })`.
+ * database openable (e.g. across a page reload) can keep this instead of the password, and open, save and
+ * sync the file with `passwordHashCredentials(hash)`.
  */
 export async function passwordHash(password: string): Promise<Uint8Array> {
   return call((c) => c.kdbxPasswordHash(password));
 }
 
-/** A KDBX key from a `passwordHash` (opens the file like the password does, with `openKdbx`). */
-export function passwordHashCredentials(hash: Uint8Array): KdbxKey {
+/**
+ * Credentials from a `passwordHash` (and optionally a key file), equivalent to `passwordCredentials(password,
+ * keyFile)`: `openLocalVault`, `openKdbx`, `saveLocal` and `SelfHostedSync.syncDatabase` all take them.
+ */
+export function passwordHashCredentials(hash: Uint8Array, keyFile?: Uint8Array): KdbxCredentials {
   if (hash.length !== 32) throw new OpenVireoError("invalid_password_hash", "a password hash is 32 bytes");
-  return { passwordHash: new Uint8Array(hash) };
+  const c: KdbxCredentials = { passwordHash: new Uint8Array(hash) };
+  if (keyFile) c.keyFile = new Uint8Array(keyFile);
+  return c;
 }
 
-/** Opens a local `.kdbx` file as an editable `Vault`. */
+/**
+ * Opens a local `.kdbx` file as an editable `Vault` (with a password, a password hash and/or a key file). A
+ * wrong password or key file is `vault_key_mismatch`.
+ */
 export async function openLocalVault(data: Uint8Array | ArrayBuffer, credentials: KdbxCredentials): Promise<Vault> {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-  try {
-    return await guarded(() => core().Vault.openLocal(bytes, credentials));
-  } catch (e) {
-    // The facade reports a wrong key as kdbx_error; the SDK's code for it has been vault_key_mismatch.
-    if (e instanceof OpenVireoError && e.code === "kdbx_error" && /password or key file is wrong/.test(e.message)) {
-      throw new OpenVireoError("vault_key_mismatch", e.message, undefined, { cause: e });
-    }
-    throw e;
-  }
+  return guarded(() => core().Vault.openLocal(bytes, credentials));
 }
 
 /** Creates a new local database (Argon2 KDF, a Recycle Bin) as an editable `Vault`. */

@@ -60,7 +60,10 @@ export class OpenVireoError extends Error {
   /**
    * Extra data some codes carry, camelCased: `recovery_not_ready` has `notBefore` (RFC 3339, when the
    * reset link starts working); `plan_limit` has `limit`, `max`, `current`, `plan` and `upgradeUrl`
-   * (where to change plan); `quota_exceeded` has `max` (the vault's size limit in bytes).
+   * (where to change plan); `quota_exceeded` has `max` (the vault's size limit in bytes); a sign-in or unlock
+   * `unauthorized` has `reason`: `"opaque_refused"` (the server refused the password: wrong email or password)
+   * or `"keyset_unwrap_failed"` (the password was accepted but the keyset didn't unwrap: wrong Secret Key, or a
+   * wrong password on an offline unlock).
    */
   readonly details?: Record<string, unknown>;
   constructor(

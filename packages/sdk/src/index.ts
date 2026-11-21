@@ -15,5 +15,5 @@ export { Account, AccountVault, VaultUploadError, deletionExpired, configOf, pla
 export { DEFAULT_SHARE_FIELDS, getShareInfo, itemSharePayload, openShare, shareableFields, textSharePayload, type OpenedShare, type ShareInfo } from "./share/index.js";
 export * from "./share/totp.js";
 export { ServiceAccount, type SaVault } from "./service-account.js";
-export { SelfHostedSync, type SelfHostedOptions, type VaultVersion } from "./self-hosted.js";
+export { SelfHostedSync, type SelfHostedOptions, type SelfHostedSyncOptions, type VaultVersion } from "./self-hosted.js";
 export { ready } from "./core/full.js";

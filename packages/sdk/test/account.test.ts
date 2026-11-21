@@ -3,6 +3,7 @@ import { Account, MemoryStorage, SelfHostedSync, ServiceAccount, openKdbx, vault
 import { CONFIG, FakeAuthServer, ISSUER } from "./helpers/auth-server.js";
 import { FakeSyncServer } from "./helpers/sync-server.js";
 import { addEntry } from "./helpers/dbs.js";
+import { formatSecretKey, generateSecretKey } from "../src/crypto/secret-key.js";
 
 function servers() {
   const auth = new FakeAuthServer();
@@ -31,7 +32,11 @@ describe("Account / ServiceAccount (end to end against in-memory servers)", () =
 
     // a second device: login with the Secret Key, open the vault
     const alice2 = await Account.connect({ issuer: ISSUER, fetch, device: { name: "cli", platform: "cli" } });
-    await expect(alice2.login({ email: "alice@example.com", password: "wrong", secretKey })).rejects.toMatchObject({ code: "unauthorized" });
+    await expect(alice2.login({ email: "alice@example.com", password: "wrong", secretKey })).rejects.toMatchObject({ code: "unauthorized", details: { reason: "opaque_refused" } });
+    // the right password with another Secret Key: the server accepts the password, the keyset doesn't unwrap
+    const otherKey = formatSecretKey(generateSecretKey());
+    await expect(alice2.login({ email: "alice@example.com", password: "correct horse ü", secretKey: otherKey })).rejects.toMatchObject({ code: "unauthorized", details: { reason: "keyset_unwrap_failed" } });
+    expect(alice2.signedIn).toBe(false);
     await alice2.login({ email: "alice@example.com", password: "correct horse ü", secretKey });
     const v2 = await alice2.openVault(vault.id);
     expect(v2.read("ov://Team%20Infra/GitHub/password")).toBe("s3cret");
