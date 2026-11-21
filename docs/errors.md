@@ -32,7 +32,7 @@ as opposed to refusing the request.
 
 | Code | Status | Meaning | What to do |
 |---|---|---|---|
-| `unauthorized` | 401 | Wrong email or password, a Secret Key that doesn't match, or a session that is no longer valid | Ask again, or sign in again |
+| `unauthorized` | 401 | Wrong email or password, a Secret Key that doesn't match, or a session that is no longer valid. On sign-in and unlock, `err.details.reason` tells which: `opaque_refused` (wrong email or password) or `keyset_unwrap_failed` (the password was accepted but the Secret Key doesn't match; offline, a wrong password) | Ask again (for the Secret Key on `keyset_unwrap_failed`), or sign in again |
 | `invalid_secret_key` | | The Secret Key is malformed, or this device has none for the account | Ask for the Secret Key (Emergency Kit) |
 | `mfa_required` | | The account has two-factor authentication and no code was given | Pass `totp` |
 | `invalid_mfa` | 401 | Wrong two-factor code | With a `totp` function, `login` asks again by itself |
@@ -86,7 +86,7 @@ Purchase routes the iOS app uses:
 | `forbidden` | 403 | The account or service account doesn't have the role this needs (e.g. `write` for a change) | Ask a vault manager for access |
 | `not_found` | 404 | No such vault, entry, member, … | |
 | `not_available_offline` | | Offline, and this vault was never synced on this device | Go online once |
-| `vault_key_mismatch` | | None of the keys or passwords opens the server copy | Self-hosted: ask for the database's new password. Accounts: the keys are out of date; reload the vault list |
+| `vault_key_mismatch` | | The password, password hash or key file doesn't open the file (a local database, or the server copy) | Self-hosted: ask for the database's new password. Accounts: the keys are out of date; reload the vault list |
 | `no_vault_key` | | The account holds no usable key for this vault | Reload the vault list; ask a manager to share it again |
 | `too_many_conflicts` | 412 | The vault kept changing during the sync, five times in a row. Local changes are kept | Sync again |
 | `server_rolled_back` | | The server returned an older copy than this device already synced: restored from a backup, or tampered with | Ask the user; `vault.sync({ acceptServerState: true })` merges anyway |

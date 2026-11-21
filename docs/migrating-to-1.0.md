@@ -42,6 +42,11 @@ rest.
 same shapes as before. Two differences: `recoveryStatus().locked` only appears when it's `true`, and wrong-key
 errors are `vault_key_mismatch` as before.
 
+**Sign-in errors say why.** `login` and `unlock` still fail with `unauthorized`, and now set
+`err.details.reason`: `"opaque_refused"` (wrong email or password) or `"keyset_unwrap_failed"` (the password
+was accepted but the Secret Key doesn't match; on an offline unlock, a wrong password). After
+`keyset_unwrap_failed` on `login` the core signs out the session it opened, so `account.signedIn` is false.
+
 **Storage.** `storage` keeps the same key names (`ov:session`, `secret_key:<server>:<email>`, `device:…`,
 `ov:parked_session:…`), so signed-in sessions and trusted-device Secret Keys carry over. The offline cache
 uses a new format. Edits that a 0.x device made offline and never uploaded are **not** carried over, so let
@@ -81,7 +86,7 @@ const report = await vault.sync();   // 0.x SyncResult → the core's SyncReport
 | `saveKdbx(db)` (async) | `vault.saveLocal()`; `saveKdbx(kdbx)` (sync) for a `Kdbx` |
 | `decryptKdbx(...).dbInstance` | `decryptKdbx(...).vault` |
 | `CredentialsFactory` (`passwordCredentials(pw)()`) | plain `{ password?, keyFile? }` bytes; `passwordCredentials(pw)` returns it directly |
-| `passwordHashCredentials(hash)` | returns a `KdbxKey` for `openKdbx(bytes, key)`. `openLocalVault` can't take a hash yet |
+| `passwordHashCredentials(hash)` (a kdbxweb `CredentialsFactory`) | `passwordHashCredentials(hash, keyFile?)` → plain `{ passwordHash, keyFile? }` credentials: `openLocalVault`, `openKdbx`, `saveLocal` and `SelfHostedSync.syncDatabase` all take them, so a database kept as its hash opens, saves and syncs without the password |
 | `addEntryToDb(db, groupUuid, data)` → `KdbxEntry` | `addEntryToDb(vault, groupId, data)` → the new entry's id |
 | `editEntryInDb`, `deleteEntryFromDb`, `createGroupInDb`, … (async, kdbxweb objects) | same names, synchronous, on a `Vault`, ids instead of objects |
 | `findEntryInKdbx`, `findGroupInKdbx`, `getUuidString`, `fieldText(value)` | `vault.entry(id)`, `vault.groups()`; ids are hex; `fieldText(entryRecord, name)` |
@@ -91,6 +96,10 @@ const report = await vault.sync();   // 0.x SyncResult → the core's SyncReport
 | `rekeyToVaultKey(db, key)`, `copyKdbx`, `syncGeneration(db)`, `dropServerRemotes(db)`, `applyVaultKdf(db)` | methods on `Kdbx`: `rekeyToVaultKey`, `clone`, `syncGeneration`, `dropServerRemotes`, `applyVaultKdf` |
 | `kdfSettings(db)` | `kdfSettings(bytes)` (reads the outer header) or `kdbx.kdfSettings()` |
 | `initKdbx`, `kdbxweb` | gone |
+
+A wrong password, password hash or key file is `vault_key_mismatch`, as in 0.x, from `openLocalVault`,
+`openKdbx`, `decryptKdbx` and sync alike. (Early 1.0 builds reported `kdbx_error` from `openLocalVault`; that
+code now only means a file that isn't valid KDBX.)
 
 Entry and group ids are the core's: 32 lowercase hex digits. kdbxweb used base64 ids, so if you stored ids,
 convert them (`base64 → bytes → hex`).
@@ -141,6 +150,13 @@ import { passwordCredentials } from "@openvireo/sdk";
 const { kdbx, report } = await server.syncDatabase("home", bytes, passwordCredentials("pw"));
 ```
 
+- `syncDatabase(id, { db, credentials, localChanged, acceptServerState })` is now
+  `syncDatabase(id, bytes, credentials, { localChanged, acceptServerState })`. `localChanged: false` checks
+  with a `HEAD` first and hands back `bytes` unchanged (outcome `"unchanged"`) when the server is unchanged
+  too; `acceptServerState: true` continues after `server_rolled_back` or `server_lost_database`. `state` is
+  gone: the core keeps the ETag and base copy in the `storage` you passed to `pair`/`restore`/`connect`.
+- `credentials` can be `passwordHashCredentials(hash)`, so a database reopened from its hash (after a page
+  reload) syncs without asking for the password again.
 - `new SelfHostedSync(url, token)` is now `SelfHostedSync.connect(url, token, opts)`.
 - `deviceToken` and `client` are gone. `serverUrl` is a getter, and `history` and `openVersion` are new.
 - `events({ onEvent })` is now `events(onEvent, onError?)` with the core's event records.

@@ -8,7 +8,8 @@ sync loop over files that aren't vaults.
 
 The sync loop is the shared Rust core's (ov-sync): `vault.sync()` on an account vault, `syncDatabase` on a
 self-hosted server, or `account.core.syncVaultKdbx(vaultId, bytes, base)` for an account vault you hold as a
-file. Each does a `HEAD` when nothing changed locally, a download, the rollback checks (revision and the sync
+file. Each does a `HEAD` when nothing changed locally (`vault.sync({ localChanged: false })`,
+`syncDatabase(id, bytes, credentials, { localChanged: false })`), a download, the rollback checks (revision and the sync
 generation inside the file), the three-way merge against the base copy kept in the offline cache, the
 `If-Match` upload, and on `412` download, merge and retry (up to five times, then `too_many_conflicts`).
 Since 1.0 there is no `syncKdbx`; see [Migrating to 1.0](migrating-to-1.0.md).
