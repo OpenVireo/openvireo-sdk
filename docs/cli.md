@@ -2,19 +2,25 @@
 
 Read, inject and rotate OpenVireo vault secrets from scripts, CI and servers, with a **service
 account** (`OPENVIREO_SERVICE_ACCOUNT_TOKEN=ov_sa_…`) or your own **login**. Vaults are downloaded and
-decrypted locally; writes use the same conditional PUT and merge/retry loop as Qt and the web app, so
-concurrent edits are merged, not lost. Runs as one binary (Bun `--compile`, no Node needed), or on Node ≥ 20.
+decrypted locally; writes use the same conditional PUT and merge/retry loop as the desktop and web apps, so
+concurrent edits are merged, not lost.
+
+`ov` is a native binary built from [openvireo-core](https://github.com/OpenVireo/openvireo-core), the shared
+Rust core every OpenVireo app runs on. It needs nothing else installed. It replaces the TypeScript `ov` that
+earlier releases of this repo shipped (see [The TypeScript `ov`](#the-typescript-ov)); the commands, flags,
+output and exit codes are the same, with the differences listed under
+[Differences from the TypeScript `ov`](#differences-from-the-typescript-ov).
 
 ## Install
 
-Each [release](https://github.com/OpenVireo/openvireo-sdk/releases) has `ov` as a single binary that needs
-nothing else installed (no Node), for Linux (x64, arm64), macOS (x64, arm64) and Windows (x64), with a
-`SHA256SUMS` file and its GPG signature `SHA256SUMS.asc`:
+Each [openvireo-core release](https://github.com/OpenVireo/openvireo-core/releases) has `ov` for Linux (x64,
+arm64), macOS (x64, arm64) and Windows (x64), with a `SHA256SUMS` file and its GPG signature
+`SHA256SUMS.asc`:
 
 ```sh
-v=VERSION p=linux-x64    # VERSION: the release without the v, e.g. 1.0.0; p: linux-arm64 | darwin-x64 | darwin-arm64
+v=VERSION p=linux-x64    # VERSION: the core release without the v, e.g. 1.0.0; p: linux-arm64 | darwin-x64 | darwin-arm64
 for f in "ov-$v-$p.tar.gz" SHA256SUMS SHA256SUMS.asc; do
-  curl -fLO "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v/$f"
+  curl -fLO "https://github.com/OpenVireo/openvireo-core/releases/download/v$v/$f"
 done
 gpg --verify SHA256SUMS.asc SHA256SUMS        # see Verifying the binaries
 sha256sum --ignore-missing -c SHA256SUMS      # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
@@ -26,7 +32,7 @@ On Windows, in PowerShell:
 
 ```powershell
 $v = "VERSION"
-$base = "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v"
+$base = "https://github.com/OpenVireo/openvireo-core/releases/download/v$v"
 foreach ($f in "ov-$v-windows-x64.zip", "SHA256SUMS", "SHA256SUMS.asc") { Invoke-WebRequest "$base/$f" -OutFile $f }
 gpg --verify SHA256SUMS.asc SHA256SUMS                  # gpg from Gpg4win
 (Get-FileHash "ov-$v-windows-x64.zip").Hash             # compare with its line in SHA256SUMS
@@ -34,8 +40,11 @@ Expand-Archive "ov-$v-windows-x64.zip" .
 .\ov-$v-windows-x64\ov.exe version                       # or put that directory on your PATH
 ```
 
-The binary is ~60 MB (the Bun runtime) and includes the SDK's OPAQUE WASM module, so login works
-without Node.
+`SHA256SUMS` also lists the release's other files (the core's libraries for app builds), so check with
+`--ignore-missing` or compare the one line.
+
+`ov connect` runs the REST server, which is a separate program, `openvireo-connect`: install it from this
+repo's releases (see [Connect](connect.md#install)) and put it on your `PATH`.
 
 ### Verifying the binaries
 
@@ -65,17 +74,35 @@ The Windows binaries are signed with Azure Artifact Signing, the same publisher 
 Get-AuthenticodeSignature .\ov.exe | Format-List Status, SignerCertificate, TimeStamperCertificate   # Status: Valid
 ```
 
-### With Node
+To build `ov` yourself, see [Building from source](#building-from-source).
 
-`@openvireo/cli` is also on GitHub Packages (see [Install](index.md#install) for the registry setup) and runs
-on Node ≥ 20:
+### Differences from the TypeScript `ov`
+
+The native `ov` was checked against the TypeScript one by running both on the same inputs against the same
+test servers: help text, arguments, output and exit codes match. A session saved by `ov login` in one works
+in the other (same `session.json`). What differs:
+
+- **`ov connect`** runs `openvireo-connect` from your `PATH` with the same arguments. The TypeScript `ov` had
+  connect built in. Without it, `ov connect` exits 1 and says where to get it.
+- **An empty password stays protected.** An entry created with an empty `Password` keeps its protected
+  flag after the upload, as KeePassXC keeps it; the TypeScript `ov` up to 0.11.0 lost the flag, so
+  `ov item get` showed that field differently.
+- **`OPENVIREO_LOG`** (`error`, `warn`, `info`, `debug` or `trace`) prints the core's log lines on stderr.
+  Off when unset; the TypeScript `ov` had no logging.
+- **TLS** uses the operating system's trust store.
+
+### The TypeScript `ov`
+
+openvireo-sdk releases up to 0.11.0 shipped `ov` built from TypeScript (`packages/cli`): a single binary made
+with Bun (~60 MB, with the Bun runtime) on the
+[SDK's releases](https://github.com/OpenVireo/openvireo-sdk/releases), downloaded and checked as above with
+`openvireo-sdk` in place of `openvireo-core` in the URLs, and `@openvireo/cli` on GitHub Packages for Node ≥ 20
+(see [Install](index.md#install) for the registry setup):
 
 ```sh
 npm install -g @openvireo/cli
 ov version
 ```
-
-To build `ov` yourself, see [Building from source](#building-from-source).
 
 ## References
 
@@ -179,6 +206,21 @@ The link is printed on stdout; what it allows goes to stderr. `--field` takes Ke
 
 ## Building from source
 
+The native `ov` builds with the Rust toolchain that openvireo-core pins in `rust-toolchain.toml` (`rustup`
+installs it on the first `cargo` call):
+
+```sh
+git clone https://github.com/OpenVireo/openvireo-core && cd openvireo-core
+cargo build --release --locked -p ov       # target/release/ov
+./target/release/ov version
+cargo test -p ov                           # the CLI tests, against in-memory servers
+```
+
+Check out a release tag to build that release rather than `develop`. openvireo-core's
+[`docs/building.md`](https://github.com/OpenVireo/openvireo-core/blob/develop/docs/building.md) has the rest.
+
+### The TypeScript `ov` and `openvireo-connect`
+
 You need Node ≥ 20 and npm, and [Bun](https://bun.sh) 1.3 or later for the single binary:
 
 ```sh
@@ -189,8 +231,7 @@ npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bu
 npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP
 ```
 
-Check out a release tag (`git checkout v1.0.0`) to build that release rather than `develop`. Without Bun,
-`npm run build` builds every package for Node, and `node packages/cli/dist/bin.js` runs `ov`.
+Without Bun, `npm run build` builds every package for Node, and `node packages/cli/dist/bin.js` runs `ov`.
 
 The release archives for every platform (both `ov` and `openvireo-connect`) come from one script, which
 cross-compiles, so it works on any of them:
