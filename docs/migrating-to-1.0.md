@@ -21,7 +21,17 @@ await ready();
 ```
 
 `@openvireo/sdk/share` uses only the lite module (about 190 KB gzip), so a public share page doesn't load the
-rest.
+rest. `@openvireo/sdk/sync` loads no WebAssembly at all. Every other entry (`@openvireo/sdk`, `/crypto`,
+`/opaque`, `/auth`, `/vault`, `/merge`) brings the full module into the bundle that imports it, so to keep it out
+of a page's first load, import those with a dynamic `import()` when a vault or account is first needed (type
+imports are free):
+
+<!-- no-check -->
+```ts
+const sdk = await import("@openvireo/sdk");
+await sdk.ready();
+const account = await sdk.Account.connect({ issuer });
+```
 
 ## Accounts
 
