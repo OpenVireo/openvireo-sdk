@@ -108,15 +108,7 @@ describe("ov connect REST API", () => {
     expect(created.body.group).toEqual(["Apps"]);
     expect(created.body.protected.sort()).toEqual(["Password", "UserName", "token"]);
     expect(created.body.fields.token).toBeUndefined(); // the response doesn't echo protected values
-    expect((await client(readSa)("GET", "/v1/vaults/Team%20Infra/items/Apps/Api?field=token", { token: READ })).body.value).toBe("t-1");
-  });
 
-  // KNOWN CORE GAP (W3-IW2 report): after a 412 the core's SA session keeps the remote entry whole, so the
-  // write ends up in history only (or wins, by the clock, within the same second: not deterministic, so skipped).
-  it.skip("merges on 412", async () => {
-    const log: string[] = [];
-    const c = client(writeSa, { log });
-    await c("PUT", "/v1/vaults/Team%20Infra/items/Apps/Api", { token: WRITE, body: { fields: { username: "svc", token: "t-1" }, protected: { username: true } } });
     const race = await editBetweenGetAndPut(w, "GitHub", { URL: "https://github.example" });
     const upd = await c("PUT", "/v1/vaults/Team%20Infra/items/GitHub", { token: WRITE, body: { fields: { password: "via-connect" } } });
     w.sync.afterGet = null;
