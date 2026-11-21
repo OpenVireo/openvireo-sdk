@@ -53,8 +53,21 @@ export class SelfHostedSync {
   get serverUrl(): string {
     return this.core.serverUrl();
   }
+  /**
+   * `GET /health`, as JSON text. An address that answers but isn't an OpenVireo sync server (a web page, a
+   * 404, JSON without `status`) is `not_sync_server` with the page's `status`; an unreachable one is
+   * `network_error`.
+   */
   health(): Promise<string> {
     return this.core.health();
+  }
+  /**
+   * Downloads `databases/<databaseId>` as the server has it, to save a first copy on this device (no key
+   * needed: the bytes are the `.kdbx` as uploaded, under the database's own password). `null` when the
+   * server has no such database.
+   */
+  async download(databaseId: string): Promise<Uint8Array | null> {
+    return (await this.core.download(databaseId)) ?? null;
   }
   listDatabases(): Promise<BlobMeta[]> {
     return this.core.listDatabases();

@@ -36,7 +36,7 @@ const childGroups = (v: Vault, parent: string) => v.groups().filter((g) => g.par
 const titlesIn = (v: Vault, groupId: string) => v.entryRecords(true).filter((e) => e.groupId === groupId).map((e) => fieldText(e, "Title")).sort();
 
 describe("importInto", () => {
-  it("adds the file's entries and groups, keeps the vault's root, skips the recycle bin and custom data", async () => {
+  it("adds the file's entries and groups, keeps the vault's root, skips the recycle bin and the remote settings", async () => {
     const src = await sourceFile();
     const target = await vault();
     const r = importInto(src, target);
@@ -49,7 +49,8 @@ describe("importInto", () => {
     expect(titlesIn(target, top.find((g) => g.name === "Web")!.id)).toEqual(["Mail", "Mail alias"]);
     expect(byTitle(target, "Old")).toBeUndefined();
     expect(target.metaCustomData("KPXC_REMOTE_SYNC_SETTINGS")).toBeUndefined();
-    expect(target.metaCustomData("KPXC_BROWSER_key")).toBeUndefined();
+    // contract-v1.8: custom data the vault lacks comes along (0.x left it all behind)
+    expect(target.metaCustomData("KPXC_BROWSER_key")).toBe("secret");
     const mail = byTitle(target, "Mail")!;
     expect(target.customIcon(mail.customIcon!)).toEqual(new Uint8Array([137, 80, 78, 71, 1, 2, 3]));
     expect(mail.attachments.map((x) => x.name)).toEqual(["note.txt"]);

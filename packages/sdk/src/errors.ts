@@ -29,6 +29,9 @@ export type OpenVireoErrorCode =
   | "network_error"
   | "insecure_url"
   | "signed_out"
+  // account deletion (SPEC.md §23)
+  | "account_pending_deletion"
+  | "deletion_blocked"
   // account recovery (SPEC.md §18)
   | "recovery_not_ready"
   | "recovery_cancelled"
@@ -49,6 +52,8 @@ export type OpenVireoErrorCode =
   | "server_rolled_back"
   | "server_lost_database"
   | "too_many_conflicts"
+  | "rotation_pending"
+  | "not_sync_server"
   | "invalid_reference"
   | "entry_not_found"
   | "not_available_offline"
@@ -63,7 +68,10 @@ export class OpenVireoError extends Error {
    * (where to change plan); `quota_exceeded` has `max` (the vault's size limit in bytes); a sign-in or unlock
    * `unauthorized` has `reason`: `"opaque_refused"` (the server refused the password: wrong email or password)
    * or `"keyset_unwrap_failed"` (the password was accepted but the keyset didn't unwrap: wrong Secret Key, or a
-   * wrong password on an offline unlock).
+   * wrong password on an offline unlock); `account_pending_deletion` has `scheduledFor` (RFC 3339);
+   * `deletion_blocked` has `orgs` (`[{ id, name }]`, the orgs to hand over first); `invalid_public_keys` from
+   * `createVault` or `importVault` in an org has `principal` and `email` (the owner or admin whose keys don't
+   * verify).
    */
   readonly details?: Record<string, unknown>;
   constructor(
