@@ -36,10 +36,14 @@ binaries from the [releases](https://github.com/OpenVireo/openvireo-sdk/releases
 
 ## A first program
 
+Sign in, list the vaults, read one field and sign out. The same program in every language: TypeScript is
+this SDK; Python, Kotlin, Java, Swift and C++ are the [core bindings](https://github.com/openvireo/openvireo-core/blob/develop/docs/bindings/README.md),
+which share its API and error codes; the `ov` CLI does it from a shell.
+
 <!-- prelude
 declare const email: string, password: string, secretKey: string;
 -->
-```ts
+```ts tab="TypeScript"
 import { Account, MemoryStorage } from "@openvireo/sdk";
 
 const account = await Account.connect({
@@ -55,6 +59,122 @@ for (const info of await account.listVaults()) {
 const vault = await account.openVault((await account.listVaults())[0]!.id);
 console.log(vault.read("ov://Personal/GitHub/username"));
 await account.logout();
+```
+```python tab="Python"
+import openvireo as ov
+from openvireo.hosts import default_host
+
+
+async def main(email: str, password: bytes, secret_key: bytes) -> None:
+    client = ov.OvClient(
+        ov.ClientConfig(
+            device=ov.DeviceInfo(id=None, name="My script", platform=ov.Platform.CLI),
+            offline=False,
+            server=None,
+        ),
+        default_host(),
+    )
+    account = await client.connect("https://accounts.openvireo.com")
+    # Returns LoginStep.NEEDS_TOTP when two-step sign-in is on: see the Python guide
+    await account.login(ov.LoginInput(email=email, password=password, secret_key=secret_key, totp=None, trust_device=True))
+
+    vaults = await account.vaults()
+    for info in vaults:
+        print(info.name, info.role)
+    vault = await account.open_vault(vaults[0].id)
+    print(vault.read_field("ov://Personal/GitHub/username").decode())
+    await account.sign_out(False)
+```
+```kotlin tab="Kotlin"
+import com.openvireo.core.*
+import com.openvireo.core.hosts.defaultHost
+
+suspend fun firstProgram(email: String, password: ByteArray, secretKey: ByteArray) {
+    val client = OvClient(
+        ClientConfig(DeviceInfo(id = null, name = "My script", platform = Platform.CLI), offline = false, server = null),
+        defaultHost(),
+    )
+    val account = client.connect("https://accounts.openvireo.com", CancelToken())
+    // Returns LoginStep.NeedsTotp when two-step sign-in is on: see the Kotlin guide
+    account.login(LoginInput(email, password, secretKey = secretKey, totp = null, trustDevice = true), CancelToken())
+
+    val vaults = account.vaults(CancelToken())
+    for (info in vaults) println("${info.name} ${info.role}")
+    val vault = account.openVault(vaults.first().id, CancelToken())
+    println(vault.readField("ov://Personal/GitHub/username").decodeToString())
+    account.signOut(false, CancelToken())
+}
+```
+```java tab="Java"
+import com.openvireo.core.*;
+import com.openvireo.core.java.*;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+JOvClient client = new JOvClient(
+    new ClientConfig(new DeviceInfo(null, "My script", Platform.CLI), false, null),
+    JDefaultHosts.create());
+JAccount account = client.connect("https://accounts.openvireo.com").join();
+// Returns LoginStep.NeedsTotp when two-step sign-in is on: see the Java guide
+account.login(new LoginInput(email, password, secretKey, null, true)).join();
+
+List<VaultInfo> vaults = account.vaults().join();
+for (VaultInfo info : vaults) System.out.println(info.getName() + " " + info.getRole());
+JVault vault = account.openVault(vaults.get(0).getId()).join();
+System.out.println(new String(vault.readField("ov://Personal/GitHub/username"), StandardCharsets.UTF_8));
+account.signOut(false).join();
+```
+```swift tab="Swift"
+import OpenVireoRustCore
+
+// The Host is the platform's part: HTTP, a secure store, a cache, a clock and a log sink.
+// The iOS app has one; implement the HttpTransport, SecureStore, BlobCache, Clock and LogSink protocols.
+let host = Host(http: MyHttp(), store: MyKeychainStore(), cache: MyCache(), clock: MyClock(), log: MyLog())
+let client = OvClient(
+    config: ClientConfig(device: DeviceInfo(id: nil, name: "My app", platform: .ios), offline: false, server: nil),
+    host: host)
+let cancel = CancelToken()
+let account = try await client.connect(issuer: "https://accounts.openvireo.com", cancel: cancel)
+// The LoginStep asks for a TOTP code when two-step sign-in is on
+_ = try await account.login(
+    input: LoginInput(email: email, password: password, secretKey: secretKey, totp: nil, trustDevice: true),
+    cancel: cancel)
+
+let vaults = try await account.vaults(cancel: cancel)
+for info in vaults { print(info.name, info.role) }
+let vault = try await account.openVault(vaultId: vaults[0].id, cancel: cancel)
+print(String(decoding: try vault.readField(reference: "ov://Personal/GitHub/username"), as: UTF8.self))
+try await account.signOut(forgetDevice: false, cancel: cancel)
+```
+```cpp tab="C++"
+#include <ovcore.h>
+
+// Calls block: run them on a worker thread. MyHttp, MyStore, MyCache, MyClock and MyLog implement the
+// Host classes in <host.h>.
+auto cancel = ov::new_cancel_token();
+ov::ClientConfig config{"", "My tool", ov::Platform::Cli, false, false, ov::ServerConfig{}};
+auto client = ov::call([&] {
+    return ov::new_client(config, std::make_unique<MyHttp>(), std::make_unique<MyStore>(),
+                          std::make_unique<MyCache>(), std::make_unique<MyClock>(), std::make_unique<MyLog>());
+});
+auto account = ov::call([&] { return client->connect("https://accounts.openvireo.com", *cancel); });
+// A LoginStep that needs a TOTP code when two-step sign-in is on
+ov::LoginInput input{email, std::move(password), true, std::move(secret_key), "", true};
+ov::call([&] { return account->login(std::move(input), *cancel); });
+
+auto vaults = ov::call([&] { return account->vaults(*cancel); });
+for (const auto &info : vaults) std::printf("%s\n", std::string(info.name).c_str());
+auto vault = ov::call([&] { return account->open_vault(vaults[0].id, *cancel); });
+auto value = ov::call([&] { return vault->read_field("ov://Personal/GitHub/username"); });
+std::printf("%.*s\n", static_cast<int>(value.size()), reinterpret_cast<const char *>(value.data()));
+ov::wipe(value);
+ov::call([&] { account->sign_out(false, *cancel); });
+```
+```sh tab="ov CLI"
+ov login --email you@example.com      # master password, then the Secret Key the first time
+ov vault list
+ov read ov://Personal/GitHub/username
+ov logout
 ```
 
 For automation, prefer a [service account](guides/service-accounts.md): it needs no password and can be
