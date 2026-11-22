@@ -7,7 +7,7 @@ network, and keeps edits made offline until they can be uploaded.
 import { browserStorage } from "@openvireo/sdk";
 declare const issuer: string, password: string, id: string;
 -->
-```ts
+```ts tab="TypeScript"
 import { Account, isUnreachable } from "@openvireo/sdk";
 
 const account = await Account.connect({
@@ -26,6 +26,94 @@ await vault.write("ov://Home/Wifi/password", "new").catch((e) => {
 
 const { vaults, dropped } = await account.reconnect();   // back online; revoked vaults are forgotten
 await vault.sync();                                       // uploads the kept edit
+```
+```python tab="Python"
+client = ov.OvClient(
+    ov.ClientConfig(device=ov.DeviceInfo(id=None, name="Laptop", platform=ov.Platform.CLI), offline=True, server=None),
+    default_host(store=KeyringStore(), cache_dir="~/.cache/openvireo"),   # offline needs a persistent cache
+)
+account = await client.connect(issuer)
+await account.unlock(password, None)       # works offline from the cached wrapped keyset
+vault = await account.open_vault(vault_id)  # offline: the local copy
+account.is_offline()                        # True while the servers can't be reached
+
+try:
+    await vault.write_field("ov://Home/Wifi/password", b"new", False)
+except ov.OvError as e:
+    if e.code != ov.OvErrorCode.NETWORK_ERROR:
+        raise                               # offline: the edit is kept and merges in later
+
+result = await account.reconnect()          # back online; result.dropped: revoked vaults, forgotten
+await vault.sync(ov.SyncOptions(local_changed=True))   # uploads the kept edit
+```
+```kotlin tab="Kotlin"
+val client = OvClient(
+    ClientConfig(DeviceInfo(id = null, name = "Laptop", platform = Platform.CLI), offline = true, server = null),
+    defaultHost(cacheDir = Path.of("ov-cache")),   // offline needs a persistent cache
+)
+val account = client.connect(issuer, CancelToken())
+account.unlock(password, null, CancelToken())                 // works offline from the cached wrapped keyset
+val vault = account.openVault(vaultId, CancelToken())         // offline: the local copy
+account.isOffline()                                           // true while the servers can't be reached
+
+try {
+    vault.writeField("ov://Home/Wifi/password", "new".toByteArray(), false, CancelToken())
+} catch (e: OvException) {
+    if (e.code != OvErrorCode.NETWORK_ERROR) throw e          // offline: the edit is kept and merges in later
+}
+
+val result = account.reconnect(CancelToken())                 // back online; result.dropped: revoked vaults
+vault.sync(SyncOptions(localChanged = true), CancelToken())   // uploads the kept edit
+```
+```java tab="Java"
+JOvClient client = new JOvClient(
+    new ClientConfig(new DeviceInfo(null, "Laptop", Platform.CLI), true, null),
+    JDefaultHosts.create(Path.of("ov-cache")));   // offline needs a persistent cache
+JAccount account = client.connect(issuer).join();
+account.unlock(password, null).join();          // works offline from the cached wrapped keyset
+JVault vault = account.openVault(vaultId).join();   // offline: the local copy
+
+try {
+    vault.writeField("ov://Home/Wifi/password", "new".getBytes(StandardCharsets.UTF_8), false).join();
+} catch (CompletionException e) {
+    if (JErrors.code(e) != OvErrorCode.NETWORK_ERROR) throw e;   // offline: the edit is kept
+}
+
+ReconnectResult result = account.reconnect().join();   // back online; getDropped(): revoked vaults
+vault.sync(new SyncOptions(true, false)).join();       // uploads the kept edit
+```
+```swift tab="Swift"
+let client = OvClient(
+    config: ClientConfig(device: DeviceInfo(id: nil, name: "iPhone", platform: .ios), offline: true, server: nil),
+    host: host)   // offline needs a Host with a persistent BlobCache
+let account = try await client.connect(issuer: issuer, cancel: cancel)
+_ = try await account.unlock(password: password, secretKey: nil, cancel: cancel)   // works offline
+let vault = try await account.openVault(vaultId: vaultId, cancel: cancel)            // offline: the local copy
+account.isOffline()                                                                 // true while unreachable
+
+do {
+    _ = try await vault.writeField(reference: "ov://Home/Wifi/password", value: Data("new".utf8), create: false, cancel: cancel)
+} catch let error as OvError where error.code == .networkError {
+    // offline: the edit is kept and merges in later
+}
+
+let result = try await account.reconnect(cancel: cancel)   // back online; result.dropped: revoked vaults
+_ = try await vault.sync(options: SyncOptions(localChanged: true, acceptServerState: false), cancel: cancel)
+```
+```cpp tab="C++"
+ov::ClientConfig config{"", "Laptop", ov::Platform::QtLinux, true, false, ov::ServerConfig{}};   // offline = true
+// ... new_client with a persistent BlobCache, then connect as usual
+ov::call([&] { return account->unlock(std::move(password), {}, *cancel); });   // works offline
+auto vault = ov::call([&] { return account->open_vault(vault_id, *cancel); });   // offline: the local copy
+
+try {
+    ov::call([&] { return vault->write_field("ov://Home/Wifi/password", to_bytes("new"), false, *cancel); });   // to_bytes: std::string → rust::Vec<uint8_t>
+} catch (const ov::Error &e) {
+    if (e.code() != "network_error") throw;   // offline: the edit is kept and merges in later
+}
+
+auto result = ov::call([&] { return account->reconnect(*cancel); });   // result.dropped: revoked vaults
+ov::call([&] { return vault->sync(true, *cancel); });                  // uploads the kept edit
 ```
 
 ## What falls back
