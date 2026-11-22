@@ -29,8 +29,9 @@ openvireo-connect --version
 
 It's signed the same way too: the macOS binaries with a notarized Developer ID, the Windows one with Azure
 Artifact Signing, and the checksums with the OpenVireo release key; see
-[Verifying the binaries](cli.md#verifying-the-binaries). The `ov` binary has connect built in as `ov connect`,
-so you don't need both.
+[Verifying the binaries](cli.md#verifying-the-binaries). The native `ov` (from openvireo-core's releases)
+doesn't have connect built in: `ov connect` runs `openvireo-connect` from your `PATH` with the same
+arguments, so install both. (The TypeScript `ov` up to 0.11.0 had it built in.)
 
 With Node ≥ 20, `npm install -g @openvireo/connect` installs it from GitHub Packages (see
 [Install](index.md#install)). To build it from source, clone the repository as for
@@ -58,7 +59,7 @@ curl -H "Authorization: Bearer $(cat eso.token)" \
 # {"value":"…"}
 ```
 
-`ov connect` is the same as `openvireo-connect serve` (this package's bin, `node dist/bin.js`), and
+`ov connect` runs `openvireo-connect serve` (this package's bin, `node dist/bin.js`), and
 `ov connect token` as `openvireo-connect token`; run as `openvireo-connect`, the usage, errors and the
 `listening on` line name it that way, and `openvireo-connect --version` prints its version.
 
