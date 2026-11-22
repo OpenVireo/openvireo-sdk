@@ -71,7 +71,6 @@
   },
   "files": [
     "dist",
-    "vendor",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE"
@@ -83,7 +82,7 @@
     "smoke": "node scripts/smoke.mjs && bun scripts/smoke.mjs"
   },
   "dependencies": {
-    "@openvireo/core-wasm": "file:vendor/core-wasm/openvireo-core-wasm-0.0.0.tgz"
+    "@openvireo/core-wasm": "1.0.0"
   },
   "devDependencies": {
     "fake-indexeddb": "6.2.2"
