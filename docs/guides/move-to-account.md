@@ -95,11 +95,24 @@ val summary = vault.importFrom(file, LocalImportMode.Merge)   // added, updated,
 // or: LocalImportMode.Copies(groupId), with vault.importTargets() listing the groups to offer
 vault.sync(SyncOptions(localChanged = true), CancelToken())
 ```
+```java tab="Java"
+JVault file = client.openLocal(fileBytes, new KdbxCredentials(password, null, null)).join();
+ImportSummary summary = vault.importFrom(file, LocalImportMode.Merge.INSTANCE);   // added, updated, unchanged
+// or: new LocalImportMode.Copies(groupId), with vault.importTargets() listing the groups to offer
+vault.sync(new SyncOptions(true, false)).join();
+```
 ```swift tab="Swift"
 let file = try await client.openLocal(kdbx: fileBytes, credentials: KdbxCredentials(password: password, keyFile: nil), cancel: cancel)
 let summary = try vault.importFrom(source: file, mode: .merge)   // added, updated, unchanged
 // or: .copies(parentGroupId: groupId), with vault.importTargets() listing the groups to offer
 _ = try await vault.sync(options: SyncOptions(localChanged: true, acceptServerState: false), cancel: cancel)
+```
+```cpp tab="C++"
+ov::KdbxCredentials creds{true, std::move(password), false, {}, false, {}};
+auto file = ov::call([&] { return client->open_local(std::move(file_bytes), std::move(creds), *cancel); });
+ov::LocalImportMode merge{ov::LocalImportKind::Merge, ""};   // or {Copies, group_id}: vault->import_targets() lists them
+auto summary = ov::call([&] { return vault->import_from(*file, merge); });   // added, updated, unchanged
+ov::call([&] { return vault->sync(true, *cancel); });
 ```
 
 - `importInto` merges by entry and group UUID and keeps the newer version of each entry (the older goes into

@@ -362,6 +362,15 @@ try await confirmWithBob(bob.publicKeys.fingerprint)
 _ = try await account.shareVaultWithKeys(vaultId: vaultId, grantee: .principal(bob.principal), role: .write,
                                          keys: bob.publicKeys, cancel: cancel)
 ```
+```cpp tab="C++"
+auto bob = ov::call([&] { return account->look_up("bob@example.com", *cancel); });
+const auto &k = bob.public_keys;
+auto slice = [](const rust::Vec<std::uint8_t> &v) { return rust::Slice<const std::uint8_t>(v.data(), v.size()); };
+if (!ov::verify_public_keys(slice(k.enc_pk), slice(k.sign_pk), slice(k.sig))) throw std::runtime_error("Bob's keys don't verify");
+confirm_with_bob(k.fingerprint);
+ov::Grantee grantee{ov::GranteeKind::Principal, bob.principal};
+ov::call([&] { return account->share_vault_with_keys(vault_id, grantee, ov::VaultRole::Write, k, *cancel); });
+```
 
 ## Revoking and rotating
 

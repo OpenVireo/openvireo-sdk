@@ -277,6 +277,20 @@ for (f in opened.payload.fields) {
     // render as plain text; hide f.protected values until shown
 }
 ```
+```java tab="Java"
+String api = account.serverConfig().getApi();   // or the share host's API, without an account
+ShareInfo info = client.shareInfo(api, JOv.parseShareLink(link).getId()).join();   // doesn't count as an open
+// Show a "Reveal" button and open only when it's pressed: link previews then can't use up a one-time link.
+byte[] passcode = info.getKdf() != null ? askForPasscode().getBytes(StandardCharsets.UTF_8) : null;
+OpenedShare opened = client.openShare(api, link.getBytes(StandardCharsets.UTF_8), passcode, info).join();
+
+for (ShareField f : opened.getPayload().getFields()) {
+    byte[] shown = f.getK().equals("totp")
+        ? JOv.totpCode(JOv.parseTotpUri(f.getValue()), System.currentTimeMillis()).getCode()
+        : f.getValue();
+    // render as plain text; hide f.getProtected() values until shown
+}
+```
 ```swift tab="Swift"
 let api = account.serverConfig().api       // or the share host's API, without an account
 let info = try await client.shareInfo(api: api, shareId: try parseShareLink(link: link).id, cancel: cancel)
@@ -289,6 +303,20 @@ for f in opened.payload.fields {
         ? try totpCode(params: try parseTotpUri(uri: f.value), nowMs: Int64(Date().timeIntervalSince1970 * 1000)).code
         : f.value
     // render as plain text; hide f.protected values until shown
+}
+```
+```cpp tab="C++"
+auto api = ov::call([&] { return account->server_config(); }).api;   // or the share host's API, without an account
+auto parts = ov::call([&] { return ov::parse_share_link(link); });
+ov::wipe(parts.key);
+auto info = ov::call([&] { return client->share_info(api, parts.id, *cancel); });   // doesn't count as an open
+// Show a "Reveal" button and open only when it's pressed: link previews then can't use up a one-time link.
+ov::OpenShareInput input{to_bytes(link), false, {}, true, info};
+if (info.has_kdf) { input.has_passcode = true; input.passcode = to_bytes(ask_for_passcode()); }
+auto opened = ov::call([&] { return client->open_share(api, std::move(input), *cancel); });
+
+for (const auto &f : opened.payload.fields) {
+    // f.k == "totp": ov::totp_code(ov::parse_totp_uri(f.value), now_ms).code; hide f.is_protected values until shown
 }
 ```
 
