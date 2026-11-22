@@ -33,6 +33,10 @@ expect(copy.read("ov://Personal/GitHub/password")).toBe("hunter2");
 
 Every `Account`, `ServiceAccount` and `SelfHostedSync` takes a `fetch` option, which is how the fakes plug in.
 
+The fakes are TypeScript only. The core's own test servers (the `test-server` feature: `TestServers` in the C++
+binding, `opaqueServer*` in Swift test builds) are for the bindings' tests and aren't in release builds; from
+Python, Kotlin or Java, test against a local account and sync server (see the self-hosting docs).
+
 ## Useful hooks
 
 | | |
