@@ -11,7 +11,7 @@ Loads secrets from OpenVireo vaults into a job with a service account, and masks
 ```
 
 **Documentation:** [docs/github-action.md](../../docs/github-action.md), also on
-[openvireo.com/docs/sdk/github-action](https://openvireo.com/docs/sdk/github-action/).
+[developer.openvireo.com/cli/github-action/](https://developer.openvireo.com/cli/github-action/).
 
 ## Development
 

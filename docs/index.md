@@ -200,7 +200,7 @@ limited to a few vaults.
 - [Merge behaviour](merge-behaviour.md): how concurrent edits are combined
 - [Lower-level APIs](lower-level.md): the sync loop, HTTP clients, vaults and KDBX, Argon2, the core modules
 - [Migrating to 1.0](migrating-to-1.0.md): from 0.x (kdbxweb) to the core's handles
-- [API reference](https://openvireo.com/docs/sdk/api/): every export, generated from the source
+- [API reference](https://developer.openvireo.com/sdk/api/): every export, generated from the source
   (`npm run docs:api` builds it locally)
 
 ## Subpath imports

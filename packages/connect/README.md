@@ -19,7 +19,7 @@ Download the signed `openvireo-connect` binary from the
 [Install](../../docs/connect.md#install).
 
 **Documentation:** [docs/connect.md](../../docs/connect.md), also on
-[openvireo.com/docs/sdk/connect](https://openvireo.com/docs/sdk/connect/).
+[developer.openvireo.com/cli/connect/](https://developer.openvireo.com/cli/connect/).
 
 ## Development
 

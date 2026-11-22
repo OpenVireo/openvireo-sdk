@@ -27,7 +27,7 @@ OpenVireo Sync Server.
 ## Documentation
 
 In [`docs/`](../../docs/index.md) at the repository root, and on
-[openvireo.com/docs/sdk](https://openvireo.com/docs/sdk/):
+[developer.openvireo.com/sdk/](https://developer.openvireo.com/sdk/):
 
 - Guides: [hosted accounts](../../docs/guides/hosted-account.md),
   [vaults and sharing](../../docs/guides/vaults-and-sharing.md), [live updates](../../docs/guides/events.md),
@@ -36,7 +36,7 @@ In [`docs/`](../../docs/index.md) at the repository root, and on
   [self-hosted sync servers](../../docs/guides/self-hosted-sync.md), [testing](../../docs/guides/testing.md)
 - Reference: [concepts](../../docs/concepts.md), [errors](../../docs/errors.md),
   [merge behaviour](../../docs/merge-behaviour.md), [lower-level APIs](../../docs/lower-level.md), and the
-  [API reference](https://openvireo.com/docs/sdk/api/) (`npm run docs:api` at the repository root builds it)
+  [API reference](https://developer.openvireo.com/sdk/api/) (`npm run docs:api` at the repository root builds it)
 
 The protocol is specified in OpenVireo's
 [SPEC.md](https://github.com/openvireo/openvireo/blob/develop/docs/plans/accounts/SPEC.md) (ov v1).

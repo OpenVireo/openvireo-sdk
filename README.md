@@ -9,7 +9,7 @@ npm workspace for the OpenVireo accounts/sharing client code. OpenVireo is a for
 | [`packages/connect`](packages/connect/README.md) | `ov connect`: REST server holding one service account token; `deploy/` has ESO webhook manifests and Helm values |
 | [`packages/github-action`](packages/github-action/README.md) | JavaScript action that loads secrets into a job and masks them (`action.yml`, bundled `dist/`) |
 
-**Documentation** is in [`docs/`](docs/index.md) and on [openvireo.com/docs/sdk](https://openvireo.com/docs/sdk/):
+**Documentation** is in [`docs/`](docs/index.md) and on [developer.openvireo.com/sdk/](https://developer.openvireo.com/sdk/):
 concepts, guides, errors, the CLI, connect and the GitHub Action.
 
 ```sh
@@ -25,8 +25,9 @@ vitest aliases), and share the in-memory servers in `packages/sdk/test/helpers/w
 
 ## Docs
 
-`docs/` is Markdown that openvireo.com publishes from a release tag (the site's `npm run docs:dev`). Keep
-links between pages relative so they work on GitHub and on the site. `npm run typecheck` also type-checks
+`docs/` is Markdown that [developer.openvireo.com](https://developer.openvireo.com/sdk/) publishes from a release tag
+(`npm run sync` in openvireo-developer). Keep links between pages relative so they work on GitHub and on the site.
+Consecutive code blocks marked `tab="Label"` (` ```python tab="Python" `) become one tabbed group there. `npm run typecheck` also type-checks
 every ` ```ts ` block in `docs/` and the package READMEs against the SDK's sources
 (`scripts/check-doc-samples.mjs`). A sample may use names it doesn't declare; to check it fully, declare
 them in an HTML comment right before the block, which neither GitHub nor the site shows:

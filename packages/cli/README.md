@@ -10,7 +10,7 @@ ov run --env-file .env.tpl -- ./migrate.sh     # references resolved in the envi
 ```
 
 **Documentation:** [docs/cli.md](../../docs/cli.md), also on
-[openvireo.com/docs/sdk/cli](https://openvireo.com/docs/sdk/cli/).
+[developer.openvireo.com/cli/](https://developer.openvireo.com/cli/).
 
 ## Install
 
