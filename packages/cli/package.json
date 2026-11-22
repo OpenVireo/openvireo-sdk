@@ -1,6 +1,7 @@
 {
   "name": "@openvireo/cli",
   "version": "1.0.0",
+  "private": true,
   "description": "openvireo: read, inject and rotate OpenVireo vault secrets with a service account or a user login",
   "license": "MIT OR Apache-2.0",
   "repository": {

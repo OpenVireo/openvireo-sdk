@@ -60,8 +60,8 @@ The protocol is specified in OpenVireo's
 Since 1.0 the SDK is a TypeScript layer over `@openvireo/core-wasm`, openvireo-core compiled to WebAssembly:
 crypto, OPAQUE, sessions, the keyring, sync, KDBX and merge run in the same code as the iOS and desktop apps.
 `@openvireo/sdk/share` loads only the core's lite module (about 190 KB gzip); the rest loads the full module
-(about 880 KB gzip) the first time it's used. Until `@openvireo/core-wasm` is published, it's vendored under
-`vendor/core-wasm` (see its `SOURCE.md`). Upgrading from 0.x: [docs/migrating-to-1.0.md](../../docs/migrating-to-1.0.md).
+(about 880 KB gzip) the first time it's used. `@openvireo/core-wasm` comes from GitHub Packages like the SDK
+(openvireo-core [releases](https://github.com/OpenVireo/openvireo-core/releases)). Upgrading from 0.x: [docs/migrating-to-1.0.md](../../docs/migrating-to-1.0.md).
 
 ## Development
 

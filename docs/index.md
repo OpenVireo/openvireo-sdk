@@ -13,7 +13,7 @@ encrypted `.kdbx` files, wrapped keysets and sealed keys; see [Concepts](concept
 | Package | What it is |
 |---|---|
 | `@openvireo/sdk` | The library: accounts, vaults, sharing, sync, merge, service accounts |
-| `@openvireo/cli` | `ov`: read, inject and rotate secrets from scripts and CI. See [CLI](cli.md) |
+| `ov` | A native binary (from openvireo-core) to read, inject and rotate secrets from scripts and CI. See [CLI](cli.md) |
 | `@openvireo/connect` | `ov connect`: a REST server for one service account, with Kubernetes manifests. See [Connect](connect.md) |
 | GitHub Action | Loads secrets into a workflow and masks them. See [GitHub Action](github-action.md) |
 

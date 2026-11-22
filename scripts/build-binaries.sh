@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
-# Cross-compiles `ov` and `openvireo-connect` into single binaries (Bun --compile) for every release
+# Cross-compiles `openvireo-connect` into single binaries (Bun --compile) for every release
 # platform and packs each into an archive with the licences, plus a SHA256SUMS file:
 #
 #   scripts/build-binaries.sh [out-dir]                    # compile and pack; default: dist-binaries/
 #   scripts/build-binaries.sh --compile-only <dir>         # only the unpacked <name>-<version>-<platform>/ dirs
 #   scripts/build-binaries.sh --pack-only <dir> [out-dir]  # pack those dirs (default: into <dir>)
 #
-# gives ov-<version>-<platform>.tar.gz (.zip for Windows) and openvireo-connect-<version>-<platform>…
+# gives openvireo-connect-<version>-<platform>.tar.gz (.zip for Windows). `ov` is the native Rust binary,
+# released from openvireo-core.
 # The release signs the executables between the two stages (scripts/macos/sign.sh, Artifact Signing), so
 # that the archives and SHA256SUMS hold the signed files.
 # Compiling builds the SDK and connect first, since Bun resolves @openvireo/sdk through the workspace's dist/.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-version="$(node -p "require('$root/packages/cli/package.json').version")"
+version="$(node -p "require('$root/packages/connect/package.json').version")"
 platforms=(linux-x64 linux-arm64 darwin-x64 darwin-arm64 windows-x64)
-names=(ov openvireo-connect)
+names=(openvireo-connect)
 
 mode=all
 case "${1:-}" in
@@ -42,7 +43,6 @@ compile_all() {
   cd "$root"
   npm run build -w @openvireo/sdk -w @openvireo/connect >/dev/null
   for platform in "${platforms[@]}"; do
-    compile ov packages/cli/src/bin.ts packages/cli "$platform" "$dest"
     compile openvireo-connect packages/connect/src/bin.ts packages/connect "$platform" "$dest"
   done
 }

@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  packages: read # npm ci installs @openvireo/core-wasm from GitHub Packages
 
 jobs:
   check:
@@ -19,7 +20,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@openvireo"
       - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
