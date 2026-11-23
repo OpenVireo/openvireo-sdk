@@ -240,11 +240,11 @@ account.signOut(false).join();  // ends the session on the server and forgets it
 account.signOut(true).join();   // also forgets the trusted Secret Key
 ```
 ```swift tab="Swift"
-if account.isSignedIn() && !account.isUnlocked() {
+if try account.isSignedIn(), try !account.isUnlocked() {
     _ = try await account.unlock(password: password, secretKey: nil, cancel: cancel)
 }
 
-account.lock()                                              // wipes the keys from memory; the session stays
+try account.lock()                                          // wipes the keys from memory; the session stays
 try await account.signOut(forgetDevice: false, cancel: cancel)   // ends the session and forgets it here
 try await account.signOut(forgetDevice: true, cancel: cancel)    // also forgets the trusted Secret Key
 ```
@@ -409,8 +409,8 @@ account.changeEmail("new@example.com", code, password).join();
 String url = new String(account.webSessionUrl("/settings").join(), StandardCharsets.UTF_8);   // one-time link (60 s)
 ```
 ```swift tab="Swift"
-account.email()         // the signed-in email
-account.userId()
+try account.email()         // the signed-in email
+try account.userId()
 try account.fingerprint()   // this account's public key fingerprint, for others to compare
 
 _ = try await account.changePassword(current: current, next: next, kdf: nil, cancel: cancel)   // signs others out
@@ -503,7 +503,7 @@ if let vault = preview.vaults.first, !vault.sharedWith.isEmpty {
 
 let scheduledFor = try await account.deleteAccount(password: password, confirm: typedEmail, cancel: cancel)
 // This device is signed out and its offline cache is gone. The Secret Key stays, so after signing in again:
-if account.deletionScheduledFor() != nil {
+if try account.deletionScheduledFor() != nil {
     try await account.restoreAccount(password: password, cancel: cancel)
 }
 ```

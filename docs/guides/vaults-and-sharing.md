@@ -45,9 +45,9 @@ vault.etag();           // the server version this copy is based on
 let vaults = try await account.vaults(cancel: cancel)   // VaultInfo: id, name, role (.read, .write, .manage), orgId
 
 let vault = try await account.openVault(vaultId: vaults[0].id, cancel: cancel)   // downloads and decrypts it
-vault.name()
+try vault.name()
 try vault.entries(includeRecycleBin: false)   // EntrySummary records; vault.entry(entryId:) the full record
-vault.etag()                                  // the server version this copy is based on
+try vault.etag()                              // the server version this copy is based on
 ```
 ```cpp tab="C++"
 auto vaults = ov::call([&] { return account->vaults(*cancel); });   // id, name, role, org_id, ...

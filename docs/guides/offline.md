@@ -89,7 +89,7 @@ let client = OvClient(
 let account = try await client.connect(issuer: issuer, cancel: cancel)
 _ = try await account.unlock(password: password, secretKey: nil, cancel: cancel)   // works offline
 let vault = try await account.openVault(vaultId: vaultId, cancel: cancel)            // offline: the local copy
-account.isOffline()                                                                 // true while unreachable
+try account.isOffline()                                                             // true while unreachable
 
 do {
     _ = try await vault.writeField(reference: "ov://Home/Wifi/password", value: Data("new".utf8), create: false, cancel: cancel)

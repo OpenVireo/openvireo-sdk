@@ -71,7 +71,7 @@ loop: while let event = try await stream.next(cancel: cancel) {
     switch event {
     case .vaultChanged(let vaultId, let etag, _, _):
         // another device uploaded (or deleted) a vault this account can open
-        if vaultId == vault.id() && etag != vault.etag() {
+        if try vaultId == vault.id() && etag != vault.etag() {
             _ = try await vault.sync(options: SyncOptions(localChanged: false, acceptServerState: false), cancel: cancel)
         }
     case .vaultsChanged(let vaults): render(vaults)   // access changed

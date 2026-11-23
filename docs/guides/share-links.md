@@ -292,7 +292,7 @@ for (ShareField f : opened.getPayload().getFields()) {
 }
 ```
 ```swift tab="Swift"
-let api = account.serverConfig().api       // or the share host's API, without an account
+let api = try account.serverConfig().api   // or the share host's API, without an account
 let info = try await client.shareInfo(api: api, shareId: try parseShareLink(link: link).id, cancel: cancel)
 // Show a "Reveal" button and open only when it's pressed: link previews then can't use up a one-time link.
 let passcode = info.kdf != nil ? Data(askForPasscode().utf8) : nil
