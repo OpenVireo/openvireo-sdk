@@ -1,6 +1,6 @@
 {
   "name": "@openvireo/sdk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OpenVireo accounts, vault sync and sharing SDK (ov v1) for browsers, Node and Bun",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -82,7 +82,7 @@
     "smoke": "node scripts/smoke.mjs && bun scripts/smoke.mjs"
   },
   "dependencies": {
-    "@openvireo/core-wasm": "1.0.0"
+    "@openvireo/core-wasm": "1.1.0"
   },
   "devDependencies": {
     "fake-indexeddb": "6.2.2"
