@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Load secrets
-        uses: openvireo/openvireo-sdk/packages/github-action@<ref>
+        uses: openvireo/openvireo-sdk/packages/github-action@v1.0.0
         with:
           service-account-token: ${{ secrets.OPENVIREO_SERVICE_ACCOUNT_TOKEN }}
           secrets: |
