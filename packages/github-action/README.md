@@ -3,7 +3,7 @@
 Loads secrets from OpenVireo vaults into a job with a service account, and masks every value in the logs.
 
 ```yaml
-      - uses: openvireo/openvireo-sdk/packages/github-action@v1.0.0
+      - uses: openvireo/openvireo-sdk/packages/github-action@v1.0.1
         with:
           service-account-token: ${{ secrets.OPENVIREO_SERVICE_ACCOUNT_TOKEN }}
           secrets: |

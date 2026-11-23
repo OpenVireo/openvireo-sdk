@@ -18,7 +18,7 @@ arm64), macOS (x64, arm64) and Windows (x64), with a `SHA256SUMS` file and its G
 `SHA256SUMS.asc`:
 
 ```sh
-v=VERSION p=linux-x64    # VERSION: the core release without the v, e.g. 1.0.0; p: linux-arm64 | darwin-x64 | darwin-arm64
+v=VERSION p=linux-x64    # VERSION: the core release without the v, e.g. 1.1.0; p: linux-arm64 | darwin-x64 | darwin-arm64
 for f in "ov-$v-$p.tar.gz" SHA256SUMS SHA256SUMS.asc; do
   curl -fLO "https://github.com/OpenVireo/openvireo-core/releases/download/v$v/$f"
 done
@@ -227,7 +227,7 @@ You need Node ≥ 20 and npm, and [Bun](https://bun.sh) 1.3 or later for the sin
 git clone https://github.com/OpenVireo/openvireo-sdk && cd openvireo-sdk
 npm ci
 npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/ov
-./packages/cli/dist/ov version             # ov 1.0.0
+./packages/cli/dist/ov version             # ov 1.0.1
 npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP
 ```
 

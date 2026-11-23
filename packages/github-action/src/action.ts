@@ -41,7 +41,7 @@ export async function run(io: ActionIo, opts: { fetch?: FetchLike } = {}): Promi
       setOutput(io, "loaded", "");
       return 0;
     }
-    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/1.0.0" } });
+    const sa = await ServiceAccount.fromToken(token, { fetch: opts.fetch, headers: { "User-Agent": "openvireo-github-action/1.0.1" } });
     const src = serviceAccountSource(sa);
     const resolved: [string, string][] = [];
     try {
