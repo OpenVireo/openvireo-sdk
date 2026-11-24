@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  addCustomIconToDb,
   addEntryToDb,
   collectAllDbData,
   createNewKdbx,
   createVaultKdbx,
+  customIconPng,
   decryptKdbx,
   editEntryInDb,
   fieldText,
@@ -16,6 +18,8 @@ import {
   parseReference,
   readField,
   saveKdbx,
+  saveLocalVault,
+  setEntryCustomIconInDb,
   vaultCredentials,
   writeField,
 } from "../src/vault/index.js";
@@ -98,6 +102,34 @@ describe("entry helpers (web app shapes)", () => {
     const { entries } = collectAllDbData(vault);
     expect(entries.map((x) => [x.title, x.passwordValue])).toEqual([["Mail", "p2"]]);
     await expect(decryptKdbx(created.fileBuffer, "wrong")).rejects.toMatchObject({ code: "vault_key_mismatch" });
+  });
+
+  it("custom icons: add, set on an entry, collect, save, clear", async () => {
+    // a 1x1 PNG
+    const png = fromHex(
+      "89504e470d0a1a0a0000000d4948445200000001000000010806000000" +
+        "1f15c4890000000d49444154789c6360f8cfc0f01f0005000201a5f2c84a0000000049454e44ae426082",
+    );
+    const created = await createNewKdbx("Icons", "pw");
+    const vault = created.vault;
+    const root = created.groups.find((g) => g.parentUuid === null)!.uuid;
+    const id = addEntryToDb(vault, root, { title: "Site", username: "", passwordValue: "", url: "https://example.com", notes: "", tags: [] });
+    expect(collectAllDbData(vault).entries[0]).toMatchObject({ icon: 0 });
+    expect(collectAllDbData(vault).entries[0]!.customIcon).toBeUndefined();
+
+    const iconId = addCustomIconToDb(vault, png);
+    expect(addCustomIconToDb(vault, png)).toBe(iconId);
+    setEntryCustomIconInDb(vault, id, iconId);
+    expect(collectAllDbData(vault).entries[0]!.customIcon).toBe(iconId);
+    expect(customIconPng(vault, iconId)).toEqual(png);
+    expect(customIconPng(vault, "0".repeat(32))).toBeNull();
+
+    const reopened = await decryptKdbx(await saveLocalVault(vault), "pw");
+    expect(reopened.entries[0]!.customIcon).toBe(iconId);
+    expect(customIconPng(reopened.vault, iconId)).toEqual(png);
+
+    setEntryCustomIconInDb(vault, id, null);
+    expect(collectAllDbData(vault).entries[0]!.customIcon).toBeUndefined();
   });
 });
 

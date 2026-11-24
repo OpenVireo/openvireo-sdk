@@ -47,7 +47,10 @@ credentials)`, `vault.saveLocal()`, and the entry, group, field, history and att
 `credentials` are `{ password?, keyFile? }` as bytes; `passwordCredentials(password)` and
 `vaultCredentials(vaultKey)` make them. The web app's plain-data helpers work on a `Vault`:
 `decryptKdbx`, `createNewKdbx`, `collectAllDbData`, `addEntryToDb`, `editEntryInDb` (history first),
-`deleteEntryFromDb`, group helpers and `exportSelectedGroupsToKdbx`. For references and items:
+`deleteEntryFromDb`, group helpers and `exportSelectedGroupsToKdbx`. Entry icons (such as downloaded
+favicons) are PNGs stored in the database: `addCustomIconToDb` adds one and returns its id,
+`setEntryCustomIconInDb` sets or clears an entry's, and `customIconPng` reads one back by the
+`customIcon` id that `collectAllDbData` reports. For references and items:
 `parseReference`, `readField`, `writeField`, `findEntry`, `parseItemReference`, `itemOf`, `listItems` and
 `setItemFields`. Entry and group ids are 32 lowercase hex digits.
 
