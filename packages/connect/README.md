@@ -1,8 +1,15 @@
-# @openvireo/connect: `openvireo-connect` / `ov connect`
+# @openvireo/connect (deprecated)
 
-A small self-hosted REST server that holds **one service account token** and gives any language
-HTTP access to the vaults that service account can open, with its own scoped bearer tokens. It plugs into
-the External Secrets Operator on Kubernetes (`deploy/`).
+> **Deprecated: use `ov connect` from [openvireo-core](https://github.com/OpenVireo/openvireo-core/releases)
+> or the container image `ghcr.io/openvireo/openvireo-connect`.** They take the same environment variables
+> and serve the same API, so moving is a swap of the binary or image. This is the last release of this
+> package; see [Migrating from openvireo-connect](../../docs/connect.md#migrating-from-openvireo-connect).
+> The Helm chart and Kubernetes manifests moved to openvireo-core
+> [`deploy/connect/`](https://github.com/OpenVireo/openvireo-core/tree/develop/deploy/connect).
+
+The TypeScript version of connect: a small self-hosted REST server that holds **one service account token**
+and gives any language HTTP access to the vaults that service account can open, with its own scoped bearer
+tokens.
 
 ```sh
 ov connect token --name app --vault "Team Infra" > app.token 2> entry.txt
@@ -11,12 +18,9 @@ curl -H "Authorization: Bearer $(cat app.token)" \
   "http://127.0.0.1:8080/v1/vaults/Team%20Infra/items/Deploy/Database?field=password"
 ```
 
-This package's own bin is `openvireo-connect` (`openvireo-connect [serve]`, `openvireo-connect token …`,
-`openvireo-connect --version`); `ov connect` is the same server inside the CLI.
-
-Download the signed `openvireo-connect` binary from the
-[releases](https://github.com/OpenVireo/openvireo-sdk/releases), or build it from source; see
-[Install](../../docs/connect.md#install).
+This package's bin, `openvireo-connect` (`openvireo-connect [serve]`, `openvireo-connect token …`,
+`openvireo-connect --version`), still works the same way, and prints a deprecation notice on stderr when it
+starts serving. `createConnectHandler` and `newConnectToken` are still exported for embedding.
 
 **Documentation:** [docs/connect.md](../../docs/connect.md), also on
 [developer.openvireo.com/cli/connect/](https://developer.openvireo.com/cli/connect/).
@@ -25,8 +29,6 @@ Download the signed `openvireo-connect` binary from the
 
 ```sh
 npm run typecheck -w @openvireo/connect && npm test -w @openvireo/connect && npm run build -w @openvireo/connect
-helm lint deploy/helm/openvireo-connect --set serviceAccountToken=x --set 'connectTokens[0].name=a' --set "connectTokens[0].sha256=$(printf 'a%.0s' {1..64})"
-kubectl kustomize deploy/kubernetes
 ```
 
 The tests run the handler and a real HTTP listener against the SDK's in-memory auth and sync servers

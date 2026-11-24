@@ -14,9 +14,9 @@ ov run --env-file .env.tpl -- ./migrate.sh     # references resolved in the envi
 
 ## Install
 
-Download the signed `ov` binary for Linux, macOS or Windows from the
-[releases](https://github.com/OpenVireo/openvireo-sdk/releases) (no Node needed), or
-`npm install -g @openvireo/cli`; see [Install](../../docs/cli.md#install).
+`ov` is now the native binary from
+[openvireo-core's releases](https://github.com/OpenVireo/openvireo-core/releases) (no Node needed); see
+[Install](../../docs/cli.md#install). This repo's releases no longer have binaries.
 
 ## Building from source
 

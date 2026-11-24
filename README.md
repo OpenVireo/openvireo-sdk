@@ -6,7 +6,7 @@ npm workspace for the OpenVireo accounts/sharing client code. OpenVireo is a for
 |---|---|
 | [`packages/sdk`](packages/sdk/README.md) | `@openvireo/sdk`: the shared TypeScript SDK (crypto, OPAQUE, auth and sync clients, vault, merge, `ServiceAccount`) |
 | [`packages/cli`](packages/cli/README.md) | Not published: the GitHub Action's template and masking helpers. `ov` itself is the native binary from [openvireo-core](https://github.com/OpenVireo/openvireo-core/releases) |
-| [`packages/connect`](packages/connect/README.md) | `ov connect`: REST server holding one service account token; `deploy/` has ESO webhook manifests and Helm values |
+| [`packages/connect`](packages/connect/README.md) | `@openvireo/connect`, deprecated: the TypeScript REST server holding one service account token. Use `ov connect` from openvireo-core; its Helm chart and manifests are in openvireo-core `deploy/connect/` |
 | [`packages/github-action`](packages/github-action/README.md) | JavaScript action that loads secrets into a job and masks them (`action.yml`, bundled `dist/`) |
 
 **Documentation** is in [`docs/`](docs/index.md) and on [developer.openvireo.com/sdk/](https://developer.openvireo.com/sdk/):
@@ -55,9 +55,9 @@ cross-package pins in step), commit, then push a matching tag: `git tag v0.1.0 &
 - **npmjs.com**, once the repository variable `NPMJS_PUBLISH` is `true`. The first publish needs an
   `NPM_TOKEN` secret (a granular token that can publish `@openvireo/*`); after it, add this repo and
   `release.yml` as a trusted publisher for each package on npmjs.com and delete the secret.
-- **GitHub Releases**: the `ov` and `openvireo-connect` binaries, signed (macOS: notarized Developer ID,
-  Windows: Azure Artifact Signing) with a GPG-signed `SHA256SUMS`. A tag fails to release if signing isn't
-  set up; see [.github/RELEASE-SIGNING.md](.github/RELEASE-SIGNING.md).
+- **GitHub Releases**: a release with notes only. There are no binaries: `ov` (including `ov connect`) and
+  connect's container image `ghcr.io/openvireo/openvireo-connect` come from
+  [openvireo-core's releases](https://github.com/OpenVireo/openvireo-core/releases), signed there.
 
 Installing from GitHub Packages needs a token with `read:packages`, even for public packages:
 

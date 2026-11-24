@@ -43,8 +43,8 @@ Expand-Archive "ov-$v-windows-x64.zip" .
 `SHA256SUMS` also lists the release's other files (the core's libraries for app builds), so check with
 `--ignore-missing` or compare the one line.
 
-`ov connect` runs the REST server, which is a separate program, `openvireo-connect`: install it from this
-repo's releases (see [Connect](connect.md#install)) and put it on your `PATH`.
+`ov connect` runs the REST server (from core 1.2.0; see [Connect](connect.md)). For containers, the core
+release also publishes it as the image `ghcr.io/openvireo/openvireo-connect`.
 
 ### Verifying the binaries
 
@@ -82,8 +82,9 @@ The native `ov` was checked against the TypeScript one by running both on the sa
 test servers: help text, arguments, output and exit codes match. A session saved by `ov login` in one works
 in the other (same `session.json`). What differs:
 
-- **`ov connect`** runs `openvireo-connect` from your `PATH` with the same arguments. The TypeScript `ov` had
-  connect built in. Without it, `ov connect` exits 1 and says where to get it.
+- **`ov connect`** is built in from core 1.2.0, as it was in the TypeScript `ov`. Core 1.0 and 1.1 ran a
+  separate `openvireo-connect` from your `PATH` instead (see
+  [Migrating from openvireo-connect](connect.md#migrating-from-openvireo-connect)).
 - **An empty password stays protected.** An entry created with an empty `Password` keeps its protected
   flag after the upload, as KeePassXC keeps it; the TypeScript `ov` up to 0.11.0 lost the flag, so
   `ov item get` showed that field differently.
@@ -219,7 +220,7 @@ cargo test -p ov                           # the CLI tests, against in-memory se
 Check out a release tag to build that release rather than `develop`. openvireo-core's
 [`docs/building.md`](https://github.com/OpenVireo/openvireo-core/blob/develop/docs/building.md) has the rest.
 
-### The TypeScript `ov` and `openvireo-connect`
+### Building the TypeScript `ov`
 
 You need Node ≥ 20 and npm, and [Bun](https://bun.sh) 1.3 or later for the single binary:
 
@@ -232,13 +233,4 @@ npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory 
 ```
 
 Without Bun, `npm run build` builds every package for Node, and `node packages/cli/dist/bin.js` runs `ov`.
-
-The release archives for every platform (both `ov` and `openvireo-connect`) come from one script, which
-cross-compiles, so it works on any of them:
-
-```sh
-scripts/build-binaries.sh                  # every release platform, both binaries, archives and SHA256SUMS in dist-binaries/
-scripts/build-binaries.sh --compile-only dist-binaries   # the same in two stages, signing in between (as the release does):
-scripts/macos/sign.sh dist-binaries [identity]           # macOS: hardened runtime + JIT entitlement; ad hoc without an identity
-scripts/build-binaries.sh --pack-only dist-binaries      # archives and SHA256SUMS next to them
-```
+The SDK's releases no longer have binaries.
