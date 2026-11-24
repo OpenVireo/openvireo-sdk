@@ -18,6 +18,10 @@ export interface KeePassEntry {
   tags: string[];
   expiryTime?: Date;
   lastModified?: Date;
+  /** Standard KeePass icon number. */
+  icon: number;
+  /** Custom icon id (e.g. a downloaded favicon), when the entry has one; read it with `customIconPng`. */
+  customIcon?: string;
 }
 
 export interface KeePassGroup {
@@ -36,6 +40,8 @@ export interface EntryData {
   notes: string;
   tags: string[];
   expiryTime?: Date;
+  /** Custom icon id (from `addCustomIconToDb`). */
+  customIcon?: string;
 }
 
 /** A field's text from an entry record ("" when missing). */
@@ -70,6 +76,8 @@ export function collectAllDbData(vault: Vault): { entries: KeePassEntry[]; group
       tags: [...e.tags],
       ...(e.expiresAt !== undefined ? { expiryTime: new Date(e.expiresAt * 1000) } : {}),
       ...(e.modifiedAt ? { lastModified: new Date(e.modifiedAt * 1000) } : {}),
+      icon: e.iconId,
+      ...(e.customIcon ? { customIcon: e.customIcon } : {}),
     };
   });
   return { entries, groups };
@@ -100,14 +108,22 @@ export function addEntryToDb(vault: Vault, groupUuid: string, data: EntryData): 
     tags: data.tags,
     expiry: data.expiryTime ? { kind: "at", at: Math.floor(data.expiryTime.getTime() / 1000) } : { kind: "never" },
   };
+  if (data.customIcon) input.customIcon = data.customIcon;
   return vault.addEntry(groupUuid, input);
 }
 
-/** Updates an entry; the previous state goes to its history first (as KeePassXC does). */
+/**
+ * Updates an entry; the previous state goes to its history first (as KeePassXC does). `customIcon: null`
+ * clears the entry's custom icon.
+ */
 export function editEntryInDb(
   vault: Vault,
   entryUuid: string,
-  data: Partial<Omit<EntryData, "expiryTime">> & { expiryTime?: Date | null; fields?: Record<string, string | { value: string; protected: boolean }> },
+  data: Partial<Omit<EntryData, "expiryTime" | "customIcon">> & {
+    expiryTime?: Date | null;
+    customIcon?: string | null;
+    fields?: Record<string, string | { value: string; protected: boolean }>;
+  },
 ): void {
   const fields: FieldInput[] = [];
   if (data.title !== undefined) fields.push(std("Title", data.title));
@@ -122,6 +138,7 @@ export function editEntryInDb(
     expiry: data.expiryTime === undefined ? { kind: "keep" } : data.expiryTime === null ? { kind: "never" } : { kind: "at", at: Math.floor(data.expiryTime.getTime() / 1000) },
   };
   if (data.tags !== undefined) input.tags = data.tags;
+  if (data.customIcon !== undefined) input.customIcon = data.customIcon;
   vault.editEntry(entryUuid, input);
 }
 
@@ -139,6 +156,27 @@ export const emptyRecycleBinInDb = (vault: Vault): void => void vault.emptyRecyc
 export const renameGroupInDb = (vault: Vault, groupUuid: string, newName: string): void => void vault.renameGroup(groupUuid, newName);
 
 export const setGroupIconInDb = (vault: Vault, groupUuid: string, icon: number): void => void vault.setGroupIcon(groupUuid, icon);
+
+/** A custom icon's PNG bytes, or `null` when the database has no icon with that id. */
+export function customIconPng(vault: Vault, iconId: string): Uint8Array | null {
+  try {
+    return vault.customIcon(iconId);
+  } catch (e) {
+    if ((e as { code?: string }).code === "not_found") return null;
+    throw e;
+  }
+}
+
+/** Adds a PNG as a custom icon (an identical one already there is reused); returns its id. */
+export const addCustomIconToDb = (vault: Vault, png: Uint8Array): string => vault.addCustomIcon(png);
+
+/**
+ * Sets an entry's custom icon (from `addCustomIconToDb`), or clears it with `null` so the standard icon
+ * shows again. Like any edit, the previous state goes to the entry's history first.
+ */
+export function setEntryCustomIconInDb(vault: Vault, entryUuid: string, iconId: string | null): void {
+  vault.editEntry(entryUuid, { fields: [], removeFields: [], expiry: { kind: "keep" }, customIcon: iconId });
+}
 
 /** Exports the selected groups (and their entries) into a new password-protected database. */
 export async function exportSelectedGroupsToKdbx(vault: Vault, selected: string[], password: string, kdf: KdbxKdf = { kind: "databaseDefault" }): Promise<Uint8Array> {
