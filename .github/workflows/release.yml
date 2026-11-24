@@ -109,7 +109,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          for p in sdk connect cli; do
+          for p in sdk connect; do
             tgz="$(ls openvireo-$p-*.tgz)"
             v="${tgz#openvireo-$p-}"; v="${v%.tgz}"
             if npm view "@openvireo/$p@$v" version >/dev/null 2>&1; then
