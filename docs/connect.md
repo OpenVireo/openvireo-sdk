@@ -6,41 +6,33 @@ HTTP access to the vaults that service account can open. Callers use connect's *
 vaults and to read or write. Vault data is decrypted inside ov connect, so run it next to its callers
 (same host, pod network) and not on the public internet.
 
-Writes go through the SDK's conditional PUT with merge/retry (`If-Match`; on 412 download, merge, retry),
+Writes go through the same conditional PUT with merge/retry as the apps (`If-Match`; on 412 download, merge, retry),
 so connect, the CLI, Qt and the web app can all edit the same vault. A service account with a `read`
 grant gets 403 on every write.
 
 ## Install
 
-Each [release](https://github.com/OpenVireo/openvireo-sdk/releases) has `openvireo-connect` as a single
-binary (`openvireo-connect-<version>-<platform>.tar.gz`, `.zip` for Windows) for a server without Node or
-the full CLI. Download, check and install it the same way as [`ov`](cli.md#install), with
-`openvireo-connect` in place of `ov`:
+Connect is part of `ov`, the native binary from
+[openvireo-core's releases](https://github.com/OpenVireo/openvireo-core/releases) (from 1.2.0): install `ov`
+as in [CLI: Install](cli.md#install) and run `ov connect`. Nothing else is needed. The binaries are signed and
+the checksums GPG-signed; see [Verifying the binaries](cli.md#verifying-the-binaries).
 
 ```sh
-v=VERSION p=linux-x64    # VERSION: the release without the v, e.g. 0.4.0; p: linux-arm64 | darwin-x64 | darwin-arm64
-for f in "openvireo-connect-$v-$p.tar.gz" SHA256SUMS SHA256SUMS.asc; do
-  curl -fLO "https://github.com/OpenVireo/openvireo-sdk/releases/download/v$v/$f"
-done
-gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum --ignore-missing -c SHA256SUMS
-tar -xzf "openvireo-connect-$v-$p.tar.gz" && sudo install "openvireo-connect-$v-$p/openvireo-connect" /usr/local/bin/
-openvireo-connect --version
+ov connect --help
+ov connect version
 ```
 
-It's signed the same way too: the macOS binaries with a notarized Developer ID, the Windows one with Azure
-Artifact Signing, and the checksums with the OpenVireo release key; see
-[Verifying the binaries](cli.md#verifying-the-binaries). The native `ov` (from openvireo-core's releases)
-doesn't have connect built in: `ov connect` runs `openvireo-connect` from your `PATH` with the same
-arguments, so install both. (The TypeScript `ov` up to 0.11.0 had it built in.)
-
-With Node ≥ 20, `npm install -g @openvireo/connect` installs it from GitHub Packages (see
-[Install](index.md#install)). To build it from source, clone the repository as for
-[`ov`](cli.md#building-from-source), then:
+For containers, the core release also publishes the image `ghcr.io/openvireo/openvireo-connect` (linux amd64
+and arm64, distroless, non-root), tagged with the core version. Its entrypoint is `ov`, running `ov connect`:
 
 ```sh
-npm ci && npm run build -w @openvireo/sdk -w @openvireo/connect
-bun build --compile --minify packages/connect/src/bin.ts --outfile openvireo-connect   # or: node packages/connect/dist/bin.js
+# VERSION: the core release without the v, e.g. 1.2.0
+docker run --rm -p 8080:8080 -e OPENVIREO_CONNECT_HOST=0.0.0.0 \
+  -e OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE=/run/secrets/sa.token -e OPENVIREO_CONNECT_TOKENS_FILE=/run/secrets/tokens.json \
+  -v "$PWD/secrets:/run/secrets:ro" ghcr.io/openvireo/openvireo-connect:VERSION
 ```
+
+To build `ov` from source, see [Building from source](cli.md#building-from-source).
 
 ## Run
 
@@ -59,9 +51,10 @@ curl -H "Authorization: Bearer $(cat eso.token)" \
 # {"value":"…"}
 ```
 
-`ov connect` runs `openvireo-connect serve` (this package's bin, `node dist/bin.js`), and
-`ov connect token` as `openvireo-connect token`; run as `openvireo-connect`, the usage, errors and the
-`listening on` line name it that way, and `openvireo-connect --version` prints its version.
+`ov connect` is the same as `ov connect serve`. `ov connect token [--name N] [--vault V]... [--write]` prints
+a new token on stdout and its config entry as the last line on stderr; `ov connect version` prints the
+version. The server logs one line per request on stderr (time, method, path, status, token name), never
+values.
 
 | Variable | Default | |
 |---|---|---|
@@ -104,21 +97,25 @@ vaults outside a token's scope, both answer 404.
 
 ## Kubernetes: External Secrets Operator
 
-ov connect plugs into ESO's built-in **webhook provider**; there is no custom operator. In `packages/connect/deploy/`:
+ov connect plugs into ESO's built-in **webhook provider**; there is no custom operator. The manifests are in
+openvireo-core, in [`deploy/connect/`](https://github.com/OpenVireo/openvireo-core/tree/develop/deploy/connect),
+next to the image they run:
 
-- `kubernetes/`: `kubectl apply -k` manifests: namespace, the two Secrets as placeholders
-  (`secrets.example.yaml`), the Deployment (non-root, read-only root filesystem, probes on `/ready`
-  and `/health`), Service, a NetworkPolicy that only lets the `external-secrets` namespace in, and two
+- `kubernetes/`: `kubectl apply -k deploy/connect/kubernetes` manifests: namespace, the two Secrets as
+  placeholders (`secrets.example.yaml`), the Deployment (non-root, read-only root filesystem, probes on
+  `/ready` and `/health`), Service, a NetworkPolicy that only lets the `external-secrets` namespace in, and two
   `ClusterSecretStore`s. `external-secret.example.yaml` shows the consumer side.
 - `helm/openvireo-connect/`: the same as a chart (`existingSecret` or `serviceAccountToken` + `connectTokens`,
-  `externalSecrets.token` for the ESO Secret, `networkPolicy.allowedNamespaces`).
+  `externalSecrets.token` for the ESO Secret, `networkPolicy.allowedNamespaces`). It runs
+  `ghcr.io/openvireo/openvireo-connect` at the chart's `appVersion` (the core version) by default.
 - `helm/external-secrets-values.yaml`: values for the upstream ESO chart.
 
 ```sh
+git clone https://github.com/OpenVireo/openvireo-core && cd openvireo-core   # check out the release tag you run
 helm install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace \
-  -f packages/connect/deploy/helm/external-secrets-values.yaml
+  -f deploy/connect/helm/external-secrets-values.yaml
 ov connect token --name eso > eso.token 2> entry.txt
-helm install openvireo packages/connect/deploy/helm/openvireo-connect -n openvireo-connect --create-namespace \
+helm install openvireo deploy/connect/helm/openvireo-connect -n openvireo-connect --create-namespace \
   --set-file serviceAccountToken=sa.token --set-json "connectTokens=[$(tail -1 entry.txt)]" \
   --set-file externalSecrets.token=eso.token
 ```
@@ -130,10 +127,27 @@ The stores (`apiVersion: external-secrets.io/v1`, ESO ≥ 0.17; use `v1beta1` on
 - `openvireo-items`: `dataFrom: [{extract: {key: "Team%20Infra/items/GitHub"}}]` makes every field of the item a key
   of the Secret (result `$.fields`).
 
-The image is built from the repository root with `docker build -f packages/connect/Dockerfile -t openvireo-connect .`
-(Bun single binary on distroless). It is not published yet: push it to your registry and set `image`.
+## Migrating from openvireo-connect
+
+Before openvireo-core 1.2.0, connect was a separate program, `openvireo-connect`: a Bun single binary on the
+SDK's releases (up to SDK 1.1.0), `@openvireo/connect` on npm, and an image you built yourself from `packages/connect/Dockerfile`.
+`ov connect` replaces it with the same environment variables, the same token format and config entries, the
+same routes, responses and status codes, and the same `User-Agent` (`openvireo-connect/<version>`) towards
+the auth and sync servers. To move, swap the program and keep the config:
+
+- A binary or systemd unit: replace `openvireo-connect` with `ov connect` (`openvireo-connect token …` becomes
+  `ov connect token …`).
+- A container: use `ghcr.io/openvireo/openvireo-connect:<core version>` instead of your own image.
+- Helm or kustomize: use the chart and manifests in openvireo-core `deploy/connect/`; the values are the same.
+  They lived in this repo's `packages/connect/deploy/` before.
+
+`@openvireo/connect` is deprecated: 1.2.0 is its last release. It still works, and its bin prints a notice
+when it starts serving.
 
 ## Library
+
+`@openvireo/connect` (deprecated, see above) also exports the handler for embedding in a Node or Bun
+server:
 
 ```ts
 import { createConnectHandler, newConnectToken } from "@openvireo/connect";

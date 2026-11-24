@@ -14,7 +14,7 @@ encrypted `.kdbx` files, wrapped keysets and sealed keys; see [Concepts](concept
 |---|---|
 | `@openvireo/sdk` | The library: accounts, vaults, sharing, sync, merge, service accounts |
 | `ov` | A native binary (from openvireo-core) to read, inject and rotate secrets from scripts and CI. See [CLI](cli.md) |
-| `@openvireo/connect` | `ov connect`: a REST server for one service account, with Kubernetes manifests. See [Connect](connect.md) |
+| `ov connect` | A REST server for one service account, built into `ov`, with a container image and Kubernetes manifests. See [Connect](connect.md). (`@openvireo/connect`, its TypeScript version, is deprecated) |
 | GitHub Action | Loads secrets into a workflow and masks them. See [GitHub Action](github-action.md) |
 
 The SDK runs in browsers, Node ≥ 20 and Bun (also compiled into a single binary). It's ESM only.
@@ -30,9 +30,10 @@ echo "//npm.pkg.github.com/:_authToken=\${GITHUB_TOKEN}" >> .npmrc
 npm install @openvireo/sdk
 ```
 
-The `ov` CLI and the `openvireo-connect` server are command-line programs: download them as signed single
-binaries from the [releases](https://github.com/OpenVireo/openvireo-sdk/releases) (no Node needed); see
-[CLI](cli.md#install) and [Connect](connect.md#install).
+The `ov` CLI, which includes the `ov connect` server, is a native program: download it as a signed single
+binary from [openvireo-core's releases](https://github.com/OpenVireo/openvireo-core/releases) (no Node needed);
+see [CLI](cli.md#install) and [Connect](connect.md#install). Connect's container image is
+`ghcr.io/openvireo/openvireo-connect`.
 
 ## A first program
 
