@@ -1,7 +1,7 @@
 {
   "name": "@openvireo/connect",
   "version": "1.1.0",
-  "description": "openvireo connect: a self-hosted REST server that holds one OpenVireo service account token",
+  "description": "Deprecated: use `ov connect` from openvireo-core. openvireo connect: a self-hosted REST server that holds one OpenVireo service account token",
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
@@ -32,7 +32,6 @@
   },
   "files": [
     "dist",
-    "deploy",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE"
