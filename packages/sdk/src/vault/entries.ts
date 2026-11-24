@@ -40,6 +40,8 @@ export interface EntryData {
   notes: string;
   tags: string[];
   expiryTime?: Date;
+  /** Custom icon id (from `addCustomIconToDb`). */
+  customIcon?: string;
 }
 
 /** A field's text from an entry record ("" when missing). */
@@ -106,14 +108,22 @@ export function addEntryToDb(vault: Vault, groupUuid: string, data: EntryData): 
     tags: data.tags,
     expiry: data.expiryTime ? { kind: "at", at: Math.floor(data.expiryTime.getTime() / 1000) } : { kind: "never" },
   };
+  if (data.customIcon) input.customIcon = data.customIcon;
   return vault.addEntry(groupUuid, input);
 }
 
-/** Updates an entry; the previous state goes to its history first (as KeePassXC does). */
+/**
+ * Updates an entry; the previous state goes to its history first (as KeePassXC does). `customIcon: null`
+ * clears the entry's custom icon.
+ */
 export function editEntryInDb(
   vault: Vault,
   entryUuid: string,
-  data: Partial<Omit<EntryData, "expiryTime">> & { expiryTime?: Date | null; fields?: Record<string, string | { value: string; protected: boolean }> },
+  data: Partial<Omit<EntryData, "expiryTime" | "customIcon">> & {
+    expiryTime?: Date | null;
+    customIcon?: string | null;
+    fields?: Record<string, string | { value: string; protected: boolean }>;
+  },
 ): void {
   const fields: FieldInput[] = [];
   if (data.title !== undefined) fields.push(std("Title", data.title));
@@ -128,6 +138,7 @@ export function editEntryInDb(
     expiry: data.expiryTime === undefined ? { kind: "keep" } : data.expiryTime === null ? { kind: "never" } : { kind: "at", at: Math.floor(data.expiryTime.getTime() / 1000) },
   };
   if (data.tags !== undefined) input.tags = data.tags;
+  if (data.customIcon !== undefined) input.customIcon = data.customIcon;
   vault.editEntry(entryUuid, input);
 }
 

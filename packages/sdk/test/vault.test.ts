@@ -130,6 +130,16 @@ describe("entry helpers (web app shapes)", () => {
 
     setEntryCustomIconInDb(vault, id, null);
     expect(collectAllDbData(vault).entries[0]!.customIcon).toBeUndefined();
+
+    // with the other fields, in one history step
+    const history = vault.history(id).length;
+    editEntryInDb(vault, id, { title: "Site 2", customIcon: iconId });
+    expect(vault.history(id)).toHaveLength(history + 1);
+    expect(collectAllDbData(vault).entries[0]).toMatchObject({ title: "Site 2", customIcon: iconId });
+    editEntryInDb(vault, id, { customIcon: null });
+    expect(collectAllDbData(vault).entries[0]!.customIcon).toBeUndefined();
+    const other = addEntryToDb(vault, root, { title: "Other", username: "", passwordValue: "", url: "", notes: "", tags: [], customIcon: iconId });
+    expect(collectAllDbData(vault).entries.find((e) => e.uuid === other)!.customIcon).toBe(iconId);
   });
 });
 
