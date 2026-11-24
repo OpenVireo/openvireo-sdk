@@ -219,7 +219,7 @@ cargo test -p ov                           # the CLI tests, against in-memory se
 Check out a release tag to build that release rather than `develop`. openvireo-core's
 [`docs/building.md`](https://github.com/OpenVireo/openvireo-core/blob/develop/docs/building.md) has the rest.
 
-### The TypeScript `ov` and `openvireo-connect`
+### Building the TypeScript `ov`
 
 You need Node ≥ 20 and npm, and [Bun](https://bun.sh) 1.3 or later for the single binary:
 
@@ -232,13 +232,4 @@ npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory 
 ```
 
 Without Bun, `npm run build` builds every package for Node, and `node packages/cli/dist/bin.js` runs `ov`.
-
-The release archives for every platform (both `ov` and `openvireo-connect`) come from one script, which
-cross-compiles, so it works on any of them:
-
-```sh
-scripts/build-binaries.sh                  # every release platform, both binaries, archives and SHA256SUMS in dist-binaries/
-scripts/build-binaries.sh --compile-only dist-binaries   # the same in two stages, signing in between (as the release does):
-scripts/macos/sign.sh dist-binaries [identity]           # macOS: hardened runtime + JIT entitlement; ad hoc without an identity
-scripts/build-binaries.sh --pack-only dist-binaries      # archives and SHA256SUMS next to them
-```
+The SDK's releases no longer have binaries.
