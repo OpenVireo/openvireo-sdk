@@ -107,7 +107,6 @@ const { options } = ts.convertCompilerOptionsFromJson(
       "@openvireo/sdk": [`${sdk}/index.ts`],
       "@openvireo/sdk/storage/node": [`${sdk}/auth/storage-node.ts`],
       "@openvireo/sdk/*": [`${sdk}/*/index.ts`],
-      "@openvireo/connect": [join(root, "packages/connect/src/index.ts")],
     },
   },
   root,

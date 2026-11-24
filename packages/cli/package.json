@@ -33,13 +33,12 @@
   ],
   "scripts": {
     "build": "tsup",
-    "build:binary": "npm run build --prefix ../.. -w @openvireo/sdk -w @openvireo/connect && bun build --compile --minify --sourcemap src/bin.ts --outfile dist/ov",
+    "build:binary": "npm run build --prefix ../.. -w @openvireo/sdk && bun build --compile --minify --sourcemap src/bin.ts --outfile dist/ov",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "smoke": "bun scripts/smoke.ts"
   },
   "dependencies": {
-    "@openvireo/connect": "1.2.0",
     "@openvireo/sdk": "1.2.0"
   },
   "exports": {

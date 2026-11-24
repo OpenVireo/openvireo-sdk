@@ -1,8 +1,7 @@
-# Publishes @openvireo/sdk and @openvireo/connect when a vX.Y.Z tag is pushed, and creates the GitHub
-# release (notes only, no binaries). `ov`, which includes `ov connect`, is the native Rust binary from
-# openvireo-core's releases, and connect's container image (ghcr.io/openvireo/openvireo-connect) is built by
-# the core release too; @openvireo/connect is deprecated. packages/cli stays only as a library of the GitHub
-# Action. npm installs need GitHub Packages (@openvireo/core-wasm), so every `npm ci` has a token.
+# Publishes @openvireo/sdk when a vX.Y.Z tag is pushed, and creates the GitHub release (notes only, no
+# binaries). `ov`, which includes `ov connect`, is the native Rust binary from openvireo-core's releases, and
+# connect's container image (ghcr.io/openvireo/openvireo-connect) is built by the core release too.
+# packages/cli stays only as a library of the GitHub Action. npm installs need GitHub Packages (@openvireo/core-wasm), so every `npm ci` has a token.
 #
 # GitHub Packages: always, with the workflow's GITHUB_TOKEN.
 # npmjs.com: only when the repository variable NPMJS_PUBLISH is "true". Authenticates with npm
@@ -42,7 +41,7 @@ jobs:
       - name: Check the tag matches every package version
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          for p in sdk connect; do
+          for p in sdk; do
             v="$(node -p "require('./packages/$p/package.json').version")"
             if [ "v$v" != "$GITHUB_REF_NAME" ]; then
               echo "::error::packages/$p is $v but the tag is $GITHUB_REF_NAME"; exit 1
@@ -51,7 +50,7 @@ jobs:
       - name: Pack
         run: |
           mkdir -p tarballs
-          for p in sdk connect; do npm pack --workspace "packages/$p" --pack-destination tarballs; done
+          for p in sdk; do npm pack --workspace "packages/$p" --pack-destination tarballs; done
           ls -l tarballs
       - uses: actions/upload-artifact@v4
         with:
@@ -78,8 +77,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Dependency order: connect needs sdk
-          for p in sdk connect; do
+          for p in sdk; do
             tgz="$(ls openvireo-$p-*.tgz)"
             v="${tgz#openvireo-$p-}"; v="${v%.tgz}"
             if npm view "@openvireo/$p@$v" version >/dev/null 2>&1; then
@@ -109,7 +107,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          for p in sdk connect; do
+          for p in sdk; do
             tgz="$(ls openvireo-$p-*.tgz)"
             v="${tgz#openvireo-$p-}"; v="${v%.tgz}"
             if npm view "@openvireo/$p@$v" version >/dev/null 2>&1; then
@@ -135,13 +133,11 @@ jobs:
           args=(--repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --verify-tag --generate-notes)
           if [[ "$version" == *-* ]]; then args+=(--prerelease); fi
           cat > notes.md <<EOF
-          The npm packages are \`@openvireo/sdk\` and \`@openvireo/connect\` $version.
+          The npm package is \`@openvireo/sdk\` $version.
 
-          This release has no binaries. Connect now ships as \`ov connect\` in the native \`ov\` binary from
+          This release has no binaries. \`ov\`, with \`ov connect\`, is the native binary from
           [openvireo-core's releases](https://github.com/OpenVireo/openvireo-core/releases) (signed, with a GPG-signed
-          \`SHA256SUMS\`), and as the container image \`ghcr.io/openvireo/openvireo-connect\`, with the same environment
-          variables and API. \`@openvireo/connect\` is deprecated; see
-          [Migrating from openvireo-connect](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/docs/connect.md#migrating-from-openvireo-connect).
+          \`SHA256SUMS\`); connect's container image is \`ghcr.io/openvireo/openvireo-connect\`.
           EOF
           gh release create "$GITHUB_REF_NAME" "${args[@]}" --notes-file notes.md
         env:

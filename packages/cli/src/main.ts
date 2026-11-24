@@ -3,7 +3,6 @@ import { writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { type ParseArgsOptionsConfig, parseArgs } from "node:util";
 import { DEFAULT_SHARE_FIELDS, OpenVireoError, type FetchLike, findEntry, formatReference, itemOf, itemSharePayload, listItems, parseItemReference, parseReference, setItemFields, shareableFields, textSharePayload, writeField } from "@openvireo/sdk";
-import { connectMain } from "@openvireo/connect";
 import { generatePassword, parseCharsets } from "./generate.js";
 import { Masker } from "./mask.js";
 import { STRIPPED_ENV, runCommand } from "./run.js";
@@ -19,8 +18,6 @@ export interface CliIo {
   stdin: () => Promise<string>;
   prompt?: Prompt;
   fetch?: FetchLike;
-  /** overrides how `ov connect serve` waits for a stop signal (tests) */
-  stopSignal?: Promise<void>;
 }
 
 export const USAGE = `ov ${VERSION}: OpenVireo vault secrets for scripts, CI and servers
@@ -44,7 +41,6 @@ Usage:
   ov whoami
   ov account delete [--yes --email E]        lock the account and erase it after 30 days
   ov account restore                         keep an account scheduled for deletion
-  ov connect [serve | token …]               the REST server (see ov connect --help)
   ov version
 
 Credentials: OPENVIREO_SERVICE_ACCOUNT_TOKEN (or OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE), else the session from
@@ -317,9 +313,6 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case "whoami":
         for (const [k, v] of Object.entries(await whoami(io))) out(`${k}: ${v}\n`);
         return 0;
-
-      case "connect":
-        return await connectMain(rest, { prog: "ov connect", env: io.env, stdout: out, stderr: err, fetch: io.fetch, stopSignal: io.stopSignal });
 
       default:
         throw new UsageError(`unknown command "${cmd}" (see ov help)`);

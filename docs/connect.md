@@ -141,20 +141,5 @@ the auth and sync servers. To move, swap the program and keep the config:
 - Helm or kustomize: use the chart and manifests in openvireo-core `deploy/connect/`; the values are the same.
   They lived in this repo's `packages/connect/deploy/` before.
 
-`@openvireo/connect` is deprecated: 1.2.0 is its last release. It still works, and its bin prints a notice
-when it starts serving.
-
-## Library
-
-`@openvireo/connect` (deprecated, see above) also exports the handler for embedding in a Node or Bun
-server:
-
-```ts
-import { createConnectHandler, newConnectToken } from "@openvireo/connect";
-import { ServiceAccount } from "@openvireo/sdk";
-
-const sa = await ServiceAccount.fromToken(process.env.OPENVIREO_SERVICE_ACCOUNT_TOKEN!);
-const { token, entry } = newConnectToken({ name: "app", access: "write" });
-const handler = createConnectHandler({ source: sa, tokens: [entry] }); // (Request) => Promise<Response>
-Bun.serve({ port: 8080, fetch: handler });
-```
+`@openvireo/connect` 1.2.0 was its last release; the package is no longer maintained, and its source left
+this repo after SDK 1.2.0.

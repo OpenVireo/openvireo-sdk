@@ -8,7 +8,6 @@ export default defineConfig({
     alias: [
       { find: /^@openvireo\/sdk$/, replacement: sdk("src/index.ts") },
       { find: /^@openvireo\/sdk\/storage\/node$/, replacement: sdk("src/auth/storage-node.ts") },
-      { find: /^@openvireo\/connect$/, replacement: fileURLToPath(new URL("../connect/src/index.ts", import.meta.url)) },
     ],
   },
   test: {

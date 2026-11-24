@@ -227,7 +227,7 @@ You need Node ≥ 20 and npm, and [Bun](https://bun.sh) 1.3 or later for the sin
 ```sh
 git clone https://github.com/OpenVireo/openvireo-sdk && cd openvireo-sdk
 npm ci
-npm run build:binary -w @openvireo/cli     # builds the SDK and connect, then bun build --compile … src/bin.ts --outfile dist/ov
+npm run build:binary -w @openvireo/cli     # builds the SDK, then bun build --compile … src/bin.ts --outfile dist/ov
 ./packages/cli/dist/ov version             # ov 1.2.0
 npm run smoke -w @openvireo/cli            # runs dist/ov against the in-memory servers over HTTP
 ```

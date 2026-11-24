@@ -301,10 +301,5 @@ describe("ov vault / whoami / login", () => {
     expect((await openvireo([])).code).toBe(2);
     expect((await openvireo(["version"])).stdout).toBe("ov 1.2.0\n");
     expect((await openvireo(["frobnicate"])).stderr).toBe('ov: unknown command "frobnicate" (see ov help)\n');
-    const tok = await openvireo(["connect", "token", "--name", "ci"]);
-    expect(tok.stdout).toMatch(/^ov_ct_/);
-    const connectHelp = (await openvireo(["connect", "--help"])).stdout;
-    expect(connectHelp).toContain("  ov connect token [--name N]");
-    expect(connectHelp).not.toContain("openvireo-connect");
   });
 });

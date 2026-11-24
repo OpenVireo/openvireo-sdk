@@ -6,7 +6,6 @@ npm workspace for the OpenVireo accounts/sharing client code. OpenVireo is a for
 |---|---|
 | [`packages/sdk`](packages/sdk/README.md) | `@openvireo/sdk`: the shared TypeScript SDK (crypto, OPAQUE, auth and sync clients, vault, merge, `ServiceAccount`) |
 | [`packages/cli`](packages/cli/README.md) | Not published: the GitHub Action's template and masking helpers. `ov` itself is the native binary from [openvireo-core](https://github.com/OpenVireo/openvireo-core/releases) |
-| [`packages/connect`](packages/connect/README.md) | `@openvireo/connect`, deprecated: the TypeScript REST server holding one service account token. Use `ov connect` from openvireo-core; its Helm chart and manifests are in openvireo-core `deploy/connect/` |
 | [`packages/github-action`](packages/github-action/README.md) | JavaScript action that loads secrets into a job and masks them (`action.yml`, bundled `dist/`) |
 
 **Documentation** is in [`docs/`](docs/index.md) and on [developer.openvireo.com/sdk/](https://developer.openvireo.com/sdk/):
@@ -20,7 +19,7 @@ npm run smoke -w @openvireo/cli                   # runs that binary against in-
 npm run docs:api                                  # the API reference (TypeDoc) in docs-api/
 ```
 
-The CLI, connect and the action type-check and test against the SDK's sources (tsconfig `paths` and
+The CLI and the action type-check and test against the SDK's sources (tsconfig `paths` and
 vitest aliases), and share the in-memory servers in `packages/sdk/test/helpers/world.ts`.
 
 ## Docs
@@ -47,7 +46,7 @@ docs.
 
 ## Releasing
 
-Bump `version` in `packages/{sdk,connect,cli}/package.json` (they release together; keep the exact
+Bump `version` in `packages/{sdk,cli,github-action}/package.json` (they release together; keep the exact
 cross-package pins in step), commit, then push a matching tag: `git tag v0.1.0 && git push origin v0.1.0`.
 `.github/workflows/release.yml` tests, builds and packs once, then publishes the same tarballs to:
 

@@ -73,23 +73,6 @@ try {
   check("rotate with a write grant", r.code === 0 && rotated.length === 32, r);
   r = await run(["read", "ov://Team%20Infra/GitHub/password"], reader);
   check("rotated value is on the server", r.out === rotated + "\n", r);
-  // ov connect from the same binary
-  const connect = spawn(bin, ["connect"], { env: { PATH: process.env.PATH ?? "", ...reader, OPENVIREO_CONNECT_TOKEN: "ov_ct_smoke", OPENVIREO_CONNECT_PORT: "0" } });
-  const url = await new Promise<string>((resolve, reject) => {
-    let err = "";
-    connect.stderr.on("data", (c) => {
-      err += c;
-      const m = /listening on (http:\/\/\S+)/.exec(err);
-      if (m) resolve(m[1]!);
-    });
-    connect.on("close", () => reject(new Error(err)));
-  });
-  const res = await fetch(`${url}/v1/vaults/Team%20Infra/items/Deploy/Database?field=username`, { headers: { Authorization: "Bearer ov_ct_smoke" } });
-  const body = await res.json();
-  check("ov connect serves an item field", res.status === 200 && body.value === "app", body);
-  const denied = await fetch(`${url}/v1/vaults`, { headers: { Authorization: "Bearer wrong" } });
-  check("ov connect rejects unknown tokens", denied.status === 401, denied.status);
-  connect.kill("SIGTERM");
   r = await run(["login", "--email", "alice@example.com", "--secret-key", w.secretKey], { OPENVIREO_ISSUER: base, OPENVIREO_PASSWORD: w.password });
   check("human login (OPAQUE in the binary)", r.code === 0 && r.err.startsWith("Signed in"), r);
   r = await run(["read", "ov://Private/Bank/password"], { OPENVIREO_PASSWORD: w.password });

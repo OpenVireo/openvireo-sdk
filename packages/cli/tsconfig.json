@@ -8,7 +8,6 @@
     "paths": {
       "@openvireo/sdk": ["../sdk/src/index.ts"],
       "@openvireo/sdk/storage/node": ["../sdk/src/auth/storage-node.ts"],
-      "@openvireo/connect": ["../connect/src/index.ts"]
     }
   },
   "include": ["src", "test", "scripts", "tsup.config.ts", "vitest.config.ts", "../sdk/src/vendor.d.ts"]

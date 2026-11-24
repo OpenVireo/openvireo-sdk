@@ -7043,25 +7043,8 @@ var ServiceAccount2 = class _ServiceAccount {
 
 // ../cli/src/main.ts
 import { writeFile } from "fs/promises";
-import { readFileSync as readFileSync3 } from "fs";
-import { parseArgs as parseArgs2 } from "util";
-
-// ../connect/src/server.ts
-import { readFileSync } from "fs";
-import { createServer } from "http";
-import { createServer as createHttpsServer } from "https";
-
-// ../connect/src/main.ts
+import { readFileSync as readFileSync2 } from "fs";
 import { parseArgs } from "util";
-function connectUsage(prog = "openvireo-connect") {
-  const col = " ".repeat(prog.length + 15);
-  const row = (cmd, what) => `  ${`${prog} ${cmd}`.padEnd(col.length - 2)}${what}
-`;
-  return "Usage:\n" + row("[serve]", "run the REST server (configured by environment, see README)") + `  ${prog} token [--name N] [--vault V]... [--write]
-${col}create a bearer token; prints it and its config entry
-` + row("version", "print the version");
-}
-var CONNECT_USAGE = connectUsage("ov connect");
 
 // ../cli/src/mask.ts
 var enc = new TextEncoder();
@@ -7081,7 +7064,7 @@ function maskPatterns(secrets) {
 import { spawn } from "child_process";
 
 // ../cli/src/session.ts
-import { readFileSync as readFileSync2 } from "fs";
+import { readFileSync } from "fs";
 import { homedir, hostname } from "os";
 import { join } from "path";
 
@@ -7098,7 +7081,7 @@ function serviceAccountSource(sa) {
 }
 
 // ../cli/src/session.ts
-var VERSION2 = "1.2.0";
+var VERSION = "1.2.0";
 
 // ../cli/src/template.ts
 var BRACED_REFERENCE = /\{\{\s*(ov:\/\/[^\s}]+)\s*\}\}/g;
@@ -7119,7 +7102,7 @@ async function resolveTemplate(src, text) {
 }
 
 // ../cli/src/main.ts
-var USAGE = `ov ${VERSION2}: OpenVireo vault secrets for scripts, CI and servers
+var USAGE = `ov ${VERSION}: OpenVireo vault secrets for scripts, CI and servers
 
 Usage:
   ov read <ov://vault/[group/\u2026]entry/field> [-n] [-o file]
@@ -7140,7 +7123,6 @@ Usage:
   ov whoami
   ov account delete [--yes --email E]        lock the account and erase it after 30 days
   ov account restore                         keep an account scheduled for deletion
-  ov connect [serve | token \u2026]               the REST server (see ov connect --help)
   ov version
 
 Credentials: OPENVIREO_SERVICE_ACCOUNT_TOKEN (or OPENVIREO_SERVICE_ACCOUNT_TOKEN_FILE), else the session from
