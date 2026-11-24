@@ -27,6 +27,30 @@ await vault.write("ov://Home/Wifi/password", "new").catch((e) => {
 const { vaults, dropped } = await account.reconnect();   // back online; revoked vaults are forgotten
 await vault.sync();                                       // uploads the kept edit
 ```
+```rust tab="Rust"
+let client = OvClient::new(
+    ClientConfig {
+        device: DeviceInfo { id: None, name: "Laptop".into(), platform: Platform::Cli },
+        offline: true,   // offline needs a Host with a persistent BlobCache
+        server: None,
+    },
+    host,
+);
+let account = client.connect(issuer, cancel.clone()).await?;
+account.unlock(password, None, cancel.clone()).await?;            // works offline
+let vault = account.open_vault(vault_id, cancel.clone()).await?;   // offline: the local copy
+account.is_offline();                                              // true while unreachable
+
+if let Err(e) = vault.write_field("ov://Home/Wifi/password".into(), b"new".to_vec(), false, cancel.clone()).await {
+    if e.code != OvErrorCode::NetworkError {
+        return Err(e.into());
+    }
+    // offline: the edit is kept and merges in later
+}
+
+let result = account.reconnect(cancel.clone()).await?;   // back online; result.dropped: revoked vaults
+vault.sync(SyncOptions { local_changed: true, accept_server_state: false }, cancel.clone()).await?;
+```
 ```python tab="Python"
 client = ov.OvClient(
     ov.ClientConfig(device=ov.DeviceInfo(id=None, name="Laptop", platform=ov.Platform.CLI), offline=True, server=None),

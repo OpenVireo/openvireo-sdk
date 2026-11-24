@@ -38,7 +38,7 @@ see [CLI](cli.md#install) and [Connect](connect.md#install). Connect's container
 ## A first program
 
 Sign in, list the vaults, read one field and sign out. The same program in every language: TypeScript is
-this SDK; Python, Kotlin, Java, Swift and C++ are the [core bindings](https://github.com/openvireo/openvireo-core/blob/develop/docs/bindings/README.md),
+this SDK; Rust calls the core directly; Python, Kotlin, Java, Swift and C++ are the [core bindings](https://github.com/openvireo/openvireo-core/blob/develop/docs/bindings/README.md),
 which share its API and error codes; the `ov` CLI does it from a shell.
 
 <!-- prelude
@@ -60,6 +60,33 @@ for (const info of await account.listVaults()) {
 const vault = await account.openVault((await account.listVaults())[0]!.id);
 console.log(vault.read("ov://Personal/GitHub/username"));
 await account.logout();
+```
+```rust tab="Rust"
+use ov_core::api::{CancelToken, ClientConfig, DeviceInfo, LoginInput, OvClient, Platform};
+
+// The Host is the platform's part: HTTP, a secure store, a cache, a clock and a log sink.
+// Implement the ov_core::host traits, or copy host.rs from the Rust examples.
+let client = OvClient::new(
+    ClientConfig {
+        device: DeviceInfo { id: None, name: "My script".into(), platform: Platform::Cli },
+        offline: false,
+        server: None,
+    },
+    host,
+);
+let cancel = CancelToken::new();
+let account = client.connect("https://accounts.openvireo.com".into(), cancel.clone()).await?;
+// The LoginStep asks for a TOTP code when two-step sign-in is on
+let login = LoginInput { email, password, secret_key: Some(secret_key), totp: None, trust_device: true };
+account.login(login, cancel.clone()).await?;
+
+let vaults = account.vaults(cancel.clone()).await?;
+for info in &vaults {
+    println!("{} {:?}", info.name, info.role);
+}
+let vault = account.open_vault(vaults[0].id.clone(), cancel.clone()).await?;
+println!("{}", String::from_utf8_lossy(&vault.read_field("ov://Personal/GitHub/username".into())?));
+account.sign_out(false, cancel).await?;
 ```
 ```python tab="Python"
 import openvireo as ov

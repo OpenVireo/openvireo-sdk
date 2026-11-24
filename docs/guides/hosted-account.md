@@ -17,6 +17,21 @@ const account = await Account.connect({
   storage: browserStorage(),                        // where sessions and trusted-device keys live
 });
 ```
+```rust tab="Rust"
+use ov_core::api::{CancelToken, ClientConfig, DeviceInfo, OvClient, Platform};
+
+// host: your Host (HTTP, a keychain-backed SecureStore, a cache, a clock, a log sink)
+let client = OvClient::new(
+    ClientConfig {
+        device: DeviceInfo { id: None, name: "Laptop".into(), platform: Platform::Cli },
+        offline: false,
+        server: None,
+    },
+    host,
+);
+let cancel = CancelToken::new();
+let account = client.connect("https://accounts.openvireo.com".into(), cancel.clone()).await?;
+```
 ```python tab="Python"
 import openvireo as ov
 from openvireo.hosts import KeyringStore, default_host
@@ -96,10 +111,12 @@ state. Pick one for the platform:
 Anything with `get`, `set` and `delete` (the `KeyValueStorage` interface) works, and `EncryptedStorage` wraps
 another storage with an AES-GCM key you provide.
 
-In the core bindings (Python, Kotlin, Java, Swift, C++) the **Host** plays this part: its `SecureStore` keeps the
-session and trusted Secret Keys, its `BlobCache` the vaults and their sync state. Python's `default_host()` and
-Kotlin's `defaultHost()` build one (in memory unless you pass a store and a cache directory); Swift and C++ apps
-supply their own. The other examples on these pages assume `account` (and, in Swift and C++, `cancel`) from here.
+In Rust and the core bindings (Python, Kotlin, Java, Swift, C++) the **Host** plays this part: its `SecureStore`
+keeps the session and trusted Secret Keys, its `BlobCache` the vaults and their sync state. Python's
+`default_host()` and Kotlin's `defaultHost()` build one (in memory unless you pass a store and a cache directory);
+Rust, Swift and C++ apps supply their own ([`host.rs`](https://github.com/openvireo/openvireo-examples-rust/blob/main/src/host.rs)
+in the Rust examples is one to copy). The other examples on these pages assume `account` (and, in Rust, Swift
+and C++, `cancel`) from here.
 
 ## Signing up
 
@@ -111,6 +128,11 @@ declare function showEmergencyKit(secretKey: string): void;
 ```ts tab="TypeScript"
 const { secretKey, userId } = await account.register({ email, password });
 showEmergencyKit(secretKey);   // the only time the Secret Key is shown; the user must keep it
+```
+```rust tab="Rust"
+let input = RegisterInput { email, password, kdf: None, trust_device: true };
+let created = account.register(input, cancel.clone()).await?;
+show_emergency_kit(&created.secret_key);   // the only time the Secret Key is shown; the user must keep it
 ```
 ```python tab="Python"
 created = await account.register(ov.RegisterInput(email=email, password=password, kdf=None, trust_device=True))
@@ -153,6 +175,14 @@ await account.login({
   secretKey,                     // only needed the first time on this device
   totp: () => askForCode(),      // asked only when the account has two-factor authentication on
 });
+```
+```rust tab="Rust"
+// secret_key: only needed the first time on this device (else None)
+let input = LoginInput { email, password, secret_key, totp: None, trust_device: true };
+let mut step = account.login(input, cancel.clone()).await?;
+while let LoginStep::NeedsTotp(challenge) = step {   // two-factor authentication is on
+    step = account.submit_totp(challenge, ask_for_code(), cancel.clone()).await?;
+}
 ```
 ```python tab="Python"
 # secret_key: only needed the first time on this device (else None)
@@ -216,6 +246,15 @@ if (account.signedIn && !account.unlocked) await account.unlock(password);
 account.lock();             // wipes the keys from memory; the session stays
 await account.logout();     // ends the session on the server and forgets it here
 await account.logout({ forgetDevice: true });   // also forgets the trusted Secret Key
+```
+```rust tab="Rust"
+if account.is_signed_in() && !account.is_unlocked() {
+    account.unlock(password, None, cancel.clone()).await?;
+}
+
+account.lock();                                // wipes the keys from memory; the session stays
+account.sign_out(false, cancel.clone()).await?;   // ends the session and forgets it here
+account.sign_out(true, cancel.clone()).await?;    // also forgets the trusted Secret Key
 ```
 ```python tab="Python"
 if account.is_signed_in() and not account.is_unlocked():
@@ -284,6 +323,12 @@ sessionStorage.setItem("unlocked", await account.sealUnlocked(key));
 const sealed = sessionStorage.getItem("unlocked");
 if (sealed) await reloaded.resumeUnlocked(sealed, await loadKey());
 ```
+```rust tab="Rust"
+let secret = account.unlocked_keyset_secret()?;   // keep it in the keychain
+
+// after a relaunch, on a connected (signed-in, locked) account
+reloaded.resume_unlocked(secret, cancel.clone()).await?;
+```
 ```python tab="Python"
 secret = account.unlocked_keyset_secret()   # keep it in the OS keychain, never on disk in the clear
 
@@ -334,6 +379,10 @@ const stop = account.onSignedOut((reason) => {   // "session_expired" | "token_r
   showSignIn();
 });
 ```
+```rust tab="Rust"
+let reason = account.signed_out(cancel.clone()).await?;   // SessionExpired, TokenReused, Unauthorized, Logout, ...
+show_sign_in();
+```
 ```python tab="Python"
 reason = await account.signed_out()   # waits: SignedOutReason.SESSION_EXPIRED, TOKEN_REUSED, UNAUTHORIZED, LOGOUT, ...
 show_sign_in()
@@ -374,6 +423,17 @@ await account.requestEmailChange("new@example.com");              // mails a cod
 await account.changeEmail({ email: "new@example.com", code, password });
 
 const url = await account.webSessionUrl("/settings");   // a one-time link into the account website (60 s)
+```
+```rust tab="Rust"
+let email = account.email();               // the signed-in email
+let user_id = account.user_id();
+let fingerprint = account.fingerprint()?;   // this account's public key fingerprint, for others to compare
+
+account.change_password(current, next, None, cancel.clone()).await?;            // signs others out
+account.request_email_change("new@example.com".into(), cancel.clone()).await?;  // mails a code
+account.change_email("new@example.com".into(), code, password, cancel.clone()).await?;
+
+let url = account.web_session_url(Some("/settings".into()), cancel.clone()).await?;   // one-time (60 s)
 ```
 ```python tab="Python"
 account.email()         # the signed-in email
@@ -454,6 +514,20 @@ const { scheduledFor } = await account.deleteAccount({ password, confirm: typedE
 // This device is signed out (onSignedOut reports "deletion_scheduled") and its offline cache is gone.
 // The Secret Key stays so the user can sign in again and restore:
 if (account.deletionScheduledFor) await account.restoreAccount({ password });
+```
+```rust tab="Rust"
+let preview = account.deletion_preview(cancel.clone()).await?;
+let erase_on = &preview.erase_on;   // when it would be erased
+let vaults = &preview.vaults;       // id, name, shared_with: shared vaults can be given away first
+if let Some(vault) = preview.vaults.first().filter(|v| !v.shared_with.is_empty()) {
+    account.transfer_vault(vault.id.clone(), bob_principal, cancel.clone()).await?;
+}
+
+let scheduled_for = account.delete_account(password.clone(), typed_email, cancel.clone()).await?;
+// This device is signed out and its offline cache is gone. The Secret Key stays, so after signing in again:
+if account.deletion_scheduled_for().is_some() {
+    account.restore_account(password, cancel.clone()).await?;
+}
 ```
 ```python tab="Python"
 preview = await account.deletion_preview()
@@ -543,6 +617,12 @@ declare const account: Account;
 const { devices } = await account.auth.listDevices();   // name, platform, last_seen_at, current, …
 const old = devices.find((d) => !d.current && d.name === "Old laptop");
 if (old) await account.auth.revokeDevice(old.id);
+```
+```rust tab="Rust"
+let devices = account.devices(cancel.clone()).await?;   // name, platform, last_seen_at, current, ...
+if let Some(old) = devices.iter().find(|d| !d.current && d.name == "Old laptop") {
+    account.revoke_device(old.id.clone(), cancel.clone()).await?;
+}
 ```
 ```python tab="Python"
 devices = await account.devices()   # name, platform, last_seen_at, current, ...

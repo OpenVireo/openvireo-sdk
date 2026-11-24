@@ -17,6 +17,14 @@ vault.name;
 vault.vault;     // the core `Vault` handle: entries, groups, fields, history, attachments
 vault.etag;      // the server version this copy is based on
 ```
+```rust tab="Rust"
+let vaults = account.vaults(cancel.clone()).await?;   // VaultInfo: id, name, role (Read, Write, Manage), org_id
+
+let vault = account.open_vault(vaults[0].id.clone(), cancel.clone()).await?;   // downloads and decrypts it
+let name = vault.name();
+let entries = vault.entries(false);   // EntrySummary records; vault.entry(id) the full record
+let etag = vault.etag();              // the server version this copy is based on
+```
 ```python tab="Python"
 vaults = await account.vaults()   # VaultInfo: id, name, role (VaultRole.READ, WRITE, MANAGE), org_id, ...
 
@@ -77,6 +85,13 @@ vault.read({ groupPath: ["Apps"], entry: "Stripe", field: "username" });
 
 await vault.write("ov://Team/GitHub/password", "new value");                 // edits and syncs
 await vault.write("ov://Team/Apps/Stripe/api_key", key, { create: true });  // creates the entry if needed
+```
+```rust tab="Rust"
+let password = vault.read_field("ov://Team/GitHub/password".into())?;   // Vec<u8>, UTF-8
+
+// edits and syncs; create: true creates the entry if needed
+vault.write_field("ov://Team/GitHub/password".into(), b"new value".to_vec(), false, cancel.clone()).await?;
+vault.write_field("ov://Team/Apps/Stripe/api_key".into(), key, true, cancel.clone()).await?;
 ```
 ```python tab="Python"
 vault.read_field("ov://Team/GitHub/password").decode()
@@ -140,6 +155,26 @@ const result = await vault.sync();
 result.outcome;     // "uploaded", "pulled" (only downloaded), "created" or "unchanged"
 result.conflicts;   // entries both sides changed: { uuid, kind, title, fields }
 result.changes;     // what the merge did, entry by entry
+```
+```rust tab="Rust"
+let field = |name: &str, value: &str, protected| FieldInput { name: name.into(), value: value.into(), protected };
+vault.add_entry(
+    vault.root_group_id(),
+    EntryInput {
+        fields: vec![field("Title", "Database", None), field("UserName", "app", None), field("Password", "s3cret", None)],
+        ..Default::default()
+    },
+)?;
+vault.set_fields(
+    "ov://Team/Apps/Api".into(),
+    vec![field("UserName", "svc", None), field("token", "…", Some(true))],
+    CreateMode::CreateIfMissing,
+)?;
+
+let result = vault.sync(SyncOptions { local_changed: true, accept_server_state: false }, cancel.clone()).await?;
+let outcome = result.outcome;       // Uploaded, Pulled (only downloaded), Created or Unchanged
+let conflicts = &result.conflicts;   // entries both sides changed
+let changes = &result.changes;       // what the merge did, entry by entry
 ```
 ```python tab="Python"
 vault.add_entry(vault.root_group_id(), ov.EntryInput(
@@ -247,6 +282,10 @@ declare const account: Account, orgId: string;
 const personal = await account.createVault("Personal");
 const team = await account.createVault("Team Infra", { orgId });   // org owners and admins get manage automatically
 ```
+```rust tab="Rust"
+let personal = account.create_vault("Personal".into(), None, cancel.clone()).await?;
+let team = account.create_vault("Team Infra".into(), Some(org_id), cancel.clone()).await?;   // admins get manage
+```
 ```python tab="Python"
 personal = await account.create_vault("Personal", None)
 team = await account.create_vault("Team Infra", org_id)   # org owners and admins get manage automatically
@@ -283,6 +322,13 @@ const { principal, fingerprint } = await account.share(vaultId, { email: "bob@ex
 await confirmWithBob(fingerprint);   // compare it with what Bob's app shows, out of band
 
 await account.share(vaultId, { principal }, "read");   // changing the role
+```
+```rust tab="Rust"
+let bob = Grantee::Email("bob@example.com".into());
+let grant = account.share_vault(vault_id.clone(), bob, VaultRole::Write, cancel.clone()).await?;
+confirm_with_bob(&grant.fingerprint)?;   // compare it with what Bob's app shows, out of band
+
+account.change_role(vault_id, grant.principal, VaultRole::Read, cancel.clone()).await?;
 ```
 ```python tab="Python"
 grant = await account.share_vault(vault_id, ov.Grantee.EMAIL("bob@example.com"), ov.VaultRole.WRITE)
@@ -336,6 +382,12 @@ const keys = trustedPublicKeys(bob);   // throws invalid_public_keys if the sign
 await confirmWithBob(fingerprint(keys));
 await account.shareWithKeys(vaultId, { principal: bob.principal }, "write", keys);
 ```
+```rust tab="Rust"
+let bob = account.look_up("bob@example.com".into(), cancel.clone()).await?;   // keys verified
+confirm_with_bob(&bob.public_keys.fingerprint)?;
+let grantee = Grantee::Principal(bob.principal);
+account.share_vault_with_keys(vault_id, grantee, VaultRole::Write, bob.public_keys, cancel.clone()).await?;
+```
 ```python tab="Python"
 bob = await account.look_up("bob@example.com")
 if not ov.verify_public_keys(bob.public_keys):
@@ -381,6 +433,10 @@ declare const account: Account, vaultId: string, bobPrincipal: string;
 ```ts tab="TypeScript"
 await account.revoke(vaultId, [bobPrincipal]);   // removes access and rotates the vault key in one step
 await account.rotate(vaultId);                     // a new key without removing anyone
+```
+```rust tab="Rust"
+account.revoke(vault_id.clone(), vec![bob_principal], cancel.clone()).await?;   // and rotates the key
+account.rotate_vault_key(vault_id, vec![], cancel.clone()).await?;               // a new key only
 ```
 ```python tab="Python"
 await account.revoke(vault_id, [bob_principal])   # removes access and rotates the vault key in one step
@@ -432,6 +488,19 @@ await account.confirmMember(org.id, carol, [{ id: "<vault id>", role: "read" }])
 
 await account.setMemberRole(org.id, carol, "admin");   // admins get manage on every org vault
 const { rotated, failed } = await account.removeMember(org.id, carol.user_id);   // and rotates her vaults
+```
+```rust tab="Rust"
+let org = account.create_org("Acme".into(), cancel.clone()).await?;
+account.invite(org.id.clone(), "carol@example.com".into(), OrgRole::Member, cancel.clone()).await?;
+// Carol gets an email, and her app calls account.accept_invitation(token, cancel)
+
+let members = account.org_members(org.id.clone(), cancel.clone()).await?;
+let carol = members.into_iter().find(|m| m.email == "carol@example.com" && m.status == MemberStatus::Accepted).unwrap();
+let grants = vec![VaultGrantRequest { vault_id: "<vault id>".into(), role: VaultRole::Read }];
+account.confirm_member(org.id.clone(), carol.clone(), grants, cancel.clone()).await?;
+
+account.set_member_role(org.id.clone(), carol.clone(), OrgRole::Admin, cancel.clone()).await?;   // manage everywhere
+let report = account.remove_member(org.id, carol.user_id, cancel.clone()).await?;                // rotates her vaults
 ```
 ```python tab="Python"
 org = await account.create_org("Acme")

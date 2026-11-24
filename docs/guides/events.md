@@ -20,6 +20,24 @@ const live = account.subscribe({
 
 live.close();   // when the app no longer needs it
 ```
+```rust tab="Rust"
+let stream = account.subscribe(cancel.clone()).await?;
+while let Some(event) = stream.next(cancel.clone()).await? {
+    match event {
+        AccountEvent::VaultChanged { vault_id, etag, .. } => {
+            // another device uploaded (or deleted) a vault this account can open
+            if vault_id == vault.id() && etag != vault.etag() {
+                vault.sync(SyncOptions { local_changed: false, accept_server_state: false }, cancel.clone()).await?;
+            }
+        }
+        AccountEvent::VaultsChanged { vaults } => render(&vaults),   // access changed
+        AccountEvent::SessionEnded { .. } => break,
+        _ => {}
+    }
+}
+
+stream.close();   // from any thread; a pending next() then returns None
+```
 ```python tab="Python"
 stream = await account.subscribe()
 while (event := await stream.next()) is not None:

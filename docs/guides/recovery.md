@@ -19,6 +19,12 @@ const info = await account.recoverInfo(token);   // works signed out
 const { secretKey } = await account.recover({ token, password });   // signed in and unlocked afterwards
 showEmergencyKit(secretKey);
 ```
+```rust tab="Rust"
+let info = account.recover_info(token.clone(), cancel.clone()).await?;   // works signed out
+
+let created = account.recover(token, password, None, true, cancel.clone()).await?;
+show_emergency_kit(&created.secret_key);
+```
 ```python tab="Python"
 info = await account.recover_info(token)   # works signed out
 # email, not_before, expires_at, archive_days, personal_vaults, shared_grants, sole_admin_orgs
@@ -66,6 +72,12 @@ declare const account: Account, oldPassword: string, oldSecretKey: string;
 const status = await account.recoveryStatus();   // { archived, email?, expiresAt?, vaults?, locked? }
 if (status.archived && !status.locked) {
   const { restored } = await account.restoreFromArchive({ oldPassword, oldSecretKey });   // vault list reloaded
+}
+```
+```rust tab="Rust"
+let status = account.recovery_status(cancel.clone()).await?;
+if status.archived && !status.locked {
+    let restored = account.restore_from_archive(old_password, old_secret_key, cancel.clone()).await?;
 }
 ```
 ```python tab="Python"

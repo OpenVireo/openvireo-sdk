@@ -25,6 +25,19 @@ const { token } = await account.createServiceAccount(orgId, {
 
 const { token: second } = await account.issueServiceAccountSecret("<service account id>", { name: "staging" });
 ```
+```rust tab="Rust"
+let input = NewServiceAccount {
+    name: "ci".into(),
+    vaults: vec![VaultGrantRequest { vault_id, role: VaultRole::Read }],
+    expires_at: Some("2027-01-01T00:00:00Z".into()),
+    secret_name: None,
+};
+let created = account.create_service_account(org_id, input, cancel.clone()).await?;
+// show created.token once; store it as a CI secret
+
+let sa_id = "<service account id>".to_string();
+let second = account.issue_service_account_secret(sa_id, Some("staging".into()), None, cancel.clone()).await?;
+```
 ```python tab="Python"
 created = await account.create_service_account(org_id, ov.NewServiceAccount(
     name="ci",
@@ -87,6 +100,15 @@ const password = await sa.read("ov://Team Infra/GitHub deploy key/password");
 
 const { text, secrets } = await sa.inject("TOKEN=ov://Team%20Infra/CI/token\n");   // mask `secrets` in logs
 await sa.write("ov://Team Infra/CI/token", rotated);                                // needs the write role
+sa.close();   // wipes the keys from memory
+```
+```rust tab="Rust"
+let token = std::env::var("OPENVIREO_SERVICE_ACCOUNT_TOKEN")?.into_bytes();
+let sa = ServiceAccount::from_token(client, token, cancel.clone()).await?;
+let password = sa.read("ov://Team Infra/GitHub deploy key/password".into(), cancel.clone()).await?;
+
+let injected = sa.inject(b"TOKEN=ov://Team%20Infra/CI/token\n".to_vec(), cancel.clone()).await?;
+sa.write("ov://Team Infra/CI/token".into(), rotated, false, cancel.clone()).await?;
 sa.close();   // wipes the keys from memory
 ```
 ```python tab="Python"

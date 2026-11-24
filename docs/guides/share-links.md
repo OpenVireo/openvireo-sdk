@@ -32,6 +32,21 @@ const link = await account.createShare(payload, {
 });
 console.log(link.url);         // https://share.openvireo.com/<id>#<key>
 ```
+```rust tab="Rust"
+let entry = vault.entry(entry_id.clone())?;
+let choices = shareable_fields(entry.clone());   // what can be shared, in display order
+
+let payload = item_share_payload(entry, default_share_fields(), Some("Sam".into()));   // username, password, website
+let options = ShareOptions {
+    expires_in: 7 * 86400,   // seconds: 1 hour to 30 days (free plans: 7 days)
+    max_opens: Some(1),      // None: until it expires
+    passcode: None,
+    vault_id: Some(vault.id()),
+    entry_id: Some(entry_id),
+};
+let link = account.create_share(payload, options, cancel.clone()).await?;
+println!("{}", String::from_utf8_lossy(&link.url));   // https://share.openvireo.com/<id>#<key>
+```
 ```python tab="Python"
 entry = vault.entry(entry_id)
 choices = ov.shareable_fields(entry)   # what can be shared, in display order
@@ -114,6 +129,17 @@ const link = await account.createShare(textSharePayload("The alarm code is 4321"
   passcode: "tiger lily 42",
 });
 ```
+```rust tab="Rust"
+let payload = text_share_payload(b"The alarm code is 4321".to_vec(), Some("Front door".into()), None);
+let options = ShareOptions {
+    expires_in: 3600,
+    max_opens: None,
+    passcode: Some(b"tiger lily 42".to_vec()),
+    vault_id: None,
+    entry_id: None,
+};
+let link = account.create_share(payload, options, cancel.clone()).await?;
+```
 ```python tab="Python"
 link = await account.create_share(
     ov.text_share_payload(b"The alarm code is 4321", "Front door", None),
@@ -164,6 +190,14 @@ for (const s of await account.listShares()) {
 }
 await account.revokeShare(id);
 ```
+```rust tab="Rust"
+for s in account.list_shares(cancel.clone()).await? {
+    // s.reference has vault, entry, title, readable only by this account
+    let title = s.reference.map(|r| r.title).unwrap_or_default();
+    println!("{title} {} {} {:?} {} {:?}", s.status, s.opens, s.max_opens, s.expires_at, s.end_reason);
+}
+account.revoke_share(share_id, cancel.clone()).await?;
+```
 ```python tab="Python"
 for s in await account.list_shares():
     # s.reference has vault, entry, title, readable only by this account
@@ -212,6 +246,9 @@ declare const account: Account, orgId: string;
 ```ts tab="TypeScript"
 await account.auth.setOrgShareLinks(orgId, "managers");   // "on" (default), "managers" or "off"
 ```
+```rust tab="Rust"
+account.set_org_share_links(org_id, ShareLinkPolicy::Managers, cancel.clone()).await?;   // On (default), Managers, Off
+```
 ```python tab="Python"
 await account.set_org_share_links(org_id, ov.ShareLinkPolicy.MANAGERS)   # ON (default), MANAGERS or OFF
 ```
@@ -251,6 +288,19 @@ const { payload, opensLeft } = await openShare(api, { id, key }, { passcode, inf
 for (const f of payload.fields) {
   const shown = f.k === "totp" ? totpCode(parseTotpUri(f.value)).code : f.value;
   // render as plain text; hide f.protected values until shown
+}
+```
+```rust tab="Rust"
+let api = account.server_config().api;   // or the share host's API, without an account
+let share_id = ov_share::parse_share_link(&link)?.id;   // the ov-share crate, from the same repository
+let info = client.share_info(api.clone(), share_id, cancel.clone()).await?;
+// Show a "Reveal" button and open only when it's pressed: link previews then can't use up a one-time link.
+let passcode = info.kdf.is_some().then(|| ask_for_passcode().into_bytes());
+let opened = client.open_share(api, link.into_bytes(), passcode, Some(info), cancel.clone()).await?;
+
+for f in opened.payload.fields {
+    let shown = if f.k == "totp" { totp_code(parse_totp_uri(f.value)?, now_ms).code } else { f.value };
+    // render as plain text; hide f.protected values until shown
 }
 ```
 ```python tab="Python"

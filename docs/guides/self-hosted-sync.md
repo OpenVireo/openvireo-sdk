@@ -22,6 +22,13 @@ const server = await SelfHostedSync.pair("https://sync.example.org", "ABCD-EFGH"
 // next time
 const again = await SelfHostedSync.restore("https://sync.example.org", { storage });
 ```
+```rust tab="Rust"
+let url = "https://sync.example.org".to_string();
+let server = SelfHosted::pair(client.clone(), url.clone(), "ABCD-EFGH".into(), "Laptop".into(), cancel.clone()).await?;
+
+// next time, with the same persistent store
+let again = SelfHosted::restore(client.clone(), url).await?;
+```
 ```python tab="Python"
 server = await ov.SelfHosted.pair(client, "https://sync.example.org", "ABCD-EFGH", "Laptop")
 
@@ -70,6 +77,11 @@ import { decryptKdbx, passwordCredentials } from "@openvireo/sdk";
 
 const { vault } = await decryptKdbx(fileBytes, password);
 const result = await server.syncDatabase("personal", await vault.saveLocal(), passwordCredentials(password));
+// result.kdbx is the merged file: save it locally and reopen it (result.report says what changed)
+```
+```rust tab="Rust"
+let creds = KdbxCredentials { password: Some(password), ..Default::default() };
+let result = server.sync_database("personal".into(), file_bytes, creds, cancel.clone()).await?;
 // result.kdbx is the merged file: save it locally and reopen it (result.report says what changed)
 ```
 ```python tab="Python"
@@ -122,6 +134,13 @@ const databases = await server.listDatabases();          // [{ id, revision, eta
 const first = await server.download("personal");         // the .kdbx as uploaded, or null; opens with its password
 const { code } = await server.createPairingCode();       // for the next device
 const stream = server.events((e) => e.kind === "databaseChanged" && resync(e.databaseId));
+```
+```rust tab="Rust"
+let health = server.health(cancel.clone()).await?;                     // '{"status":"ok"}'
+let databases = server.list_databases(cancel.clone()).await?;          // id, revision, etag, size, updated_at
+let first = server.download("personal".into(), cancel.clone()).await?;   // the .kdbx, or None
+let code = server.create_pairing_code(cancel.clone()).await?.code;     // for the next device
+let stream = server.events(cancel.clone()).await?;                     // next() gives AccountEvent::DatabaseChanged
 ```
 ```python tab="Python"
 await server.health()                      # '{"status":"ok"}'; not_sync_server for another site

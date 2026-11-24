@@ -18,6 +18,15 @@ try {
   await e.vault.sync();   // the vault exists but its first upload failed: retry it later
 }
 ```
+```rust tab="Rust"
+let creds = KdbxCredentials { password: Some(password), ..Default::default() };
+let mode = ImportMode::NewVault { name: Some("Home".into()), org_id: None };
+let outcome = account.import_kdbx(file_bytes, creds, mode, cancel.clone()).await?;
+if !outcome.uploaded {
+    // the vault exists but its first upload failed (outcome.upload_error): retry it later
+    outcome.vault.sync(SyncOptions { local_changed: true, accept_server_state: false }, cancel.clone()).await?;
+}
+```
 ```python tab="Python"
 creds = ov.KdbxCredentials(password=password, key_file=None)
 outcome = await account.import_kdbx(file_bytes, creds, ov.ImportMode.NEW_VAULT(name="Home", org_id=None))
@@ -82,6 +91,13 @@ const { vault: file } = await decryptKdbx(fileBytes, password);
 const { added, updated, unchanged } = importInto(file, vault.vault);
 // or: importAsCopies(file, vault.vault, groupUuid), with importTargets(vault.vault) listing the groups to offer
 await vault.sync();
+```
+```rust tab="Rust"
+let creds = KdbxCredentials { password: Some(password), ..Default::default() };
+let file = client.open_local(file_bytes, creds, cancel.clone()).await?;
+let summary = vault.import_from(file, LocalImportMode::Merge)?;   // added, updated, unchanged
+// or: LocalImportMode::Copies { parent_group_id }, with vault.import_targets() listing the groups to offer
+vault.sync(SyncOptions { local_changed: true, accept_server_state: false }, cancel.clone()).await?;
 ```
 ```python tab="Python"
 file = await client.open_local(file_bytes, ov.KdbxCredentials(password=password, key_file=None))
