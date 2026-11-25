@@ -130,7 +130,8 @@ The stores (`apiVersion: external-secrets.io/v1`, ESO ≥ 0.17; use `v1beta1` on
 ## Migrating from openvireo-connect
 
 Before openvireo-core 1.2.0, connect was a separate program, `openvireo-connect`: a Bun single binary on the
-SDK's releases (up to SDK 1.1.0), `@openvireo/connect` on npm, and an image you built yourself from `packages/connect/Dockerfile`.
+SDK's releases (up to SDK 1.1.0), the `@openvireo/connect` package on GitHub Packages, and an image you built
+yourself from `packages/connect/Dockerfile`.
 `ov connect` replaces it with the same environment variables, the same token format and config entries, the
 same routes, responses and status codes, and the same `User-Agent` (`openvireo-connect/<version>`) towards
 the auth and sync servers. To move, swap the program and keep the config:
@@ -140,6 +141,5 @@ the auth and sync servers. To move, swap the program and keep the config:
 - A container: use `ghcr.io/openvireo/openvireo-connect:<core version>` instead of your own image.
 - Helm or kustomize: use the chart and manifests in openvireo-core `deploy/connect/`; the values are the same.
   They lived in this repo's `packages/connect/deploy/` before.
-
-`@openvireo/connect` 1.2.0 was its last release; the package is no longer maintained, and its source left
-this repo after SDK 1.2.0.
+- The `@openvireo/connect` package (including `createConnectHandler` for embedding): removed after SDK 1.2.0,
+  from this repo and from GitHub Packages. Run `ov connect` next to your app and call its REST API instead.
