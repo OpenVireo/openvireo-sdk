@@ -113,7 +113,8 @@ jobs:
             if npm view "@openvireo/$p@$v" version >/dev/null 2>&1; then
               echo "@openvireo/$p@$v is already on npmjs.com"
             else
-              npm publish "$tgz" --provenance --access public
+              # --loglevel verbose: npm logs why a trusted-publishing token exchange failed only at verbose
+              npm publish "$tgz" --provenance --access public --loglevel verbose
             fi
           done
 
