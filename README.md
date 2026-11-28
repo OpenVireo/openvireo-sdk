@@ -51,14 +51,14 @@ cross-package pins in step), commit, then push a matching tag: `git tag v0.1.0 &
 `.github/workflows/release.yml` tests, builds and packs once, then publishes the same tarballs to:
 
 - **GitHub Packages**, always.
-- **npmjs.com**, once the repository variable `NPMJS_PUBLISH` is `true`. The first publish needs an
-  `NPM_TOKEN` secret (a granular token that can publish `@openvireo/*`); after it, add this repo and
-  `release.yml` as a trusted publisher for each package on npmjs.com and delete the secret.
+- **npmjs.com**, when the repository variable `NPMJS_PUBLISH` is `true` (it is). It publishes by trusted
+  publishing from `release.yml`, with no token.
 - **GitHub Releases**: a release with notes only. There are no binaries: `ov` (including `ov connect`) and
   connect's container image `ghcr.io/openvireo/openvireo-connect` come from
   [openvireo-core's releases](https://github.com/OpenVireo/openvireo-core/releases), signed there.
 
-Installing from GitHub Packages needs a token with `read:packages`, even for public packages:
+Install from npm with `npm install @openvireo/sdk`. Installing from GitHub Packages instead needs a token
+with `read:packages`, even for public packages:
 
 ```sh
 echo "@openvireo:registry=https://npm.pkg.github.com" >> .npmrc

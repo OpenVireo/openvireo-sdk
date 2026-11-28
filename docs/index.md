@@ -21,13 +21,19 @@ The SDK runs in browsers, Node ≥ 20 and Bun (also compiled into a single binar
 
 ## Install
 
-Releases are published to GitHub Packages. Installing from there needs a GitHub token with `read:packages`,
-even though the packages are public:
+The SDK is on [npm](https://www.npmjs.com/package/@openvireo/sdk):
+
+```sh
+npm install @openvireo/sdk
+```
+
+Releases also go to GitHub Packages, the only registry for releases before 1.2.0 and for the old
+TypeScript `@openvireo/cli`. Installing from there needs a GitHub token with `read:packages`, even
+though the packages are public:
 
 ```sh
 echo "@openvireo:registry=https://npm.pkg.github.com" >> .npmrc
 echo "//npm.pkg.github.com/:_authToken=\${GITHUB_TOKEN}" >> .npmrc
-npm install @openvireo/sdk
 ```
 
 The `ov` CLI, which includes the `ov connect` server, is a native program: download it as a signed single
