@@ -13,7 +13,7 @@ grant gets 403 on every write.
 ## Install
 
 Connect is part of `ov`, the native binary from
-[openvireo-core's releases](https://github.com/OpenVireo/openvireo-core/releases) (from 1.2.0): install `ov`
+[openvireo-core's releases](https://github.com/OpenVireo/openvireo-core/releases) (added in core 1.2): install `ov`
 as in [CLI: Install](cli.md#install) and run `ov connect`. Nothing else is needed. The binaries are signed and
 the checksums GPG-signed; see [Verifying the binaries](cli.md#verifying-the-binaries).
 
