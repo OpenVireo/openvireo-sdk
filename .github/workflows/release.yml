@@ -5,8 +5,8 @@
 #
 # GitHub Packages: always, with the workflow's GITHUB_TOKEN.
 # npmjs.com: only when the repository variable NPMJS_PUBLISH is "true". Authenticates with npm
-# trusted publishing (OIDC) once it is configured for each package on npmjs.com, otherwise with
-# the NPM_TOKEN secret (needed for the very first publish, before the packages exist there).
+# trusted publishing (OIDC): npmjs.com trusts OpenVireo/openvireo-sdk's release.yml, so there's no token.
+# A new package's first version has to be published by hand, before a trusted publisher can be added.
 #
 # The same tarballs go to both registries. Versions already on a registry are skipped, so a failed
 # run can be re-run. A manual run (workflow_dispatch) type-checks, tests, builds and packs without publishing.
@@ -104,8 +104,6 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm install -g npm@latest # trusted publishing needs npm 11.5.1 or later
       - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for p in sdk; do
             tgz="$(ls openvireo-$p-*.tgz)"
